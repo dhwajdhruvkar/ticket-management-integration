@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Netlink Support — Workflow &amp; Testing Guide</title>
+<style>
+  :root {
+    --bg: #eef2f1;
+    --surface: #ffffff;
+    --surface-2: #f4f8f7;
+    --surface-3: #eef3f2;
+    --border: #dde7e4;
+    --border-strong: #cbd9d5;
+    --text: #0b1f1c;
+    --text-secondary: #36514c;
+    --muted: #6b827d;
+
+    --brand-50: #e6f5f1;
+    --brand-100: #c7e9e1;
+    --brand-300: #6fc7b5;
+    --brand-500: #1aa085;
+    --brand-600: #15806b;
+    --brand-700: #0f6354;
+    --chrome: #04373d;
+
+    --gradient: linear-gradient(135deg, #15806b 0%, #1aa085 60%, #2bb89a 100%);
+    --gradient-chrome: linear-gradient(135deg, #04373d 0%, #0f6354 100%);
+
+    --success-bg: #d6f4e7; --success-fg: #0f7a5e; --success-solid: #10b981;
+    --warning-bg: #fdedcf; --warning-fg: #97631a; --warning-solid: #f59e0b;
+    --danger-bg:  #fde0dd; --danger-fg:  #b3392f; --danger-solid: #ef4444;
+    --info-bg:    #d9ecf7; --info-fg:    #1d6fa5; --info-solid: #3b82f6;
+    --violet-bg:  #ede9fe; --violet-fg:  #5b21b6;
+
+    --shadow-sm: 0 1px 2px rgba(8,35,38,0.05), 0 1px 3px rgba(8,35,38,0.06);
+    --shadow-md: 0 8px 22px -8px rgba(8,35,38,0.16), 0 3px 8px rgba(8,35,38,0.06);
+    --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; line-height: 1.55;
+  }
+  body {
+    background-image:
+      radial-gradient(900px 480px at 12% -8%, rgba(26,160,133,0.10), transparent 60%),
+      radial-gradient(760px 440px at 100% 0%, rgba(15,99,84,0.08), transparent 65%);
+    background-attachment: fixed; min-height: 100vh; padding: 2.5rem 1.5rem 4rem;
+  }
+  .container { max-width: 1180px; margin: 0 auto; }
+  a { color: var(--brand-700); }
+
+  /* Hero */
+  .hero {
+    background: var(--gradient-chrome); border-radius: var(--r-xl); padding: 2.3rem 2.5rem;
+    color: #fff; box-shadow: var(--shadow-md); margin-bottom: 1.4rem; position: relative; overflow: hidden;
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(620px 300px at 100% 0%, rgba(43,184,154,0.28), transparent 60%); pointer-events: none;
+  }
+  .hero .eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.78); margin-bottom: 0.55rem; }
+  .hero h1 { margin: 0; font-size: 2.05rem; font-weight: 800; letter-spacing: -0.025em; position: relative; }
+  .hero p { margin: 0.7rem 0 0; font-size: 1.02rem; color: rgba(255,255,255,0.9); max-width: 820px; position: relative; }
+  .hero-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.3rem; position: relative; }
+  .hero-chips span { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 0.3rem 0.7rem; font-size: 0.74rem; font-weight: 600; }
+
+  /* TOC */
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 1.1rem 1.3rem; box-shadow: var(--shadow-sm); margin-bottom: 1.6rem; }
+  .toc h2 { margin: 0 0 0.7rem; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.35rem 1rem; }
+  .toc-grid a { text-decoration: none; color: var(--text-secondary); font-size: 0.85rem; padding: 0.25rem 0; display: flex; gap: 0.5rem; }
+  .toc-grid a:hover { color: var(--brand-700); }
+  .toc-grid a .n { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.6rem; }
+
+  /* Section heading */
+  .section-heading { margin: 2.6rem 0 1.1rem; }
+  .section-heading h2 { margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em; background: var(--gradient); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .section-heading p { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.92rem; }
+
+  /* Pipeline */
+  .flow { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 1.4rem; box-shadow: var(--shadow-sm); }
+  .pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; justify-content: center; }
+  .node { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 0.55rem 0.8rem; font-size: 0.8rem; font-weight: 600; text-align: center; min-width: 118px; }
+  .node .n-sub { display: block; font-size: 0.66rem; font-weight: 500; color: var(--muted); margin-top: 2px; }
+  .node.ai { background: var(--brand-50); border-color: var(--brand-100); color: var(--brand-700); }
+  .node.audit { background: var(--chrome); color: #fff; border-color: var(--chrome); }
+  .arrow { color: var(--brand-500); font-weight: 800; font-size: 1.05rem; }
+  .branch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; margin-top: 1rem; }
+  .bcard { border-radius: 10px; padding: 0.75rem 0.9rem; border: 1px solid; }
+  .bcard.auto { background: var(--success-bg); border-color: #a7e6cf; }
+  .bcard.suggest { background: var(--info-bg); border-color: #bcdcf0; }
+  .bcard.escalate { background: var(--warning-bg); border-color: #f0dcb0; }
+  .bcard .bh { font-weight: 800; font-size: 0.82rem; margin-bottom: 0.2rem; }
+  .bcard .bp { font-size: 0.75rem; color: var(--text-secondary); }
+  .bcard.auto .bh { color: var(--success-fg); } .bcard.suggest .bh { color: var(--info-fg); } .bcard.escalate .bh { color: var(--warning-fg); }
+  .flow-note { margin-top: 1rem; font-size: 0.8rem; color: var(--muted); text-align: center; }
+
+  /* Workflow cards */
+  .wf { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 1.25rem 1.4rem; box-shadow: var(--shadow-sm); margin-bottom: 1rem; position: relative; overflow: hidden; }
+  .wf::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--gradient); }
+  .wf-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .wf-num { width: 30px; height: 30px; border-radius: 8px; background: var(--brand-50); color: var(--brand-700); display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; flex-shrink: 0; }
+  .wf-head h3 { margin: 0; font-size: 1.05rem; font-weight: 800; letter-spacing: -0.01em; flex: 1; min-width: 200px; }
+  .wf-body { font-size: 0.88rem; color: var(--text-secondary); }
+  .wf-body p { margin: 0.4rem 0; }
+  .wf-body ul { margin: 0.4rem 0; padding-left: 1.15rem; }
+  .wf-body li { margin: 0.2rem 0; }
+  .new { background: var(--violet-bg); color: var(--violet-fg); font-size: 0.58rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.18rem 0.45rem; border-radius: 999px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface-3); border: 1px solid var(--border); color: var(--text-secondary); font-size: 0.68rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 999px; }
+  .chip.role { background: var(--brand-50); color: var(--brand-700); border-color: var(--brand-100); }
+  .chip.where { background: var(--info-bg); color: var(--info-fg); border-color: #bcdcf0; }
+
+  /* Test box */
+  .test { margin-top: 0.9rem; background: var(--surface-2); border: 1px solid var(--brand-100); border-left: 4px solid var(--brand-500); border-radius: var(--r-sm); padding: 0.8rem 0.95rem; }
+  .test-h { display: flex; align-items: center; gap: 0.5rem; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brand-700); margin-bottom: 0.5rem; }
+  .test-h .who { background: var(--brand-600); color: #fff; padding: 0.15rem 0.5rem; border-radius: 999px; letter-spacing: 0.02em; text-transform: none; font-weight: 700; }
+  .test ol { margin: 0; padding-left: 1.2rem; font-size: 0.83rem; color: var(--text-secondary); }
+  .test ol li { margin: 0.25rem 0; }
+  .expect { margin-top: 0.55rem; font-size: 0.82rem; color: var(--text); background: var(--success-bg); border: 1px solid #a7e6cf; border-radius: var(--r-sm); padding: 0.45rem 0.65rem; }
+  .expect strong { color: var(--success-fg); }
+
+  code, .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82em; background: rgba(21,128,107,0.09); border: 1px solid rgba(21,128,107,0.18); color: var(--brand-700); padding: 0.05rem 0.32rem; border-radius: 5px; }
+  pre { background: var(--chrome); color: #d6f4e7; border-radius: var(--r-md); padding: 0.9rem 1rem; overflow-x: auto; font-size: 0.8rem; line-height: 1.5; }
+  pre code { background: none; border: none; color: inherit; padding: 0; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; font-size: 0.84rem; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-size: 0.7rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-secondary); }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+
+  .callout { background: var(--warning-bg); border: 1px solid #f0dcb0; border-radius: var(--r-md); padding: 0.8rem 1rem; font-size: 0.85rem; color: var(--warning-fg); margin: 1rem 0; }
+  .callout.info { background: var(--info-bg); border-color: #bcdcf0; color: var(--info-fg); }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .foot { margin-top: 2.6rem; text-align: center; color: var(--muted); font-size: 0.78rem; }
+  .foot a { color: var(--brand-700); text-decoration: none; font-weight: 600; }
+
+  @media (max-width: 820px) {
+    .branch { grid-template-columns: 1fr; }
+    .grid2 { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 1.55rem; }
+  }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .hero, .wf, .flow, table { box-shadow: none; }
+    .wf, .flow { break-inside: avoid; }
+    .toc { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="eyebrow">Netlink Support · Operator Guide</div>
+    <h1>Workflow &amp; Testing Guide</h1>
+    <p>
+      Every workflow in the AI-first ITSM platform — from intake to resolution, dispatch, SLAs, approvals,
+      and the ITIL modules — paired with a hands-on <strong>"Test it in person"</strong> checklist so anyone can
+      verify the behavior end to end using the built-in demo identities.
+    </p>
+    <div class="hero-chips">
+      <span>Zero-infra demo mode</span>
+      <span>5 RBAC roles</span>
+      <span>AI triage &amp; resolution</span>
+      <span>Tamper-evident audit</span>
+      <span>Omnichannel intake</span>
+    </div>
+  </header>
+
+  <!-- ===================== TOC ===================== -->
+  <nav class="toc">
+    <h2>Contents</h2>
+    <div class="toc-grid">
+      <a href="#setup"><span class="n">0</span> Run it &amp; sign in</a>
+      <a href="#pipeline"><span class="n">—</span> End-to-end pipeline</a>
+      <a href="#w1"><span class="n">1</span> Raise via the portal</a>
+      <a href="#w2"><span class="n">2</span> Raise as an agent</a>
+      <a href="#w3"><span class="n">3</span> Raise via API / channels</a>
+      <a href="#w4"><span class="n">4</span> AI classify &amp; auto-tag</a>
+      <a href="#w5"><span class="n">5</span> AI resolver (auto/suggest/escalate)</a>
+      <a href="#w6"><span class="n">6</span> Category → group routing</a>
+      <a href="#w7"><span class="n">7</span> Triage / dispatch board</a>
+      <a href="#w8"><span class="n">8</span> Agent availability</a>
+      <a href="#w9"><span class="n">9</span> Conversation &amp; realtime</a>
+      <a href="#w10"><span class="n">10</span> Macros</a>
+      <a href="#w11"><span class="n">11</span> Custom fields</a>
+      <a href="#w12"><span class="n">12</span> Properties &amp; priority matrix</a>
+      <a href="#w13"><span class="n">13</span> Link &amp; merge tickets</a>
+      <a href="#w14"><span class="n">14</span> Resolve / close / reopen</a>
+      <a href="#w15"><span class="n">15</span> SLA &amp; escalation</a>
+      <a href="#w16"><span class="n">16</span> Service-request approvals</a>
+      <a href="#w17"><span class="n">17</span> Requester &amp; CSAT</a>
+      <a href="#w18"><span class="n">18</span> Automations</a>
+      <a href="#w19"><span class="n">19</span> Problem management</a>
+      <a href="#w20"><span class="n">20</span> Change management</a>
+      <a href="#w21"><span class="n">21</span> Assets / CMDB</a>
+      <a href="#w22"><span class="n">22</span> Knowledge base</a>
+      <a href="#w23"><span class="n">23</span> Notifications</a>
+      <a href="#w24"><span class="n">24</span> Analytics &amp; reports</a>
+      <a href="#w25"><span class="n">25</span> AI translation</a>
+      <a href="#w26"><span class="n">26</span> Audit trail</a>
+      <a href="#testing"><span class="n">A</span> Testing appendix</a>
+      <a href="#reference"><span class="n">B</span> Reference tables</a>
+    </div>
+  </nav>
+
+  <!-- ===================== SETUP ===================== -->
+  <div class="section-heading" id="setup">
+    <h2>0 · Run it &amp; sign in</h2>
+    <p>The app runs with zero infrastructure. It seeds itself on first launch and signs in with passwordless demo identities.</p>
+  </div>
+
+  <div class="wf">
+    <div class="wf-body">
+      <p><strong>Start the app</strong></p>
+<pre><code>npm install
+npm run dev
+# open http://localhost:3000</code></pre>
+      <p>
+        Demo mode is on by default (<code>DEMO_MODE=true</code>), so the sign-in page shows one-click demo
+        personas. Data lives in <code>.data/store.json</code> (in-memory + JSON). To reset to a clean seed,
+        stop the server, delete <code>.data/store.json</code>, and restart.
+      </p>
+      <div class="callout info">
+        <strong>Two run modes.</strong> Everything below works in demo mode. For production the same code runs on
+        Postgres (<code>DATA_DRIVER=prisma</code>) with Microsoft Entra ID SSO (<code>DEMO_MODE=false</code>);
+        see the Reference section for the environment flags.
+      </div>
+
+      <p style="margin-top:1rem;"><strong>Demo identities</strong> — pick a persona card on the sign-in screen, or type the email.</p>
+      <table>
+        <tr><th>Persona</th><th>Email</th><th>Role</th><th>Sees</th></tr>
+        <tr><td>Dana Lee</td><td><code>dana.lee@netlink.com</code></td><td>requester</td><td>Portal + own requests only</td></tr>
+        <tr><td>Arjun Mehta</td><td><code>arjun.mehta@netlink.com</code></td><td>agent</td><td>Full agent workspace</td></tr>
+        <tr><td>Sarah Johnson</td><td><code>sarah.johnson@netlink.com</code></td><td>agent</td><td>Full agent workspace</td></tr>
+        <tr><td>Anita Desai</td><td><code>anita.desai@netlink.com</code></td><td>agent (HR)</td><td>People Operations queue</td></tr>
+        <tr><td>Meera Nair</td><td><code>meera.nair@netlink.com</code></td><td>manager</td><td>Agent workspace + approvals + Triage</td></tr>
+        <tr><td>Priya Sharma</td><td><code>priya.sharma@netlink.com</code></td><td>tenant_admin</td><td>Everything incl. Settings, Triage</td></tr>
+        <tr><td>Vikram Rao</td><td><code>vikram.rao@netlink.com</code></td><td>super_admin</td><td>Everything</td></tr>
+      </table>
+      <p style="margin-top:0.6rem;"><span class="chip">Tip</span> The user menu (top-right) switches identities instantly in demo mode — no sign-out needed.</p>
+    </div>
+  </div>
+
+  <!-- ===================== PIPELINE ===================== -->
+  <div class="section-heading" id="pipeline">
+    <h2>The end-to-end pipeline</h2>
+    <p>Every ticket, from any channel, flows through one intake pipeline. The AI resolves first; humans handle the exceptions.</p>
+  </div>
+  <section class="flow">
+    <div class="pipe">
+      <div class="node">Ticket arrives<span class="n-sub">portal · email · Teams · Slack · API · alert</span></div>
+      <span class="arrow">→</span>
+      <div class="node ai">AI classify + tag<span class="n-sub">category · impact×urgency · sentiment</span></div>
+      <span class="arrow">→</span>
+      <div class="node">SLA timers<span class="n-sub">response &amp; resolve due</span></div>
+      <span class="arrow">→</span>
+      <div class="node">Route to group<span class="n-sub">category → profile</span></div>
+      <span class="arrow">→</span>
+      <div class="node">Automations<span class="n-sub">when / if / then</span></div>
+      <span class="arrow">→</span>
+      <div class="node ai">AI resolver<span class="n-sub">retrieve → ground → score</span></div>
+    </div>
+    <div class="branch">
+      <div class="bcard auto"><div class="bh">confidence ≥ 0.78 → Auto-resolve</div><div class="bp">Posts a grounded, cited reply and resolves the ticket. P1/critical never auto-closes.</div></div>
+      <div class="bcard suggest"><div class="bh">≥ 0.55 → Suggest a draft</div><div class="bp">Drafts a reply for an agent to approve or edit in one click (status <code>pending_agent</code>).</div></div>
+      <div class="bcard escalate"><div class="bh">otherwise → Escalate</div><div class="bp">Sits unassigned for a human — picked up in the Triage queue or by automations.</div></div>
+    </div>
+    <div class="pipe" style="margin-top:1rem;">
+      <div class="node">Dispatch / Triage<span class="n-sub">assign by load + availability</span></div>
+      <span class="arrow">→</span>
+      <div class="node">Agent workspace<span class="n-sub">reply · notes · macros · resolve</span></div>
+      <span class="arrow">→</span>
+      <div class="node">Requester &amp; CSAT<span class="n-sub">reply reopens · rating</span></div>
+      <span class="arrow">→</span>
+      <div class="node audit">Audit chain<span class="n-sub">every step, hash-linked</span></div>
+    </div>
+    <p class="flow-note">Catalog items that require approval pause here (SLA clock stops) until a manager decides.</p>
+  </section>
+
+  <!-- ===================== INTAKE ===================== -->
+  <div class="section-heading">
+    <h2>Intake — creating tickets</h2>
+    <p>Five ways in, one pipeline. All of them classify, set SLAs, route, and run the AI resolver identically.</p>
+  </div>
+
+  <div class="wf" id="w1">
+    <div class="wf-head"><span class="wf-num">1</span><h3>Raise a request via the portal</h3><span class="chip role">requester</span><span class="chip where">/portal</span></div>
+    <div class="wf-body">
+      <p>Requesters search the help center, browse the service catalog, and submit a request. Catalog items can be flagged to require manager approval.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Dana</span> Test it</div>
+        <ol>
+          <li>Go to <code>/portal</code> (Raise a Request).</li>
+          <li>Type a subject like "VPN keeps dropping" and a description, then submit.</li>
+          <li>Watch the confirmation — it shows the new reference (e.g. <code>INC-…</code>) and status.</li>
+          <li>Open "My Requests" to see it listed.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> a ticket is created, AI-classified, and either answered instantly (auto-resolved) or marked for follow-up — all without a page reload.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w2">
+    <div class="wf-head"><span class="wf-num">2</span><h3>Raise a ticket as an agent</h3><span class="chip role">agent+</span><span class="chip where">/tickets → New ticket</span></div>
+    <div class="wf-body">
+      <p>Agents log tickets on behalf of a requester and can set impact/urgency directly (requesters can't — the AI infers those).</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Go to <code>/tickets</code> and click <strong>New ticket</strong>.</li>
+          <li>Pick type (incident / service request), category, and set impact + urgency.</li>
+          <li>Submit and open the created ticket.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> priority is derived from impact × urgency (e.g. High × High → critical), and the ticket lands in the workspace with SLA timers running.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w3">
+    <div class="wf-head"><span class="wf-num">3</span><h3>Raise via REST API &amp; channels</h3><span class="chip where">/api/v1/intake</span><span class="chip where">webhooks</span></div>
+    <div class="wf-body">
+      <p>
+        The unified intake endpoint accepts portal/email/chat/API/phone/Teams/monitoring-alert payloads. Provider
+        webhooks (<code>/api/webhooks/{generic,zendesk,freshdesk,slack}</code>), M365 email polling, and a Teams bot all
+        feed the same pipeline. In demo mode you can act as any user with the <code>x-actor</code> header.
+      </p>
+      <div class="test">
+        <div class="test-h"><span class="who">Terminal (demo mode)</span> Test it</div>
+        <ol>
+          <li>With the dev server running, send an intake request:</li>
+        </ol>
+<pre><code>curl -s -X POST http://localhost:3000/api/v1/intake \
+  -H "content-type: application/json" \
+  -H "x-actor: dana.lee@netlink.com" \
+  -d '{"channel":"portal","subject":"New laptop please","body":"My laptop won'\''t boot","requesterEmail":"dana.lee@netlink.com"}'</code></pre>
+        <div class="expect"><strong>Expect:</strong> a JSON <code>{ ok, data }</code> response with the new ticket. A monitoring alert (<code>channel:"alert"</code>) instead maps severity → impact×urgency and links the named CMDB item.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== AI ===================== -->
+  <div class="section-heading">
+    <h2>AI triage &amp; resolution</h2>
+    <p>The AI is the first responder. It degrades gracefully to deterministic heuristics when no LLM key is set.</p>
+  </div>
+
+  <div class="wf" id="w4">
+    <div class="wf-head"><span class="wf-num">4</span><h3>AI classification &amp; auto-tagging</h3><span class="new">new</span><span class="chip">automatic</span></div>
+    <div class="wf-body">
+      <p>On intake the AI fills the category, impact, urgency (→ priority), and sentiment when they aren't supplied, and now also suggests topical <strong>tags</strong> that are merged onto the ticket (alongside any <code>vip</code>/<code>monitoring</code> tags).</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Create a ticket with subject "VPN disconnects and email is slow" (leave category to the AI).</li>
+          <li>Open the ticket and look at the Tags field in the properties panel.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> a sensible category (Network) and auto-tags such as <code>vpn</code>, <code>network</code>, <code>email</code>. VIP requesters also get a <code>vip</code> tag and an urgency floor.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w5">
+    <div class="wf-head"><span class="wf-num">5</span><h3>AI resolver — auto-resolve · suggest · escalate</h3><span class="chip">automatic</span></div>
+    <div class="wf-body">
+      <p>The resolver retrieves knowledge-base matches (vector search), generates a grounded answer with citations, scores its confidence, and decides:</p>
+      <ul>
+        <li><strong>≥ 0.78</strong> — auto-resolves with a cited reply (P1/critical is never auto-closed).</li>
+        <li><strong>≥ 0.55</strong> — drafts a suggestion for an agent (status <code>pending_agent</code>).</li>
+        <li><strong>otherwise</strong> — escalates for a human.</li>
+      </ul>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open any open ticket in the agent workspace.</li>
+          <li>In the composer, click <strong>Run AI</strong>.</li>
+          <li>Watch the toast + status change (auto-resolved / draft ready / escalated).</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> a grounded reply with source citations appears in the thread, and the status reflects the confidence decision. Open the AI panel to see confidence, reasoning, and cited articles.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ROUTING & DISPATCH ===================== -->
+  <div class="section-heading">
+    <h2>Routing &amp; dispatch</h2>
+    <p>Category routing hands each ticket to the right "profile" (assignment group); a human dispatcher assigns the person.</p>
+  </div>
+
+  <div class="wf" id="w6">
+    <div class="wf-head"><span class="wf-num">6</span><h3>Category → group routing (profiles)</h3><span class="chip where">Settings → groups</span></div>
+    <div class="wf-body">
+      <p>Each category is owned by one specialist "profile" group, plus a generalist Service Desk for the common ones:</p>
+      <ul>
+        <li><strong>Access &amp; Identity</strong> → Access · <strong>Network Operations</strong> → Network · <strong>Endpoint &amp; Hardware</strong> → Hardware · <strong>Software &amp; Apps</strong> → Software</li>
+        <li><strong>Service Desk</strong> (generalist) → IT, Billing, Other · <strong>People Operations</strong> → HR</li>
+      </ul>
+      <p>Specialist groups use the <code>manual</code> strategy, so intake routes a ticket to the group but leaves it <em>unassigned</em> for the dispatcher.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Priya</span> Test it</div>
+        <ol>
+          <li>Create a Hardware ticket ("new laptop").</li>
+          <li>Open it and check the Assignment group in properties.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> group = <strong>Endpoint &amp; Hardware</strong>, assignee = empty (waiting for triage). Settings → Assignment groups shows all six profiles and their categories.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w7">
+    <div class="wf-head"><span class="wf-num">7</span><h3>Triage / dispatch board</h3><span class="new">new</span><span class="chip role">manager / admin</span><span class="chip where">/triage</span></div>
+    <div class="wf-body">
+      <p>A dispatcher-only queue of unassigned open tickets. Selecting a ticket shows the eligible people split into <strong>Specialists</strong> (the ticket's group) and <strong>Common</strong> (Service Desk), each with a live open-ticket load bar and an Available/Away chip, sorted available-first then lightest-load. A persistent Team-workload panel shows everyone's capacity.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Priya (or Meera)</span> Test it</div>
+        <ol>
+          <li>Open <strong>Triage</strong> from the sidebar (only visible to manager+).</li>
+          <li>Pick an unassigned ticket from the queue.</li>
+          <li>Review the specialists' vs common handlers' open-counts and availability.</li>
+          <li>Click <strong>Assign</strong> on the lightest-loaded available agent.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the ticket leaves the queue, the chosen agent's load ticks up, and the ticket now shows that assignee. A requester visiting <code>/triage</code> is redirected/blocked (403 from the API).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w8">
+    <div class="wf-head"><span class="wf-num">8</span><h3>Agent availability</h3><span class="new">new</span><span class="chip role">agent+</span><span class="chip where">/profile</span></div>
+    <div class="wf-body">
+      <p>Agents mark themselves Available or Away. Away agents still appear in Triage but are visibly de-prioritized, so dispatchers route around them.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open <code>/profile</code> → Preferences and turn off <strong>Available for new tickets</strong>.</li>
+          <li>Switch to Priya and open <strong>Triage</strong>.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> Arjun's presence chip flips to "Away" in his profile hero, and the Triage board shows Arjun with an <strong>Away</strong> chip in the workload panel and assign lists.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== AGENT HANDLING ===================== -->
+  <div class="section-heading">
+    <h2>Agent handling</h2>
+    <p>The Zendesk-style workspace: threaded conversation, canned responses, editable properties, and lifecycle actions.</p>
+  </div>
+
+  <div class="wf" id="w9">
+    <div class="wf-head"><span class="wf-num">9</span><h3>Conversation &amp; realtime updates</h3><span class="new">new</span><span class="chip">live (SSE)</span></div>
+    <div class="wf-body">
+      <p>Public replies go to the requester; internal notes are agent-only (yellow). The thread updates in real time over Server-Sent Events, and a typing indicator shows when the other side is composing — no reload.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Two windows: Arjun + Dana</span> Test it</div>
+        <ol>
+          <li>Open the same ticket as Arjun (workspace) and Dana (their request) in two browser windows.</li>
+          <li>Start typing in one window's composer.</li>
+          <li>Send a public reply from Arjun.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> a "typing…" indicator appears in the other window within ~2s, and the sent message pops into the other thread instantly without refreshing.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w10">
+    <div class="wf-head"><span class="wf-num">10</span><h3>Macros / canned responses</h3><span class="new">new</span><span class="chip role">admin manages</span></div>
+    <div class="wf-body">
+      <p>Reusable reply snippets with <code>{{requester_name}}</code>, <code>{{reference}}</code>, and <code>{{subject}}</code> placeholders. Admins manage them in Settings; agents insert them from the composer.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Priya then Arjun</span> Test it</div>
+        <ol>
+          <li>As Priya: Settings → Macros → <strong>New macro</strong>; save one with a placeholder.</li>
+          <li>As Arjun: open a ticket, click <strong>Macros ▾</strong> in the composer, pick it.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the macro body is inserted into the reply box with placeholders filled from the ticket (name, reference).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w11">
+    <div class="wf-head"><span class="wf-num">11</span><h3>Custom fields</h3><span class="new">new</span><span class="chip role">admin defines</span></div>
+    <div class="wf-body">
+      <p>Per-tenant extra ticket fields (text / number / select / date / checkbox). Admins define them in Settings; agents fill them on the ticket properties panel.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Priya then Arjun</span> Test it</div>
+        <ol>
+          <li>As Priya: Settings → Custom fields → add e.g. "Cost center" (text).</li>
+          <li>As Arjun: open any ticket; the new field appears under Tags in properties. Enter a value and Save.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the value persists on the ticket (stored in <code>customFields</code>) and survives a reload.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w12">
+    <div class="wf-head"><span class="wf-num">12</span><h3>Properties &amp; the priority matrix</h3><span class="chip role">agent+</span></div>
+    <div class="wf-body">
+      <p>Editing impact or urgency recomputes priority via the ITIL matrix. Overriding priority manually requires a justification, which is written to the audit chain.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open a ticket; set Impact = High and Urgency = High.</li>
+          <li>Now change Priority away from the derived value.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> priority auto-updates to "critical" from the matrix; the manual override prompts for a justification and records a <code>ticket.priority.overridden</code> audit entry.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w13">
+    <div class="wf-head"><span class="wf-num">13</span><h3>Link &amp; merge tickets</h3><span class="new">new</span><span class="chip role">agent+</span></div>
+    <div class="wf-body">
+      <p>Relate duplicates/related tickets, or merge a duplicate into a target — merging re-parents the source's messages onto the target, cancels the source, and links them (non-destructive, fully audited).</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open a ticket; find the <strong>Related tickets</strong> panel in the details column.</li>
+          <li>Pick another ticket and click <strong>Link</strong> (both now list each other).</li>
+          <li>Pick a duplicate and click <strong>Merge into…</strong>, confirm.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the merged (source) ticket becomes <code>cancelled</code> with a banner linking to the target; its messages now appear on the target thread.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w14">
+    <div class="wf-head"><span class="wf-num">14</span><h3>Resolve / close / reopen</h3><span class="chip role">agent+ · requester</span></div>
+    <div class="wf-body">
+      <p>Agents resolve (optionally with a reply + resolution notes), close, or put a ticket on hold (<code>pending</code> pauses the SLA clock). A requester replying to a resolved ticket reopens it.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Arjun then Dana</span> Test it</div>
+        <ol>
+          <li>As Arjun: on an open ticket, click <strong>Submit as Solved</strong> with a short reply.</li>
+          <li>As Dana: open the request and post a reply.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the ticket resolves and notifies Dana; Dana's reply flips it to <code>reopened</code> and it re-enters the active queue.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SLA & APPROVALS ===================== -->
+  <div class="section-heading">
+    <h2>SLA &amp; approvals</h2>
+    <p>Deadlines are derived from priority, pause while waiting, and escalate in stages. Catalog requests can require sign-off.</p>
+  </div>
+
+  <div class="wf" id="w15">
+    <div class="wf-head"><span class="wf-num">15</span><h3>SLA timers &amp; staged escalation</h3><span class="chip">background job</span></div>
+    <div class="wf-body">
+      <p>Each ticket gets response + resolution deadlines from its priority (P1 15m/2h … P5 8h/5d). At 80% of the window it's tagged <code>sla_at_risk</code> and the assignee/manager are warned; on breach it auto-escalates and alerts go out. <code>pending</code> pauses the clock; leaving pending resumes and shifts the deadlines. Business calendars (timezone/working window/holidays) can be linked per policy.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open a ticket and read the SLA panel (First response / Resolution bars + due countdown).</li>
+          <li>Put it <strong>On hold</strong> (pending) and note the "Clock paused" badge.</li>
+          <li>Bring it back to in-progress (send a reply) — the deadlines shift out by the paused time.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the SLA badge tracks met / at-risk / breached; pausing freezes the countdown; the background sweep tags at-risk and escalates on breach.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w16">
+    <div class="wf-head"><span class="wf-num">16</span><h3>Service-request approvals</h3><span class="chip role">manager decides</span></div>
+    <div class="wf-body">
+      <p>Catalog items flagged <code>requiresApproval</code> hold the ticket (SLA paused) with an approval for the manager. Approving resumes fulfilment (routing → automations → AI); rejecting cancels — both notify the requester.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Dana then Meera</span> Test it</div>
+        <ol>
+          <li>As Dana: from the portal catalog, submit an item that requires approval.</li>
+          <li>As Meera: open the ticket → Approval panel → <strong>Approve</strong> (or Reject).</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the ticket sits in <code>pending</code> with a "Waiting on {approver}" card and paused SLA; approving resumes the pipeline, rejecting cancels — Dana is notified either way.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w17">
+    <div class="wf-head"><span class="wf-num">17</span><h3>Requester experience &amp; CSAT</h3><span class="chip role">requester</span></div>
+    <div class="wf-body">
+      <p>Requesters see only their own tickets, reply in a chat-style thread, and rate the resolution. "Not yet" reopens the ticket.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Dana</span> Test it</div>
+        <ol>
+          <li>Open a resolved request; a "Did this resolve your issue?" prompt appears.</li>
+          <li>Click <strong>Yes, resolved</strong> or <strong>Not yet</strong>.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> "Yes" records satisfaction and closes it; "Not yet" reopens it for an agent. CSAT feeds the analytics dashboard.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== AUTOMATIONS ===================== -->
+  <div class="wf" id="w18">
+    <div class="wf-head"><span class="wf-num">18</span><h3>Automations (when / if / then)</h3><span class="chip role">admin</span><span class="chip where">Settings → Automation rules</span></div>
+    <div class="wf-body">
+      <p>Rules trigger on <code>ticket.created</code>, <code>ticket.updated</code>, <code>sla.at_risk</code>, or <code>sla.breached</code>, match ALL/ANY conditions, and run actions (assign / set priority / status / category / add tag / notify / run AI). A dry-run previews what a rule <em>would</em> do without mutating anything.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Priya</span> Test it</div>
+        <ol>
+          <li>Settings → Automation rules → <strong>New rule</strong>.</li>
+          <li>e.g. when <code>ticket.created</code>, if category = Network, then add tag "net-triage".</li>
+          <li>Create a Network ticket and check its tags.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the rule's run-count increments and the action applies (the new tag shows on matching tickets).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ITIL MODULES ===================== -->
+  <div class="section-heading">
+    <h2>ITIL modules</h2>
+    <p>The full service-management set, each AI-enhanced, on the same audited backend.</p>
+  </div>
+
+  <div class="wf" id="w19">
+    <div class="wf-head"><span class="wf-num">19</span><h3>Problem management</h3><span class="chip where">/problems</span></div>
+    <div class="wf-body">
+      <p>Cluster recurring incidents into a Problem, record root-cause (RCA), publish a workaround as a known-error KB article, and raise a Change for the permanent fix. AI can suggest clusters and a root cause.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open <code>/problems</code>; create a problem or accept an AI-suggested cluster.</li>
+          <li>Link a couple of incidents, add a workaround, and mark it a known error.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> linked incidents show a live count; publishing the workaround creates a KB article; you can raise a Change from the problem.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w20">
+    <div class="wf-head"><span class="wf-num">20</span><h3>Change management (CAB)</h3><span class="chip where">/changes</span></div>
+    <div class="wf-body">
+      <p>Changes get an AI risk score + rationale and move through an approval state machine (draft → assess → approve → implement → review). Managers decide CAB approvals.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Arjun then Meera</span> Test it</div>
+        <ol>
+          <li>As Arjun: create a change (title + description + type).</li>
+          <li>As Meera: open it and approve/reject the CAB approval.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> a 0–100 risk score with rationale appears on create; the manager's decision advances the state and is audited.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w21">
+    <div class="wf-head"><span class="wf-num">21</span><h3>Assets / CMDB</h3><span class="chip where">/assets</span></div>
+    <div class="wf-body">
+      <p>Inventory + configuration items with a dependency graph. Link CIs to tickets and run impact analysis (what depends on a CI, and which tickets touch it).</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open <code>/assets</code>; open a CI and view its dependencies.</li>
+          <li>On a ticket, link an affected CI in properties, then check the CI's impact view.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the CI lists dependents and the linked ticket appears in its impact analysis.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w22">
+    <div class="wf-head"><span class="wf-num">22</span><h3>Knowledge base</h3><span class="chip where">/knowledge-base</span></div>
+    <div class="wf-body">
+      <p>Versioned articles move draft → in-review → published and are embedded on write so the resolver can retrieve them. Vector search powers both the resolver and the help center.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open <code>/knowledge-base</code>; create an article and publish it.</li>
+          <li>Search for a keyword from it; then run the AI resolver on a related ticket.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> search returns the article with a score, and the resolver cites it in an auto-resolved/suggested reply.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== PLATFORM ===================== -->
+  <div class="section-heading">
+    <h2>Platform &amp; observability</h2>
+    <p>Notifications, analytics, translation, and the tamper-evident audit chain.</p>
+  </div>
+
+  <div class="wf" id="w23">
+    <div class="wf-head"><span class="wf-num">23</span><h3>Notifications</h3><span class="chip">in-app · email · Teams · Slack</span></div>
+    <div class="wf-body">
+      <p>Templated notifications (created / assigned / pending / resolved / approval / SLA warning / breach) are always recorded in-app and pushed live over SSE; email/Teams/Slack delivery happens when configured. Per-user preferences (email, desktop, weekly digest, monthly report) are enforced at send time.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Get a ticket assigned to you (via Triage) and watch the bell in the top bar.</li>
+          <li>Open <code>/profile</code> → Preferences to toggle notification channels.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the bell shows a live unread count that updates without reload; preferences persist server-side.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w24">
+    <div class="wf-head"><span class="wf-num">24</span><h3>Analytics &amp; reports</h3><span class="new">new: PDF</span><span class="chip where">/analytics</span></div>
+    <div class="wf-body">
+      <p>KPIs (deflection, MTTR/FRT, SLA compliance by priority, reopen rate, backlog by group, CSAT, ROI) plus daily trends. Export the per-ticket report as <strong>CSV</strong> or a branded <strong>PDF</strong>. Managers/admins who opt in receive a monthly PDF report by email (scheduled job).</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Priya</span> Test it</div>
+        <ol>
+          <li>Open <code>/analytics</code>; review the KPI bands and trend charts.</li>
+          <li>Click <strong>Download PDF</strong> (and <strong>Download CSV</strong>).</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> a valid PDF downloads (KPI summary + SLA table + ticket appendix); CSV opens in a spreadsheet. The monthly-report opt-in lives in <code>/profile</code> → Preferences.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w25">
+    <div class="wf-head"><span class="wf-num">25</span><h3>AI translation</h3><span class="new">new</span></div>
+    <div class="wf-body">
+      <p>Translate any message in place, or translate your draft before sending — useful for mixed-language teams and requesters.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>On a ticket thread, click <strong>Translate</strong> under a message, pick a language, and Go.</li>
+          <li>In the composer, type a reply, choose a target language, and click <strong>Translate</strong>.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the translated text appears under the message (with a Hide toggle), and the composer draft is rewritten in the chosen language. Offline (no LLM key) it degrades to a passthrough.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w26">
+    <div class="wf-head"><span class="wf-num">26</span><h3>Audit trail</h3><span class="chip where">/audit</span></div>
+    <div class="wf-body">
+      <p>Every lifecycle step, AI decision, automation, approval, assignment, and sign-in appends a SHA-256 hash-linked block to the per-tenant chain. The verifier recomputes the chain and pinpoints any tampering.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Priya</span> Test it</div>
+        <ol>
+          <li>Open <code>/audit</code> and browse recent blocks for a ticket you just worked.</li>
+          <li>Run the verify action (or hit <code>/api/v1/audit?verify=1</code>).</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the chain verifies as intact; each action you took (assign, reply, resolve, override) is present with actor + payload hash.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== TESTING APPENDIX ===================== -->
+  <div class="section-heading" id="testing">
+    <h2>A · Testing appendix</h2>
+    <p>Ways to verify the whole system — by hand, via the API, or automated.</p>
+  </div>
+
+  <div class="wf">
+    <div class="wf-body">
+      <p><strong>In-person happy path (≈10 min)</strong> — one continuous run that exercises the core loop:</p>
+      <ol>
+        <li><span class="chip role">Dana</span> Raise a request in the portal → note the reference.</li>
+        <li><span class="chip role">Priya</span> Open <strong>Triage</strong>, assign it to the lightest-loaded available agent.</li>
+        <li><span class="chip role">Arjun</span> Open the ticket, insert a <strong>macro</strong>, run/adjust the reply, set a <strong>custom field</strong>, and <strong>Submit as Solved</strong>.</li>
+        <li><span class="chip role">Dana</span> Reply once (it reopens), then rate <strong>Yes, resolved</strong> (CSAT).</li>
+        <li><span class="chip role">Priya</span> Open <strong>Analytics</strong> → Download PDF; open <strong>Audit</strong> → verify the chain.</li>
+      </ol>
+      <div class="expect"><strong>Expect:</strong> every hop reflects instantly (SSE), SLA + audit track each step, and the analytics/CSAT numbers move.</div>
+
+      <p style="margin-top:1.2rem;"><strong>API testing (demo mode)</strong> — act as any user with the <code>x-actor</code> header against <code>/api/v1</code>:</p>
+<pre><code># list unassigned tickets (dispatch queue)
+curl -s "http://localhost:3000/api/v1/tickets?assigneeId=unassigned" \
+  -H "x-actor: priya.sharma@netlink.com"
+
+# the triage board (manager/admin only)
+curl -s http://localhost:3000/api/v1/triage -H "x-actor: meera.nair@netlink.com"
+
+# assign a ticket
+curl -s -X POST http://localhost:3000/api/v1/tickets/&lt;id&gt;/actions \
+  -H "content-type: application/json" -H "x-actor: priya.sharma@netlink.com" \
+  -d '{"action":"assign","assigneeId":"user_arjun"}'
+
+# health + active feature flags
+curl -s http://localhost:3000/api/v1/health</code></pre>
+      <p><span class="chip">Note</span> In production mode (<code>DEMO_MODE=false</code>) the <code>x-actor</code> header is disabled; use a session cookie or an API key (<code>Authorization: Bearer nlk_…</code>). The full surface is documented at <code>/api/v1/openapi.json</code>.</p>
+
+      <p style="margin-top:1.2rem;"><strong>Automated checks</strong></p>
+<pre><code>npm run typecheck   # tsc --noEmit
+npm test            # Vitest: audit chain, SLA + pause, priority matrix,
+                    #   routing, approvals, RBAC, embeddings, classification
+npm run build       # production build
+
+# End-to-end smoke: signs in as all roles and exercises the API behind
+# every UI control (needs the app running on :3000).
+powershell -File scripts/e2e-smoke.ps1</code></pre>
+
+      <div class="callout">
+        <strong>Reset the demo data.</strong> Stop the server, delete <code>.data/store.json</code>, and restart — the app reseeds a fresh workspace (tenant, users, groups, SLA policies, KB, demo tickets, macros, custom fields). The store auto-reseeds whenever the internal schema version changes.
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== REFERENCE ===================== -->
+  <div class="section-heading" id="reference">
+    <h2>B · Reference tables</h2>
+    <p>The enums, matrix, and flags you'll see throughout the workflows.</p>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <p style="font-weight:800; font-size:0.9rem; margin:0 0 0.5rem;">Ticket statuses</p>
+      <table>
+        <tr><th>Status</th><th>Meaning</th></tr>
+        <tr><td><code>new</code> / <code>open</code></td><td>Awaiting first work</td></tr>
+        <tr><td><code>in_progress</code></td><td>An agent is actively working it</td></tr>
+        <tr><td><code>pending</code></td><td>On hold — SLA clock paused</td></tr>
+        <tr><td><code>pending_agent</code></td><td>AI drafted a suggestion for review</td></tr>
+        <tr><td><code>escalated</code></td><td>Needs a human / SLA-escalated</td></tr>
+        <tr><td><code>auto_resolved</code></td><td>Resolved by the AI</td></tr>
+        <tr><td><code>resolved</code> / <code>closed</code></td><td>Done (closed after auto-close window)</td></tr>
+        <tr><td><code>reopened</code></td><td>Requester replied after resolution</td></tr>
+        <tr><td><code>cancelled</code></td><td>Rejected approval or merged away</td></tr>
+      </table>
+    </div>
+    <div>
+      <p style="font-weight:800; font-size:0.9rem; margin:0 0 0.5rem;">SLA matrix (response / resolve)</p>
+      <table>
+        <tr><th>Priority</th><th>Response</th><th>Resolve</th></tr>
+        <tr><td>critical (P1)</td><td>15m</td><td>2h</td></tr>
+        <tr><td>high (P2)</td><td>1h</td><td>4h</td></tr>
+        <tr><td>medium (P3)</td><td>2h</td><td>24h</td></tr>
+        <tr><td>low (P4)</td><td>4h</td><td>3d</td></tr>
+        <tr><td>very_low (P5)</td><td>8h</td><td>5d</td></tr>
+      </table>
+      <p style="font-weight:800; font-size:0.9rem; margin:1rem 0 0.5rem;">Priority = Impact × Urgency</p>
+      <table>
+        <tr><th>Impact \ Urgency</th><th>High</th><th>Medium</th><th>Low</th></tr>
+        <tr><td>High</td><td>critical</td><td>high</td><td>medium</td></tr>
+        <tr><td>Medium</td><td>high</td><td>medium</td><td>low</td></tr>
+        <tr><td>Low</td><td>medium</td><td>low</td><td>very_low</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:1rem;">
+    <div>
+      <p style="font-weight:800; font-size:0.9rem; margin:0 0 0.5rem;">Categories → group (profile)</p>
+      <table>
+        <tr><th>Category</th><th>Owning group</th></tr>
+        <tr><td>Access</td><td>Access &amp; Identity</td></tr>
+        <tr><td>Network</td><td>Network Operations</td></tr>
+        <tr><td>Hardware</td><td>Endpoint &amp; Hardware</td></tr>
+        <tr><td>Software</td><td>Software &amp; Apps</td></tr>
+        <tr><td>IT · Billing · Other</td><td>Service Desk (generalist)</td></tr>
+        <tr><td>HR</td><td>People Operations</td></tr>
+      </table>
+    </div>
+    <div>
+      <p style="font-weight:800; font-size:0.9rem; margin:0 0 0.5rem;">Key environment flags</p>
+      <table>
+        <tr><th>Flag</th><th>Effect</th></tr>
+        <tr><td><code>DEMO_MODE</code></td><td><code>true</code>: passwordless demo sign-in + <code>x-actor</code>. <code>false</code>: SSO/API-key only.</td></tr>
+        <tr><td><code>DATA_DRIVER</code></td><td><code>memory</code> (JSON file) or <code>prisma</code> (Postgres).</td></tr>
+        <tr><td><code>GEMINI_API_KEY</code> / <code>GROQ_API_KEY</code></td><td>Enable a real LLM; absent → offline heuristics.</td></tr>
+        <tr><td><code>AUTH_MICROSOFT_ENTRA_ID_*</code></td><td>Entra ID SSO for production sign-in.</td></tr>
+        <tr><td><code>MS_GRAPH_*</code> / <code>SLACK_*</code></td><td>Email polling, Teams, and Slack channels.</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <p class="foot">
+    Netlink Support — Workflow &amp; Testing Guide · companions:
+    <a href="./overview.html">overview.html</a> ·
+    <a href="./workflow.html">workflow.html</a> ·
+    <a href="./comparison.html">comparison.html</a> ·
+    <a href="./README.md">README.md</a>
+  </p>
+
+</div>
+</body>
+</html>

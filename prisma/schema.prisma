@@ -1,0 +1,834 @@
+// =============================================================================
+// Netlink Support — production data model (full ITIL).
+//
+// This schema is the production persistence target. The application also runs
+// against an in-memory / JSON-file store (see src/server/data) when no
+// DATABASE_URL is configured, so the demo works with zero infrastructure and
+// this Postgres model lights up the moment a database is provisioned.
+//
+// Vector search: embeddings are stored as Float[] so the Prisma Client can read
+// and write them directly. For production-scale kNN, prisma/sql/001_pgvector.sql
+// adds a real `vector(384)` column + ivfflat index; the vector-search adapter
+// uses it when present and falls back to in-process cosine otherwise.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, vector]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  super_admin
+  tenant_admin
+  manager
+  agent
+  requester
+}
+
+enum TicketType {
+  incident
+  service_request
+  problem
+  change
+}
+
+enum TicketStatus {
+  new
+  open
+  in_progress
+  pending
+  auto_resolved
+  pending_agent
+  escalated
+  resolved
+  reopened
+  closed
+  cancelled
+}
+
+/// P1 (critical) .. P5 (very_low), derived from impact x urgency.
+enum TicketPriority {
+  critical
+  high
+  medium
+  low
+  very_low
+}
+
+enum ImpactLevel {
+  low
+  medium
+  high
+}
+
+enum TicketChannel {
+  email
+  portal
+  chat
+  api
+  phone
+  teams
+}
+
+enum TicketCategory {
+  IT
+  HR
+  Access
+  Software
+  Hardware
+  Network
+  Billing
+  Other
+}
+
+enum ResolutionDecision {
+  auto_resolve
+  suggest
+  escalate
+}
+
+enum MessageAuthorKind {
+  requester
+  agent
+  assistant
+  system
+}
+
+enum MessageVisibility {
+  public
+  internal
+}
+
+enum ArticleStatus {
+  draft
+  in_review
+  published
+  archived
+}
+
+enum ProblemStatus {
+  open
+  investigating
+  known_error
+  resolved
+  closed
+}
+
+enum ChangeType {
+  standard
+  normal
+  emergency
+}
+
+enum ChangeStatus {
+  draft
+  assessing
+  awaiting_approval
+  approved
+  rejected
+  scheduled
+  implementing
+  review
+  closed
+  cancelled
+}
+
+enum ApprovalState {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+enum AssetStatus {
+  in_stock
+  assigned
+  in_repair
+  retired
+}
+
+enum CIType {
+  application
+  server
+  database
+  network
+  service
+  endpoint
+  other
+}
+
+enum NotificationChannel {
+  email
+  teams
+  slack
+  in_app
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & identity
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  brand     String?
+  isInternal Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  departments  Department[]
+  tickets      Ticket[]
+  articles     KBArticle[]
+  problems     Problem[]
+  changes      Change[]
+  assets       Asset[]
+  cis          ConfigurationItem[]
+  catalogItems ServiceRequestCatalogItem[]
+  slaPolicies  SlaPolicy[]
+  automations  AutomationRule[]
+  macros       Macro[]
+  customFieldDefs CustomFieldDef[]
+  audit        AuditRecord[]
+  groups       AssignmentGroup[]
+
+  @@index([slug])
+}
+
+model User {
+  id         String   @id @default(cuid())
+  tenantId   String
+  email      String
+  name       String
+  role       Role     @default(requester)
+  title      String?
+  department String?
+  departmentId String?
+  initials   String?
+  active     Boolean  @default(true)
+  // External identity (Entra ID object id) for SSO linkage.
+  externalId String?
+  // Self-service profile fields (account page).
+  phone      String?
+  location   String?
+  timezone   String?
+  bio        String?
+  // Notification preference toggles ({ emailNotifications, ... }).
+  preferences Json?
+  /// VIP requesters get an urgency floor + "vip" tag on intake.
+  vip        Boolean  @default(false)
+  /// Agent availability for dispatch: false = "Away", not accepting new tickets.
+  available  Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentRef    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  requestedTickets Ticket[] @relation("Requester")
+  assignedTickets  Ticket[] @relation("Assignee")
+  approvals        Approval[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Assignment groups (support teams / queues)
+// ---------------------------------------------------------------------------
+
+model AssignmentGroup {
+  id          String           @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  // Member users by id and the categories this group is auto-routed.
+  memberIds   String[]         @default([])
+  categories  TicketCategory[] @default([])
+  leadId      String?
+  /// Auto-assignment strategy: manual | round_robin | least_loaded.
+  strategy    String           @default("manual")
+  /// Round-robin cursor (index of the last assigned member).
+  lastAssignedIndex Int        @default(0)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets Ticket[]
+
+  @@unique([tenantId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Tickets (incident / service_request / problem-link / change-link)
+// ---------------------------------------------------------------------------
+
+model Ticket {
+  id        String         @id @default(cuid())
+  reference String         @unique
+  tenantId  String
+  type      TicketType     @default(incident)
+  subject   String
+  body      String
+  status    TicketStatus   @default(open)
+  priority  TicketPriority @default(medium)
+  impact    ImpactLevel?
+  urgency   ImpactLevel?
+  category  TicketCategory @default(Other)
+  subcategory String?
+  channel   TicketChannel  @default(portal)
+  source    String?
+  tags      String[]       @default([])
+  customFields Json?
+
+  requesterEmail String
+  requesterId    String?
+  assigneeId     String?
+  assignmentGroupId String?
+
+  problemId String?
+  changeId  String?
+  catalogItemId String?
+  // Linked CMDB CIs by id (flat scalar list so both data drivers share shape).
+  ciIds     String[] @default([])
+  // Related tickets (symmetric) + merge target, flat scalar for driver parity.
+  linkedTicketIds String[] @default([])
+  mergedIntoId String?
+
+  satisfaction String?
+  resolutionNotes  String?
+  firstRespondedAt DateTime?
+  resolvedAt       DateTime?
+  closedAt         DateTime?
+  dueResponseAt    DateTime?
+  dueResolveAt     DateTime?
+  slaPolicyId      String?
+  // SLA clock pause while the ticket sits in `pending`.
+  slaPausedAt      DateTime?
+  slaPausedMins    Int       @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester   User?            @relation("Requester", fields: [requesterId], references: [id])
+  assignee    User?            @relation("Assignee", fields: [assigneeId], references: [id])
+  assignmentGroup AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
+  problem     Problem?         @relation(fields: [problemId], references: [id])
+  change      Change?          @relation(fields: [changeId], references: [id])
+  catalogItem ServiceRequestCatalogItem? @relation(fields: [catalogItemId], references: [id])
+  slaPolicy   SlaPolicy?       @relation(fields: [slaPolicyId], references: [id])
+
+  messages    TicketMessage[]
+  events      TicketEvent[]
+  resolution  Resolution?
+  approvals   Approval[]
+  attachments Attachment[]
+  affectedCIs ConfigurationItem[] @relation("TicketCIs")
+
+  @@index([tenantId, status])
+  @@index([tenantId, type])
+  @@index([assigneeId])
+  @@index([requesterEmail])
+}
+
+model TicketMessage {
+  id          String            @id @default(cuid())
+  ticketId    String
+  authorKind  MessageAuthorKind
+  authorName  String
+  visibility  MessageVisibility @default(public)
+  body        String
+  createdAt   DateTime          @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model TicketEvent {
+  id        String   @id @default(cuid())
+  ticketId  String
+  type      String
+  message   String
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model Resolution {
+  id             String             @id @default(cuid())
+  ticketId       String             @unique
+  answer         String
+  confidence     Float
+  decision       ResolutionDecision
+  reasoning      String
+  model          String
+  embeddingModel String
+  latencyMs      Int
+  createdAt      DateTime           @default(now())
+
+  ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  citations Citation[]
+}
+
+model Citation {
+  id           String @id @default(cuid())
+  resolutionId String
+  articleId    String
+  title        String
+  score        Float
+  snippet      String
+
+  resolution Resolution @relation(fields: [resolutionId], references: [id], onDelete: Cascade)
+
+  @@index([resolutionId])
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge management
+// ---------------------------------------------------------------------------
+
+model KBArticle {
+  id             String         @id @default(cuid())
+  tenantId       String
+  title          String
+  content        String
+  category       TicketCategory @default(Other)
+  tags           String[]       @default([])
+  status         ArticleStatus  @default(published)
+  version        Int            @default(1)
+  authorId       String?
+  isPublic       Boolean        @default(false)
+  embedding      Float[]        @default([])
+  embeddingModel String         @default("")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Problem management
+// ---------------------------------------------------------------------------
+
+model Problem {
+  id          String        @id @default(cuid())
+  reference   String        @unique
+  tenantId    String
+  title       String
+  description String
+  status      ProblemStatus @default(open)
+  priority    TicketPriority @default(medium)
+  impact      String?       // low | medium | high
+  urgency     String?       // low | medium | high
+  category    TicketCategory @default(Other)
+  rootCause   String?
+  rcaMethod   String?       // five_whys | ishikawa | timeline | other
+  workaround  String?
+  knownError  Boolean       @default(false)
+  publishedArticleId String?
+  changeId    String?       // permanent-fix change raised from this problem
+  reviewNotes String?       // major-problem review
+  notes       Json?         // [{ id, author, body, at }]
+  assigneeId  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  linkedTickets  Ticket[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, knownError])
+}
+
+// ---------------------------------------------------------------------------
+// Change management
+// ---------------------------------------------------------------------------
+
+model Change {
+  id            String       @id @default(cuid())
+  reference     String       @unique
+  tenantId      String
+  title         String
+  description   String
+  type          ChangeType   @default(normal)
+  status        ChangeStatus @default(draft)
+  riskScore     Int?
+  riskRationale String?
+  plannedStart  DateTime?
+  plannedEnd    DateTime?
+  implementer   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  approvals     Approval[]
+  linkedTickets Ticket[]
+  affectedCIs   ConfigurationItem[] @relation("ChangeCIs")
+
+  @@index([tenantId, status])
+}
+
+model Approval {
+  id         String        @id @default(cuid())
+  changeId   String?
+  ticketId   String?
+  approverId String?
+  approverName String
+  state      ApprovalState @default(pending)
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime      @default(now())
+
+  change   Change? @relation(fields: [changeId], references: [id], onDelete: Cascade)
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  approver User?   @relation(fields: [approverId], references: [id])
+
+  @@index([changeId])
+  @@index([ticketId])
+}
+
+// ---------------------------------------------------------------------------
+// Asset management & CMDB
+// ---------------------------------------------------------------------------
+
+model Asset {
+  id        String      @id @default(cuid())
+  tenantId  String
+  tag       String
+  name      String
+  type      String
+  status    AssetStatus @default(in_stock)
+  owner     String?
+  purchasedAt DateTime?
+  warrantyEnd DateTime?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ci     ConfigurationItem?
+
+  @@unique([tenantId, tag])
+}
+
+model ConfigurationItem {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  type      CIType   @default(other)
+  status    String   @default("operational")
+  assetId   String?  @unique
+  attributes Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  asset  Asset? @relation(fields: [assetId], references: [id])
+
+  // Self-referential dependency graph (CI -> depends on -> CI).
+  dependsOn  CIRelationship[] @relation("Source")
+  dependents CIRelationship[] @relation("Target")
+
+  affectedTickets Ticket[] @relation("TicketCIs")
+  affectedChanges Change[] @relation("ChangeCIs")
+
+  @@index([tenantId, type])
+}
+
+model CIRelationship {
+  id       String @id @default(cuid())
+  sourceId String
+  targetId String
+  kind     String @default("depends_on")
+
+  source ConfigurationItem @relation("Source", fields: [sourceId], references: [id], onDelete: Cascade)
+  target ConfigurationItem @relation("Target", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetId, kind])
+}
+
+// ---------------------------------------------------------------------------
+// Service request catalog
+// ---------------------------------------------------------------------------
+
+model ServiceRequestCatalogItem {
+  id              String         @id @default(cuid())
+  tenantId        String
+  name            String
+  description     String
+  category        TicketCategory @default(Other)
+  requiresApproval Boolean       @default(false)
+  formSchema      Json?
+  active          Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets Ticket[]
+
+  @@index([tenantId, active])
+}
+
+// ---------------------------------------------------------------------------
+// SLA
+// ---------------------------------------------------------------------------
+
+model SlaPolicy {
+  id           String   @id @default(cuid())
+  tenantId     String
+  name         String
+  priority     TicketPriority
+  responseMins Int
+  resolveMins  Int
+  businessHoursOnly Boolean @default(false)
+  /// Optional business calendar (holidays, timezone, work window). When unset
+  /// and businessHoursOnly=true, the built-in Mon-Fri 9-18 window applies.
+  calendarId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  calendar BusinessCalendar? @relation(fields: [calendarId], references: [id])
+  tickets  Ticket[]
+
+  @@unique([tenantId, priority, name])
+}
+
+/// Named business-hours calendar: IANA timezone, working weekdays/window, and
+/// holiday dates (YYYY-MM-DD). Referenced by SLA policies.
+model BusinessCalendar {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  timezone  String   @default("UTC")
+  /// Working weekdays, 0=Sunday .. 6=Saturday.
+  workDays  Int[]    @default([1, 2, 3, 4, 5])
+  startHour Int      @default(9)
+  endHour   Int      @default(18)
+  /// Holiday dates as YYYY-MM-DD (interpreted in `timezone`).
+  holidays  String[] @default([])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  policies SlaPolicy[]
+
+  @@unique([tenantId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Automation
+// ---------------------------------------------------------------------------
+
+model AutomationRule {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String
+  enabled    Boolean  @default(true)
+  trigger    String
+  conditions Json
+  actions    Json
+  runCount   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, enabled])
+}
+
+model Macro {
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String
+  body       String
+  visibility String   @default("public")
+  category   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model CustomFieldDef {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  label     String
+  type      String   @default("text")
+  options   String[] @default([])
+  required  Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+// ---------------------------------------------------------------------------
+// Attachments & notifications
+// ---------------------------------------------------------------------------
+
+model Attachment {
+  id        String   @id @default(cuid())
+  ticketId  String
+  fileName  String
+  mimeType  String
+  sizeBytes Int
+  blobUrl   String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model Notification {
+  id        String              @id @default(cuid())
+  tenantId  String
+  channel   NotificationChannel @default(in_app)
+  toAddress String
+  subject   String
+  body      String
+  // App-relative destination the in-app feed navigates to (e.g. "/tickets/tkt_1").
+  link      String?
+  sent      Boolean             @default(false)
+  sentAt    DateTime?
+  // In-app read receipt (bell dropdown).
+  readAt    DateTime?
+  createdAt DateTime            @default(now())
+
+  @@index([tenantId, sent])
+  @@index([tenantId, toAddress])
+}
+
+// ---------------------------------------------------------------------------
+// Machine-to-machine API keys
+// ---------------------------------------------------------------------------
+
+/// Server-to-server credential ("Authorization: Bearer nlk_..."). Only the
+/// SHA-256 hash is stored; the full key is shown once at creation.
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  /// First characters of the key for display ("nlk_ab12...").
+  prefix     String
+  /// SHA-256 hex of the full key.
+  keyHash    String    @unique
+  /// Acting role for requests authenticated with this key.
+  role       Role      @default(agent)
+  /// Agents this integration acts on behalf of.
+  agentIds   String[]
+  /// Optional description of the integration/application.
+  description String?
+  active     Boolean   @default(true)
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdBy  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([tenantId, active])
+}
+
+// ---------------------------------------------------------------------------
+// Inbound / outbound email ledger (threading + dedupe)
+// ---------------------------------------------------------------------------
+
+enum EmailDirection {
+  inbound
+  outbound
+}
+
+enum EmailStatus {
+  processed
+  skipped_duplicate
+  skipped_loop
+  skipped_spam
+  failed
+}
+
+/// One row per mailbox message seen (inbound) or ticket email sent (outbound).
+/// internetMessageId powers dedupe; conversationId / inReplyTo power threading.
+model EmailMessage {
+  id                String         @id @default(cuid())
+  tenantId          String
+  direction         EmailDirection @default(inbound)
+  /// Provider message id (Graph message id).
+  providerId        String?
+  /// RFC 5322 Message-ID.
+  internetMessageId String?
+  conversationId    String?
+  inReplyTo         String?
+  referencesHeader  String?
+  fromAddress       String
+  toAddress         String?
+  subject           String
+  bodyText          String         @default("")
+  hasAttachments    Boolean        @default(false)
+  status            EmailStatus    @default(processed)
+  ticketId          String?
+  receivedAt        DateTime?
+  createdAt         DateTime       @default(now())
+
+  @@unique([tenantId, internetMessageId])
+  @@index([tenantId, conversationId])
+  @@index([tenantId, ticketId])
+}
+
+// ---------------------------------------------------------------------------
+// Tamper-evident audit chain (per tenant)
+// ---------------------------------------------------------------------------
+
+model AuditRecord {
+  id          String   @id @default(cuid())
+  tenantId    String
+  index       Int
+  timestamp   DateTime @default(now())
+  actor       String
+  action      String
+  ticketId    String?
+  payload     Json
+  payloadHash String
+  prevHash    String
+  hash        String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, index])
+  @@index([tenantId, ticketId])
+}

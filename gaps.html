@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Helpdesk — Gaps & Solutions for Netlink Software Group America</title>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8faff;
+    --border: #e4e8f3;
+    --text: #0f172a;
+    --text-secondary: #334155;
+    --muted: #64748b;
+    --brand: #6366f1;
+    --brand-dark: #4338ca;
+    --gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 55%, #ec4899 100%);
+    --gradient-soft: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 55%, #fdf2f8 100%);
+    --success-bg: #d1fae5;  --success-fg: #047857;  --success: #10b981;
+    --warning-bg: #fef3c7;  --warning-fg: #b45309;  --warning: #f59e0b;
+    --danger-bg:  #fee2e2;  --danger-fg:  #b91c1c;  --danger:  #ef4444;
+    --info-bg:    #dbeafe;  --info-fg:    #1d4ed8;  --info:    #3b82f6;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.05);
+    --shadow-md: 0 6px 18px -4px rgba(15,23,42,0.08), 0 2px 6px rgba(15,23,42,0.05);
+    --shadow-brand: 0 10px 30px -10px rgba(99,102,241,0.45);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+  }
+
+  body {
+    background-image:
+      radial-gradient(900px 500px at 15% -10%, rgba(99,102,241,0.10), transparent 60%),
+      radial-gradient(800px 450px at 100% 0%,  rgba(236,72,153,0.08), transparent 65%),
+      radial-gradient(700px 500px at 50% 110%, rgba(6,182,212,0.07), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+
+  .container { max-width: 1080px; margin: 0 auto; }
+
+  /* ----- Hero ----- */
+  .hero {
+    background: var(--gradient);
+    border-radius: 1.25rem;
+    padding: 2.2rem 2.4rem;
+    color: #fff;
+    box-shadow: var(--shadow-md);
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(600px 280px at 100% 0%, rgba(255,255,255,0.18), transparent 60%);
+    pointer-events: none;
+  }
+  .hero .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 0.5rem;
+  }
+  .hero h1 {
+    margin: 0;
+    font-size: 2.1rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+  }
+  .hero p {
+    margin: 0.6rem 0 0;
+    font-size: 1rem;
+    color: rgba(255,255,255,0.92);
+    max-width: 720px;
+  }
+
+  /* ----- Score strip ----- */
+  .score-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.9rem;
+    margin: 1.4rem 0 0;
+  }
+  .score {
+    background: rgba(255,255,255,0.13);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 0.8rem;
+    padding: 0.75rem 0.9rem;
+    backdrop-filter: blur(6px);
+  }
+  .score .label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+  }
+  .score .val {
+    margin-top: 0.2rem;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #fff;
+  }
+
+  /* ----- Section heading ----- */
+  .section-heading { margin: 2.4rem 0 1.1rem; }
+  .section-heading h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .section-heading p {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  /* ----- Strengths row ----- */
+  .strengths {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.9rem;
+  }
+  .strength {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    padding: 0.95rem 1rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .strength .check {
+    display: inline-flex;
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    background: var(--success-bg);
+    color: var(--success-fg);
+    align-items: center; justify-content: center;
+    font-weight: 900;
+    font-size: 0.95rem;
+    margin-bottom: 0.45rem;
+  }
+  .strength h4 {
+    margin: 0 0 0.2rem;
+    font-size: 0.92rem;
+    font-weight: 700;
+  }
+  .strength p {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* ----- Gap cards ----- */
+  .gaps {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.1rem;
+  }
+  .gap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1.2rem 1.3rem;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+  .gap::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    background: var(--gradient);
+  }
+  .gap-head {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.8rem;
+  }
+  .gap-icon {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: var(--gradient-soft);
+    color: var(--brand-dark);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    border: 1px solid #e0e7ff;
+    flex-shrink: 0;
+  }
+  .gap h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--text);
+    flex: 1;
+  }
+  .pri {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+  .pri.p0 { background: var(--danger-bg);  color: var(--danger-fg); }
+  .pri.p1 { background: var(--warning-bg); color: var(--warning-fg); }
+  .pri.p2 { background: var(--info-bg);    color: var(--info-fg); }
+  .pri.p3 { background: #ede9fe;           color: #5b21b6; }
+
+  .gap-block {
+    border-radius: 0.7rem;
+    padding: 0.7rem 0.85rem;
+    margin-bottom: 0.6rem;
+    border: 1px solid;
+  }
+  .gap-block.missing {
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+  .gap-block.solution {
+    background: #ecfdf5;
+    border-color: #a7f3d0;
+  }
+  .gap-block .tag {
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.3rem;
+  }
+  .gap-block.missing  .tag { color: var(--danger-fg); }
+  .gap-block.solution .tag { color: var(--success-fg); }
+  .gap-block ul {
+    margin: 0;
+    padding-left: 1.05rem;
+    font-size: 0.83rem;
+    color: var(--text-secondary);
+  }
+  .gap-block ul li { margin: 0.18rem 0; line-height: 1.45; }
+  .gap-block code {
+    background: rgba(99,102,241,0.08);
+    border: 1px solid rgba(99,102,241,0.18);
+    padding: 0.05rem 0.32rem;
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.76rem;
+    color: var(--brand-dark);
+  }
+
+  /* ----- Roadmap timeline ----- */
+  .roadmap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1.3rem 1.5rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .phase {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 1.1rem;
+    padding: 1rem 0;
+    border-bottom: 1px dashed var(--border);
+    align-items: flex-start;
+  }
+  .phase:first-child { padding-top: 0.2rem; }
+  .phase:last-child  { border-bottom: none; padding-bottom: 0.2rem; }
+  .phase .stage {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .phase .stage .tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    width: fit-content;
+  }
+  .phase .stage .when {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--muted);
+    font-family: ui-monospace, monospace;
+  }
+  .phase.p0 .tag { background: var(--danger-bg);  color: var(--danger-fg); }
+  .phase.p1 .tag { background: var(--warning-bg); color: var(--warning-fg); }
+  .phase.p2 .tag { background: var(--info-bg);    color: var(--info-fg); }
+  .phase.p3 .tag { background: #ede9fe;           color: #5b21b6; }
+
+  .phase .what h4 {
+    margin: 0 0 0.25rem;
+    font-size: 0.97rem;
+    font-weight: 800;
+  }
+  .phase .what p {
+    margin: 0 0 0.45rem;
+    font-size: 0.84rem;
+    color: var(--text-secondary);
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .chip {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+  }
+
+  /* ----- Moat card ----- */
+  .moat {
+    background: var(--gradient-soft);
+    border: 1px solid #c7d2fe;
+    border-radius: 1rem;
+    padding: 1.4rem 1.6rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .moat-head {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.9rem;
+  }
+  .moat-head .icon {
+    width: 52px; height: 52px;
+    border-radius: 14px;
+    background: var(--gradient);
+    color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.6rem;
+    box-shadow: var(--shadow-brand);
+  }
+  .moat h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--brand-dark);
+  }
+  .moat .sub {
+    margin: 0.15rem 0 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+  .moat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.8rem;
+    margin-top: 0.5rem;
+  }
+  .moat-item {
+    background: rgba(255,255,255,0.7);
+    border: 1px solid #e0e7ff;
+    border-radius: 0.75rem;
+    padding: 0.8rem 0.9rem;
+  }
+  .moat-item h5 {
+    margin: 0 0 0.2rem;
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--brand-dark);
+  }
+  .moat-item p {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  /* ----- Verdict ----- */
+  .verdict {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--brand);
+    border-radius: 0.9rem;
+    padding: 1.1rem 1.3rem;
+    box-shadow: var(--shadow-sm);
+    margin-top: 1rem;
+  }
+  .verdict h4 {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .verdict p {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+  }
+
+  /* ----- Footer ----- */
+  .foot {
+    margin-top: 2.5rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .foot a {
+    color: var(--brand-dark);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  /* ----- Mobile ----- */
+  @media (max-width: 880px) {
+    .score-strip { grid-template-columns: repeat(2, 1fr); }
+    .strengths   { grid-template-columns: repeat(2, 1fr); }
+    .gaps        { grid-template-columns: 1fr; }
+    .moat-grid   { grid-template-columns: 1fr; }
+    .phase       { grid-template-columns: 1fr; gap: 0.5rem; }
+    .hero h1     { font-size: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="eyebrow">Gap Analysis · Tailored Build</div>
+    <h1>From MVP to a production helpdesk fit for Netlink.</h1>
+    <p>
+      A focused look at what this Helpdesk is missing to run inside
+      <strong>Netlink Software Group America, Inc.</strong> — covering both the
+      internal IT/HR desk for staff and the multi-tenant client desks for managed
+      services. Every gap below pairs the missing capability with the concrete
+      solution and the priority order.
+    </p>
+
+    <div class="score-strip">
+      <div class="score"><div class="label">Built for</div><div class="val">Netlink IT · HR · MSP</div></div>
+      <div class="score"><div class="label">Critical gaps</div><div class="val">12 areas</div></div>
+      <div class="score"><div class="label">Phased rollout</div><div class="val">4 phases · ~6 mo</div></div>
+      <div class="score"><div class="label">Our wedge</div><div class="val">Auditable AI · SOC 2</div></div>
+    </div>
+  </header>
+
+  <!-- ===================== NETLINK FIT ===================== -->
+  <div class="section-heading">
+    <h2>Why this matters for Netlink</h2>
+    <p>The same engine has to serve three different audiences inside Netlink — and the gaps below are what's blocking that today.</p>
+  </div>
+
+  <section class="strengths">
+    <div class="strength">
+      <div class="check">1</div>
+      <h4>Internal IT desk</h4>
+      <p>VPN, M365, Azure AD, laptop &amp; access requests for staff in the US &amp; India.</p>
+    </div>
+    <div class="strength">
+      <div class="check">2</div>
+      <h4>Internal HR desk</h4>
+      <p>Leave, policy, payroll, onboarding — answered consistently, 24×7, region-aware.</p>
+    </div>
+    <div class="strength">
+      <div class="check">3</div>
+      <h4>Client MSP desks</h4>
+      <p>Multi-tenant L1/L2 support per managed-services client, with their own KB &amp; SLAs.</p>
+    </div>
+    <div class="strength">
+      <div class="check">4</div>
+      <h4>Enterprise sales</h4>
+      <p>SOC 2 / ISO 27001 evidence and private-LLM options unlock larger Netlink deals.</p>
+    </div>
+  </section>
+
+  <!-- ===================== WHAT WE ALREADY HAVE ===================== -->
+  <div class="section-heading">
+    <h2>What the current build already gives Netlink</h2>
+    <p>This is the AI-first foundation we keep and extend — not throw away.</p>
+  </div>
+
+  <section class="strengths">
+    <div class="strength">
+      <div class="check">✓</div>
+      <h4>RAG resolver</h4>
+      <p>Semantic KB search → grounded answers with citations and confidence scoring.</p>
+    </div>
+    <div class="strength">
+      <div class="check">✓</div>
+      <h4>Confidence routing</h4>
+      <p>Auto-resolve · suggest · escalate — perfect for L1 deflection at scale.</p>
+    </div>
+    <div class="strength">
+      <div class="check">✓</div>
+      <h4>Tamper-proof audit</h4>
+      <p>SHA-256 hash-chained log — direct evidence for SOC 2 / ISO 27001 controls.</p>
+    </div>
+    <div class="strength">
+      <div class="check">✓</div>
+      <h4>Webhook ingest</h4>
+      <p>Zendesk / Freshdesk / generic webhooks — easy migration from existing tools.</p>
+    </div>
+  </section>
+
+  <!-- ===================== GAP CARDS ===================== -->
+  <div class="section-heading">
+    <h2>The gaps — and their solutions</h2>
+    <p>Each card pairs what's missing with how to close it. Priorities: P0 = blocker, P3 = nice-to-have.</p>
+  </div>
+
+  <section class="gaps">
+
+    <!-- 1 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🗄️</div>
+        <h3>Persistence &amp; backend</h3>
+        <span class="pri p0">P0 · Blocker</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>All data lives in <code>localStorage</code> via <code>src/lib/db.ts</code></li>
+          <li>One browser = one workspace; teams can't share tickets</li>
+          <li>No backups, no durability, no cross-device sync</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Move storage to <strong>Postgres</strong> on Azure (matches Netlink cloud)</li>
+          <li>Keep the <code>db.ts</code> contract — swap implementation, UI untouched</li>
+          <li>Prisma/Drizzle schema for tickets, articles, audit, users, <em>tenants</em></li>
+          <li>Nightly backups + PITR in US region for client data residency</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 2 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🔐</div>
+        <h3>Auth, users &amp; roles</h3>
+        <span class="pri p0">P0 · Blocker</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>Agents are hardcoded strings (<code>"agent.demo"</code>)</li>
+          <li>No login, no sessions, no RBAC, no multi-tenancy</li>
+          <li>No org / brand / department isolation per Netlink client</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li><strong>Azure AD SSO</strong> for staff + <strong>SCIM</strong> provisioning</li>
+          <li>Roles: <em>super-admin · tenant-admin · agent · requester</em></li>
+          <li>Tenant per client (Gold/Silver/Bronze) + one <em>netlink-internal</em> tenant</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 3 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">📬</div>
+        <h3>Omnichannel ingest</h3>
+        <span class="pri p0">P0 · Blocker</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>Only webhook ingest — no email, chat, voice, social, WhatsApp</li>
+          <li>No live chat widget for end users</li>
+          <li>No in-app messenger (Intercom-style)</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li><strong>Outlook / M365 inbound</strong> via Graph API for staff &amp; clients</li>
+          <li><strong>Microsoft Teams bot</strong> — primary channel for Netlink staff</li>
+          <li>Chat widget for client portals; Twilio for voice/SMS later</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 4 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">⏱️</div>
+        <h3>SLAs, routing &amp; queues</h3>
+        <span class="pri p1">P1 · Table-stakes</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>No first-response / resolution-time targets or breach alerts</li>
+          <li>No round-robin, skill-based, or load-based assignment</li>
+          <li>No queues per Netlink pod (US-IT, India-IT, HR, client pods)</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>SLA engine with <strong>per-tier targets</strong> (Gold 15m / Silver 1h / Bronze 4h)</li>
+          <li>Follow-the-sun routing — US business hours → India pod after EOD</li>
+          <li>Skill tags (network, AD, M365, Azure) drive auto-assignment</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 5 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🎫</div>
+        <h3>Ticket fundamentals</h3>
+        <span class="pri p1">P1 · Table-stakes</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>No merge / split / link / parent-child tickets</li>
+          <li>No CC, internal notes vs public replies, macros, custom fields</li>
+          <li>Priority enum exists but nothing acts on it</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Add <code>TicketComment</code> with <code>visibility: public|internal</code></li>
+          <li>Macro library seeded from Netlink's existing canned responses</li>
+          <li>Custom fields per tenant (e.g. client cost code, project ID)</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 6 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🌐</div>
+        <h3>Customer-facing portal</h3>
+        <span class="pri p1">P1 · Table-stakes</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>Requesters can't log in to view their tickets</li>
+          <li>KB is internal-only — no branded help center per client</li>
+          <li>No status emails, no CSAT / NPS surveys</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Multi-brand portals: <code>support.netlink.com</code> +
+              <code>support.netlink.com/{client}</code></li>
+          <li>Public KB with each client's own articles &amp; logo</li>
+          <li>Magic-link auth for client end-users; M365 SSO for staff</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 7 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🤝</div>
+        <h3>Real-time collaboration</h3>
+        <span class="pri p1">P1 · Table-stakes</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>No live updates — agents see stale ticket state</li>
+          <li>No @mentions, presence, or collision detection</li>
+          <li>No unified inbox across channels</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Supabase Realtime / SSE so US &amp; India pods see live state</li>
+          <li>@mentions fan out to <strong>Microsoft Teams</strong> channels</li>
+          <li>"Currently viewing" pill prevents double-replies across timezones</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 8 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">⚙️</div>
+        <h3>Automation builder</h3>
+        <span class="pri p2">P2 · Differentiator</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>No triggers / business rules beyond the AI resolver</li>
+          <li>No scheduled jobs (auto-close stale, follow-ups)</li>
+          <li>No approval flows or workflow designer</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Rule engine: <em>when X · if Y · then Z</em> stored as JSON</li>
+          <li>Pre-built packs: <em>onboarding flow</em>, <em>access request approval</em>,
+              <em>incident → Jira</em></li>
+          <li>Dry-run preview before turning a rule on against live tickets</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 9 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">📊</div>
+        <h3>Reporting &amp; analytics</h3>
+        <span class="pri p2">P2 · Differentiator</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>Only basic deflection / containment / confidence avg</li>
+          <li>No agent leaderboards, CSAT trends, channel breakdowns</li>
+          <li>No client-billable reports for Netlink's MSP engagements</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Per-tenant dashboards: tickets, SLA, CSAT, deflection</li>
+          <li><strong>Client-ready PDF reports</strong> auto-mailed monthly</li>
+          <li>Engineer time-on-ticket → export to billing / project accounting</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 10 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🧠</div>
+        <h3>Deeper AI features</h3>
+        <span class="pri p2">P2 · Differentiator</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>No sentiment, auto-tagging, language detection, summarization</li>
+          <li>No next-best-action coach for agents</li>
+          <li>No bilingual support (English + Hindi) for Netlink's mixed teams</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Reuse <code>/api/generate</code> for classify · summarize · translate</li>
+          <li>Auto-tagging from Netlink's ITIL taxonomy (Incident / Request / Problem / Change)</li>
+          <li>Hindi ↔ English auto-translate so US clients and India pods stay aligned</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 11 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🔌</div>
+        <h3>Integrations for Netlink's stack</h3>
+        <span class="pri p2">P2 · Differentiator</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>Webhooks ingest only — no push-back to existing tools</li>
+          <li>No Microsoft Teams, Confluence, Jira SM, ServiceNow bridges</li>
+          <li>No public REST API or outbound webhooks</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li><strong>Confluence importer</strong> bootstraps the KB from existing pages</li>
+          <li><strong>Jira SM + ServiceNow</strong> 2-way sync (clients keep their system of record)</li>
+          <li>Teams app: ticket creation, notifications, agent actions inside Teams</li>
+          <li>Versioned REST API under <code>/api/v1</code> + outbound webhook hub</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- 12 -->
+    <article class="gap">
+      <div class="gap-head">
+        <div class="gap-icon">🛡️</div>
+        <h3>Enterprise &amp; ops</h3>
+        <span class="pri p3">P3 · Scale</span>
+      </div>
+      <div class="gap-block missing">
+        <div class="tag">What's missing</div>
+        <ul>
+          <li>No SAML/SCIM, 2FA, IP allow-list, data residency</li>
+          <li>No tests, error monitoring, logging, rate-limiting</li>
+          <li>No CI/CD, no mobile app, no a11y baseline</li>
+        </ul>
+      </div>
+      <div class="gap-block solution">
+        <div class="tag">Solution for Netlink</div>
+        <ul>
+          <li>Azure AD SAML/SCIM (already Netlink's IdP); US data residency by default</li>
+          <li>Sentry + structured logs + Upstash rate-limit on public routes</li>
+          <li>Vitest + Playwright + GitHub Actions; PWA wrap for on-call mobile use</li>
+        </ul>
+      </div>
+    </article>
+
+  </section>
+
+  <!-- ===================== ROADMAP ===================== -->
+  <div class="section-heading">
+    <h2>Roadmap to parity</h2>
+    <p>The order that gets us from "demo" to "competitive product" with the least wasted work.</p>
+  </div>
+
+  <section class="roadmap">
+
+    <div class="phase p0">
+      <div class="stage">
+        <span class="tag">P0 · Must have</span>
+        <span class="when">Weeks 1–4</span>
+      </div>
+      <div class="what">
+        <h4>Become a real product</h4>
+        <p>Without these, the app is a demo. Everything else builds on top.</p>
+        <div class="chips">
+          <span class="chip">Postgres backend</span>
+          <span class="chip">Auth + roles</span>
+          <span class="chip">Multi-tenant orgs</span>
+          <span class="chip">Email ingest</span>
+          <span class="chip">Basic SLAs</span>
+          <span class="chip">Agent assignment</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="phase p1">
+      <div class="stage">
+        <span class="tag">P1 · Table-stakes</span>
+        <span class="when">Weeks 5–10</span>
+      </div>
+      <div class="what">
+        <h4>What every buyer expects</h4>
+        <p>Features whose absence ends a sales call. Catch up here, don't innovate yet.</p>
+        <div class="chips">
+          <span class="chip">Customer portal</span>
+          <span class="chip">Public KB</span>
+          <span class="chip">Internal notes</span>
+          <span class="chip">Macros</span>
+          <span class="chip">Live updates</span>
+          <span class="chip">CSAT surveys</span>
+          <span class="chip">Slack notifier</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="phase p2">
+      <div class="stage">
+        <span class="tag">P2 · Differentiator</span>
+        <span class="when">Weeks 11–18</span>
+      </div>
+      <div class="what">
+        <h4>Lean into our AI &amp; audit moat</h4>
+        <p>Now we stop catching up and start winning — make the AI/audit story unmistakable.</p>
+        <div class="chips">
+          <span class="chip">Confidence-tuning UI</span>
+          <span class="chip">Audit as compliance feature</span>
+          <span class="chip">Local / private LLM toggle</span>
+          <span class="chip">Sentiment + auto-tag</span>
+          <span class="chip">Automation builder</span>
+          <span class="chip">Public API</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="phase p3">
+      <div class="stage">
+        <span class="tag">P3 · Scale</span>
+        <span class="when">Months 5+</span>
+      </div>
+      <div class="what">
+        <h4>Mid-market &amp; enterprise</h4>
+        <p>Only after the first paying customers — these unlock bigger deals.</p>
+        <div class="chips">
+          <span class="chip">SSO / SAML / SCIM</span>
+          <span class="chip">Custom fields &amp; report builder</span>
+          <span class="chip">Mobile app</span>
+          <span class="chip">Marketplace integrations</span>
+          <span class="chip">Data residency</span>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ===================== MOAT ===================== -->
+  <div class="section-heading">
+    <h2>Why Netlink should build this — not buy Zendesk</h2>
+    <p>We won't out-feature Zendesk on every checkbox. We win by owning <em>auditable, multi-tenant, AI-first support</em> that fits Netlink's MSP model.</p>
+  </div>
+
+  <section class="moat">
+    <div class="moat-head">
+      <div class="icon" aria-hidden="true">⛓</div>
+      <div>
+        <h3>The wedge: auditable AI helpdesk built around Netlink's reality</h3>
+        <p class="sub">Internal IT + HR + multi-tenant client desks, on Netlink's existing Azure / M365 stack.</p>
+      </div>
+    </div>
+    <div class="moat-grid">
+      <div class="moat-item">
+        <h5>SOC 2 / ISO evidence</h5>
+        <p>SHA-256 hash-chained audit log — directly maps to common access &amp; change controls.</p>
+      </div>
+      <div class="moat-item">
+        <h5>Explainable AI</h5>
+        <p>Confidence, citations, reasoning are visible — defensible to enterprise clients &amp; auditors.</p>
+      </div>
+      <div class="moat-item">
+        <h5>Private / BYO LLM</h5>
+        <p>In-browser MiniLM today; on-prem or VPC-hosted model for sensitive client tenants tomorrow.</p>
+      </div>
+      <div class="moat-item">
+        <h5>True multi-tenant</h5>
+        <p>One install, isolated KB &amp; SLAs per Netlink client — built for MSP economics, not retrofitted.</p>
+      </div>
+      <div class="moat-item">
+        <h5>Fits Netlink's stack</h5>
+        <p>Azure AD SSO, Teams bot, Confluence import, Jira/SNOW sync — no rip-and-replace.</p>
+      </div>
+      <div class="moat-item">
+        <h5>Owns the IP</h5>
+        <p>Netlink keeps the code, the data, and the resale rights — usable as a paid product for clients later.</p>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <h4>The recommendation</h4>
+      <p>
+        Ship <strong>P0 + P1 (≈10 weeks)</strong> to make it credible inside Netlink IT &amp; HR.
+        Ship <strong>P2 (next 6–8 weeks)</strong> — Teams app, Jira/SNOW sync, per-tenant
+        dashboards — and Netlink can offer this to managed-services clients as a value-add or
+        a standalone product. Depth on the AI / audit / multi-tenant axes beats checkbox breadth.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <p class="foot">
+    Helpdesk — Gap &amp; Solution Map for <strong>Netlink Software Group America, Inc.</strong> ·
+    companion to <a href="./workflow.html">workflow.html</a> and
+    <a href="./workflow-design.html">workflow-design.html</a>.
+  </p>
+
+</div>
+</body>
+</html>

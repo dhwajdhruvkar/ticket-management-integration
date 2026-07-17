@@ -1,0 +1,42 @@
+# Local infrastructure for Netlink Support.
+#
+#   docker compose up -d
+#
+# Brings up Postgres (with pgvector preinstalled) and Redis. Then:
+#   set DATA_DRIVER=prisma in .env
+#   npm run db:push      # create the schema
+#   npm run db:seed      # load demo tenants, users, tickets, KB
+#
+# The app runs fine without any of this (DATA_DRIVER=memory).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: netlink-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: netlink
+      POSTGRES_PASSWORD: netlink
+      POSTGRES_DB: netlink_support
+    ports:
+      - "5432:5432"
+    volumes:
+      - netlink_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netlink -d netlink_support"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: netlink-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - netlink_redisdata:/data
+
+volumes:
+  netlink_pgdata:
+  netlink_redisdata:

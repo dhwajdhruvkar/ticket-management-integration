@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Netlink Support — Project Overview: Merging Two Systems into One AI-First ITSM Platform</title>
+<style>
+  :root {
+    --bg: #eef2f1;
+    --surface: #ffffff;
+    --surface-2: #f4f8f7;
+    --border: #dde7e4;
+    --text: #0b1f1c;
+    --text-secondary: #36514c;
+    --muted: #6b827d;
+
+    --brand-50: #e6f5f1;
+    --brand-100: #c7e9e1;
+    --brand-500: #1aa085;
+    --brand-600: #15806b;
+    --brand-700: #0f6354;
+    --chrome: #04373d;
+
+    --gradient: linear-gradient(135deg, #15806b 0%, #1aa085 60%, #2bb89a 100%);
+    --gradient-chrome: linear-gradient(135deg, #04373d 0%, #0f6354 100%);
+
+    --hd-bg: #ecfdf6;  --hd-border: #b3e6d5;  --hd-fg: #0f6354;   /* helpdesk */
+    --nl-bg: #fbf4ec;  --nl-border: #ecdcc4;  --nl-fg: #8a6320;   /* netlink ITSM */
+    --mg-bg: #eaf1fb;  --mg-border: #cdddf3;  --mg-fg: #1d5fa5;   /* merged/new */
+
+    --success-bg: #d6f4e7; --success-fg: #0f7a5e;
+    --warning-bg: #fdedcf; --warning-fg: #97631a;
+    --danger-bg:  #fde0dd; --danger-fg:  #b3392f;
+    --info-bg:    #d9ecf7; --info-fg:    #1d6fa5;
+
+    --shadow-sm: 0 1px 2px rgba(8,35,38,0.05), 0 1px 3px rgba(8,35,38,0.06);
+    --shadow-md: 0 8px 22px -8px rgba(8,35,38,0.16), 0 3px 8px rgba(8,35,38,0.06);
+    --r-md: 10px; --r-lg: 14px; --r-xl: 20px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; line-height: 1.55;
+  }
+  body {
+    background-image:
+      radial-gradient(900px 480px at 12% -8%, rgba(26,160,133,0.10), transparent 60%),
+      radial-gradient(760px 440px at 100% 0%, rgba(15,99,84,0.08), transparent 65%);
+    background-attachment: fixed; min-height: 100vh; padding: 2.5rem 1.5rem 4rem;
+  }
+  .container { max-width: 1140px; margin: 0 auto; }
+
+  /* Hero */
+  .hero {
+    background: var(--gradient-chrome); border-radius: var(--r-xl); padding: 2.3rem 2.5rem;
+    color: #fff; box-shadow: var(--shadow-md); margin-bottom: 1.6rem; position: relative; overflow: hidden;
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(620px 300px at 100% 0%, rgba(43,184,154,0.28), transparent 60%); pointer-events: none;
+  }
+  .hero .eyebrow { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.78); margin-bottom: 0.55rem; }
+  .hero h1 { margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: -0.025em; position: relative; }
+  .hero p { margin: 0.7rem 0 0; font-size: 1.02rem; color: rgba(255,255,255,0.9); max-width: 800px; position: relative; }
+  .thesis { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 0; align-items: stretch; margin-top: 1.6rem; }
+  .thesis .side { border-radius: var(--r-md); padding: 0.85rem 1rem; background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.16); }
+  .thesis .side .k { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
+  .thesis .side .v { margin-top: 0.25rem; font-size: 0.9rem; font-weight: 700; color: #fff; }
+  .thesis .op { display: flex; align-items: center; justify-content: center; padding: 0 0.7rem; font-weight: 800; font-size: 1.2rem; color: rgba(255,255,255,0.8); }
+
+  /* Section heading */
+  .section-heading { margin: 2.5rem 0 1.1rem; }
+  .section-heading h2 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -0.02em; background: var(--gradient); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .section-heading p { margin: 0.3rem 0 0; color: var(--muted); font-size: 0.92rem; }
+
+  /* Origin cards */
+  .origins { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .origin { border-radius: var(--r-lg); padding: 1.3rem 1.4rem; box-shadow: var(--shadow-sm); border: 1px solid; }
+  .origin.hd { background: var(--hd-bg); border-color: var(--hd-border); }
+  .origin.nl { background: var(--nl-bg); border-color: var(--nl-border); }
+  .origin .tag { display: inline-block; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; padding: 0.2rem 0.55rem; border-radius: 999px; margin-bottom: 0.6rem; }
+  .origin.hd .tag { background: var(--hd-fg); color: #fff; }
+  .origin.nl .tag { background: var(--nl-fg); color: #fff; }
+  .origin h3 { margin: 0 0 0.2rem; font-size: 1.12rem; font-weight: 800; }
+  .origin .sub { margin: 0 0 0.8rem; font-size: 0.84rem; color: var(--muted); }
+  .origin h4 { margin: 0.7rem 0 0.3rem; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); }
+  .origin ul { margin: 0; padding-left: 1.1rem; font-size: 0.84rem; color: var(--text-secondary); }
+  .origin ul li { margin: 0.2rem 0; }
+  .origin .good li::marker { color: var(--success-fg); }
+  .origin .bad li::marker { color: var(--danger-fg); }
+
+  /* Merge columns */
+  .merge { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+  .mcol { border-radius: var(--r-lg); padding: 1.2rem 1.3rem; box-shadow: var(--shadow-sm); border: 1px solid; }
+  .mcol.hd { background: var(--hd-bg); border-color: var(--hd-border); }
+  .mcol.nl { background: var(--nl-bg); border-color: var(--nl-border); }
+  .mcol.mg { background: var(--mg-bg); border-color: var(--mg-border); }
+  .mcol h3 { margin: 0 0 0.6rem; font-size: 0.95rem; font-weight: 800; }
+  .mcol.hd h3 { color: var(--hd-fg); } .mcol.nl h3 { color: var(--nl-fg); } .mcol.mg h3 { color: var(--mg-fg); }
+  .mcol ul { margin: 0; padding-left: 1.05rem; font-size: 0.83rem; color: var(--text-secondary); }
+  .mcol ul li { margin: 0.25rem 0; }
+
+  /* Workflow */
+  .flow { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 1.5rem; box-shadow: var(--shadow-sm); }
+  .pipe { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; justify-content: center; }
+  .node { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 0.6rem 0.85rem; font-size: 0.82rem; font-weight: 600; text-align: center; min-width: 120px; }
+  .node .n-sub { display: block; font-size: 0.68rem; font-weight: 500; color: var(--muted); margin-top: 2px; }
+  .node.ai { background: var(--brand-50); border-color: var(--brand-100); color: var(--brand-700); }
+  .node.audit { background: var(--chrome); color: #fff; border-color: var(--chrome); }
+  .arrow { color: var(--brand-500); font-weight: 800; font-size: 1.1rem; }
+  .branch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; margin-top: 1rem; }
+  .bcard { border-radius: 10px; padding: 0.8rem 0.9rem; border: 1px solid; }
+  .bcard.auto { background: var(--success-bg); border-color: #a7e6cf; }
+  .bcard.suggest { background: var(--info-bg); border-color: #bcdcf0; }
+  .bcard.escalate { background: var(--warning-bg); border-color: #f0dcb0; }
+  .bcard .bh { font-weight: 800; font-size: 0.84rem; margin-bottom: 0.2rem; }
+  .bcard .bp { font-size: 0.76rem; color: var(--text-secondary); }
+  .bcard.auto .bh { color: var(--success-fg); } .bcard.suggest .bh { color: var(--info-fg); } .bcard.escalate .bh { color: var(--warning-fg); }
+  .flow-note { margin-top: 1rem; font-size: 0.8rem; color: var(--muted); text-align: center; }
+
+  /* Module grid */
+  .mods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; }
+  .mod { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 0.95rem 1rem; box-shadow: var(--shadow-sm); }
+  .mod .ic { font-size: 1.2rem; }
+  .mod h4 { margin: 0.35rem 0 0.2rem; font-size: 0.88rem; font-weight: 800; }
+  .mod p { margin: 0; font-size: 0.76rem; color: var(--muted); line-height: 1.45; }
+
+  /* Comparison table */
+  .cmp { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .crow { display: grid; grid-template-columns: 1.1fr 1.3fr 1.3fr 1.5fr; border-top: 1px solid var(--border); }
+  .crow:first-child { border-top: none; }
+  .crow.head .c { padding: 0.8rem 0.9rem; font-weight: 800; font-size: 0.82rem; }
+  .crow.head { background: var(--surface-2); }
+  .crow.head .c.hd { color: var(--hd-fg); } .crow.head .c.nl { color: var(--nl-fg); } .crow.head .c.mg { color: var(--mg-fg); }
+  .c { padding: 0.7rem 0.9rem; font-size: 0.8rem; }
+  .c.dim { font-weight: 800; font-size: 0.78rem; background: var(--surface-2); border-right: 1px solid var(--border); display: flex; align-items: center; }
+  .c.nl { background: var(--nl-bg); border-right: 1px solid var(--nl-border); color: var(--text-secondary); }
+  .c.hd { background: var(--hd-bg); border-right: 1px solid var(--hd-border); color: var(--text-secondary); }
+  .c.mg { background: var(--mg-bg); color: var(--text-secondary); }
+  .c.mg strong { color: var(--mg-fg); }
+
+  /* Architecture */
+  .arch { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 1.3rem 1.5rem; box-shadow: var(--shadow-sm); }
+  .arch .layer { display: flex; align-items: center; gap: 0.8rem; padding: 0.5rem 0; border-bottom: 1px dashed var(--border); font-size: 0.85rem; }
+  .arch .layer:last-child { border-bottom: none; }
+  .arch .layer .lbl { width: 130px; font-weight: 800; color: var(--brand-700); font-size: 0.78rem; flex-shrink: 0; }
+  .chip { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.55rem; font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); margin: 0.12rem 0.2rem 0.12rem 0; }
+
+  .foot { margin-top: 2.4rem; text-align: center; color: var(--muted); font-size: 0.78rem; }
+  .foot a { color: var(--brand-700); text-decoration: none; font-weight: 600; }
+
+  @media (max-width: 900px) {
+    .origins, .merge, .mods { grid-template-columns: 1fr; }
+    .thesis { grid-template-columns: 1fr; gap: 0.5rem; }
+    .thesis .op { padding: 0.2rem; }
+    .branch { grid-template-columns: 1fr; }
+    .crow { grid-template-columns: 1fr; }
+    .crow .c { border-right: none; }
+    .crow.head { display: none; }
+    .c.dim { border-bottom: 1px solid var(--border); }
+    .hero h1 { font-size: 1.5rem; }
+  }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .hero, .arch, .flow, .cmp, .origin, .mcol, .mod { box-shadow: none; }
+    .section-heading { break-after: avoid; } .origin, .mcol, .mod, .bcard { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="eyebrow">Netlink Software Group America · Project Overview</div>
+    <h1>Two systems, merged into one AI-first ITSM platform.</h1>
+    <p>
+      We combined <strong>your Helpdesk prototype</strong> (an AI-first auto-resolution bot with a
+      tamper-proof audit trail) with the structure of <strong>Netlink's traditional ITSM</strong>
+      (the full ITIL module set on a real, secured backend). The result keeps the AI and the
+      compliance edge of the first, gains the modules and production foundation of the second, and
+      ships as one coherent platform.
+    </p>
+    <div class="thesis">
+      <div class="side"><div class="k">Your Helpdesk</div><div class="v">AI auto-resolve + tamper-proof audit</div></div>
+      <div class="op">+</div>
+      <div class="side"><div class="k">Netlink ITSM</div><div class="v">Full ITIL modules + real backend</div></div>
+      <div class="op">=</div>
+      <div class="side"><div class="k">Merged platform</div><div class="v">AI-first ITSM, production-grade</div></div>
+    </div>
+  </header>
+
+  <!-- THE TWO STARTING POINTS -->
+  <div class="section-heading">
+    <h2>Where we started — two different systems</h2>
+    <p>Each was strong on one side and weak on the other. That is exactly why merging them works.</p>
+  </div>
+  <section class="origins">
+    <div class="origin hd">
+      <span class="tag">System 1 · Your build</span>
+      <h3>The Helpdesk prototype</h3>
+      <p class="sub">An AI-first ticket auto-resolution bot, running entirely in the browser.</p>
+      <h4>Strengths kept</h4>
+      <ul class="good">
+        <li>AI resolves repeat tickets before an agent sees them (RAG: retrieve → grounded answer)</li>
+        <li>Confidence scoring → auto-resolve / suggest / escalate</li>
+        <li>Tamper-evident SHA-256 audit chain</li>
+        <li>Semantic knowledge-base search; clean Zendesk-style UI</li>
+      </ul>
+      <h4>Limitations fixed</h4>
+      <ul class="bad">
+        <li>Data lived only in the browser (localStorage) — no real backend</li>
+        <li>No real login, roles, or multi-user support</li>
+        <li>Only incidents/requests — no Problem, Change, Asset/CMDB</li>
+        <li>No automation, omnichannel, or reporting</li>
+      </ul>
+    </div>
+    <div class="origin nl">
+      <span class="tag">System 2 · Netlink original</span>
+      <h3>The traditional ITSM</h3>
+      <p class="sub">A classic, human-driven ITIL service desk (per the Netlink design docs).</p>
+      <h4>Strengths adopted</h4>
+      <ul class="good">
+        <li>Full ITIL modules: Incident, Request, Problem, Change, Asset/CMDB, Knowledge</li>
+        <li>Real backend (Postgres) + microservice-style structure</li>
+        <li>Authentication, roles &amp; permissions (JWT / SSO / RBAC)</li>
+        <li>SLA tracking, assignment, approval workflows</li>
+      </ul>
+      <h4>Limitations improved</h4>
+      <ul class="bad">
+        <li>Every ticket resolved by a human — AI was only a "future phase"</li>
+        <li>Audit was a plain database table (editable, not tamper-evident)</li>
+        <li>Decisions weren't explainable or captured</li>
+        <li>Knowledge base was passive (an FAQ, not a resolver)</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- THE MERGE -->
+  <div class="section-heading">
+    <h2>What we merged — the best of both ends</h2>
+    <p>We took the AI + audit core from your Helpdesk, the ITIL backbone from Netlink's ITSM, and added the production glue that makes them one system.</p>
+  </div>
+  <section class="merge">
+    <div class="mcol hd">
+      <h3>From your Helpdesk →</h3>
+      <ul>
+        <li>RAG auto-resolution engine</li>
+        <li>Confidence-based routing &amp; guardrails</li>
+        <li>Tamper-proof audit chain (now server-side, per tenant)</li>
+        <li>Semantic KB search &amp; grounded, cited answers</li>
+      </ul>
+    </div>
+    <div class="mcol nl">
+      <h3>From Netlink ITSM →</h3>
+      <ul>
+        <li>Incident · Service Request · Problem · Change · Asset/CMDB</li>
+        <li>Postgres backend + data model</li>
+        <li>Entra ID SSO + role-based access control</li>
+        <li>SLAs, assignment &amp; CAB approval workflows</li>
+      </ul>
+    </div>
+    <div class="mcol mg">
+      <h3>New in the merge ★</h3>
+      <ul>
+        <li>AI woven into every module (classify, risk-score, cluster, summarize)</li>
+        <li>Automation/rules engine + background jobs</li>
+        <li>Omnichannel intake (email, Teams, portal, webhooks)</li>
+        <li>Analytics &amp; ROI dashboards + self-service portal</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- WORKFLOW -->
+  <div class="section-heading">
+    <h2>How it works — the workflow</h2>
+    <p>What happens, end to end, the moment a ticket arrives from any channel.</p>
+  </div>
+  <section class="flow">
+    <div class="pipe">
+      <div class="node">Ticket arrives<span class="n-sub">email · Teams · portal · API</span></div>
+      <span class="arrow">→</span>
+      <div class="node ai">AI classify<span class="n-sub">category · priority · sentiment</span></div>
+      <span class="arrow">→</span>
+      <div class="node">SLA timers<span class="n-sub">response &amp; resolve due</span></div>
+      <span class="arrow">→</span>
+      <div class="node">Automation rules<span class="n-sub">assign · notify · route</span></div>
+      <span class="arrow">→</span>
+      <div class="node ai">AI resolver<span class="n-sub">retrieve → ground → score</span></div>
+    </div>
+
+    <div class="branch">
+      <div class="bcard auto">
+        <div class="bh">≥ 78% → Auto-resolve</div>
+        <div class="bp">Posts a grounded, cited reply and resolves the ticket — no agent needed.</div>
+      </div>
+      <div class="bcard suggest">
+        <div class="bh">55–78% → Suggest</div>
+        <div class="bp">Drafts a reply for an agent to review, edit, and send in one click.</div>
+      </div>
+      <div class="bcard escalate">
+        <div class="bh">&lt; 55% → Escalate</div>
+        <div class="bp">Routes to the right human agent/queue with full context.</div>
+      </div>
+    </div>
+
+    <div class="pipe" style="margin-top:1rem;">
+      <div class="node">Agent workspace<span class="n-sub">reply · notes · resolve</span></div>
+      <span class="arrow">→</span>
+      <div class="node">Requester &amp; CSAT<span class="n-sub">reply reopens · rating</span></div>
+      <span class="arrow">→</span>
+      <div class="node audit">Audit chain<span class="n-sub">every step, hash-linked</span></div>
+    </div>
+    <p class="flow-note">Urgent tickets never auto-close, missed SLAs auto-escalate, and recurring incidents are clustered into Problems — all recorded in the tamper-proof audit chain.</p>
+  </section>
+
+  <!-- MODULES -->
+  <div class="section-heading">
+    <h2>What's inside — the modules</h2>
+    <p>A complete ITIL service-management suite, each enhanced with AI.</p>
+  </div>
+  <section class="mods">
+    <div class="mod"><div class="ic">🎫</div><h4>Incidents &amp; Requests</h4><p>AI triage, conversation threads, assignment, SLAs.</p></div>
+    <div class="mod"><div class="ic">🔁</div><h4>Problem Mgmt</h4><p>Root cause, known-error DB, AI clustering of repeats.</p></div>
+    <div class="mod"><div class="ic">📝</div><h4>Change Mgmt</h4><p>AI risk score + CAB approval state machine.</p></div>
+    <div class="mod"><div class="ic">🖥️</div><h4>Assets &amp; CMDB</h4><p>Inventory, CI dependency graph, impact analysis.</p></div>
+    <div class="mod"><div class="ic">📚</div><h4>Knowledge</h4><p>Versioned, embedded-on-write, powers the resolver.</p></div>
+    <div class="mod"><div class="ic">⚙️</div><h4>Automation</h4><p>When/if/then rules with safe dry-run preview.</p></div>
+    <div class="mod"><div class="ic">📈</div><h4>Analytics</h4><p>Deflection, MTTR, SLA %, CSAT, ROI + CSV export.</p></div>
+    <div class="mod"><div class="ic">🌐</div><h4>Self-service portal</h4><p>Help center search + catalog + instant resolve.</p></div>
+  </section>
+
+  <!-- UPGRADE COMPARISON -->
+  <div class="section-heading">
+    <h2>Upgraded from both ends</h2>
+    <p>How each capability moved forward versus where the two systems started.</p>
+  </div>
+  <section class="cmp">
+    <div class="crow head">
+      <div class="c dim">Dimension</div>
+      <div class="c hd">Helpdesk prototype</div>
+      <div class="c nl">Netlink ITSM</div>
+      <div class="c mg">Merged platform ★</div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Who resolves</div>
+      <div class="c hd">AI (incidents only)</div>
+      <div class="c nl">Humans only</div>
+      <div class="c mg"><strong>AI first, humans for exceptions</strong> — across all types</div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Modules</div>
+      <div class="c hd">Tickets + KB</div>
+      <div class="c nl">Full ITIL set</div>
+      <div class="c mg"><strong>Full ITIL set, each AI-enhanced</strong></div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Data layer</div>
+      <div class="c hd">Browser localStorage</div>
+      <div class="c nl">Postgres</div>
+      <div class="c mg"><strong>Postgres (Prisma)</strong> + zero-infra demo fallback</div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Auth &amp; roles</div>
+      <div class="c hd">None</div>
+      <div class="c nl">JWT / SSO / RBAC</div>
+      <div class="c mg"><strong>Entra ID SSO + RBAC</strong> + impersonation</div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Audit</div>
+      <div class="c hd">Tamper-proof chain</div>
+      <div class="c nl">Editable log table</div>
+      <div class="c mg"><strong>Tamper-proof chain, per tenant, server-side</strong></div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Channels</div>
+      <div class="c hd">In-app only</div>
+      <div class="c nl">Portal / email</div>
+      <div class="c mg"><strong>Email · Teams · portal · webhooks</strong> (one pipeline)</div>
+    </div>
+    <div class="crow">
+      <div class="c dim">Automation</div>
+      <div class="c hd">None</div>
+      <div class="c nl">Basic rules</div>
+      <div class="c mg"><strong>Rules engine + scheduled jobs</strong> (SLA, auto-close)</div>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <div class="section-heading">
+    <h2>Architecture in brief</h2>
+    <p>One Next.js application, designed so the same code runs as a zero-infra demo or against full Azure infrastructure.</p>
+  </div>
+  <section class="arch">
+    <div class="layer"><span class="lbl">Frontend</span><div><span class="chip">Agent workspace</span><span class="chip">Requester portal</span><span class="chip">Module pages</span><span class="chip">Analytics</span></div></div>
+    <div class="layer"><span class="lbl">API</span><div><span class="chip">REST /api/v1</span><span class="chip">Auth.js (Entra SSO)</span><span class="chip">RBAC</span><span class="chip">Rate limiting</span></div></div>
+    <div class="layer"><span class="lbl">Domain services</span><div><span class="chip">Tickets</span><span class="chip">Problems</span><span class="chip">Changes</span><span class="chip">Assets/CMDB</span><span class="chip">SLA</span><span class="chip">Automation</span><span class="chip">Audit chain</span></div></div>
+    <div class="layer"><span class="lbl">AI</span><div><span class="chip">Embeddings + vector search</span><span class="chip">Resolver</span><span class="chip">Azure OpenAI / Gemini / Groq</span><span class="chip">offline fallback</span></div></div>
+    <div class="layer"><span class="lbl">Persistence</span><div><span class="chip">DataStore port</span><span class="chip">Postgres + Prisma</span><span class="chip">in-memory/JSON (demo)</span></div></div>
+    <div class="layer"><span class="lbl">Background</span><div><span class="chip">Scheduler</span><span class="chip">SLA sweep</span><span class="chip">Auto-close</span><span class="chip">Email poll</span></div></div>
+    <div class="layer"><span class="lbl">Channels</span><div><span class="chip">M365 Graph email</span><span class="chip">Teams</span><span class="chip">Webhooks</span><span class="chip">Notifications</span></div></div>
+  </section>
+
+  <p class="foot">
+    Netlink Support — Project Overview · companions:
+    <a href="./comparison.html">comparison.html</a> ·
+    <a href="./gaps.html">gaps.html</a> ·
+    <a href="./workflow-design.html">workflow-design.html</a>
+  </p>
+
+</div>
+</body>
+</html>

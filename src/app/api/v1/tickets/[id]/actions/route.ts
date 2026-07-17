@@ -1,0 +1,87 @@
+import { currentActor } from "@/server/context";
+import { fail, ok, readJson } from "@/server/http";
+import { can, isAgentRole } from "@/server/auth/rbac";
+import {
+  agentClose,
+  agentResolve,
+  assignTicket,
+  reopenTicket,
+  submitFeedback,
+} from "@/server/services/agentActions";
+import { acceptSuggestion, resolveTicket } from "@/server/ai/resolver";
+import { getTicket } from "@/server/services/ticketService";
+import type { Role } from "@/server/domain/models";
+
+// =============================================================================
+// POST /api/v1/tickets/[id]/actions — ticket lifecycle actions.
+//
+// One endpoint dispatching by `action`: assign, resolve, close, reopen,
+// accept_suggestion, run_ai (agents, gated by the relevant permission) and
+// reopen/feedback (requesters, on their own tickets). Each action delegates to
+// the matching service and returns the updated ticket.
+// =============================================================================
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+interface ActionBody {
+  action: "assign" | "resolve" | "close" | "reopen" | "feedback" | "run_ai" | "accept_suggestion";
+  assigneeId?: string | null;
+  assignmentGroupId?: string | null;
+  reply?: string;
+  resolutionNotes?: string;
+  satisfaction?: "satisfied" | "unsatisfied";
+  comment?: string;
+}
+
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const body = await readJson<ActionBody>(req);
+  if (!body?.action) return fail("action is required.");
+  const actor = await currentActor(req);
+  const role = actor.role as Role;
+
+  // Requesters may only reopen or give feedback on their own tickets.
+  if (!isAgentRole(role)) {
+    if (body.action !== "reopen" && body.action !== "feedback") return fail("Forbidden.", 403);
+    const ticket = await getTicket(id);
+    if (!ticket) return fail("Ticket not found.", 404);
+    if (ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()) {
+      return fail("Forbidden.", 403);
+    }
+    // Governance: a cancelled ticket (e.g. a rejected service request) cannot
+    // be resurrected by its requester — that would bypass the approval flow.
+    if (ticket.status === "cancelled") {
+      return fail("This request was cancelled. Please raise a new request instead.", 403);
+    }
+  }
+
+  switch (body.action) {
+    case "assign":
+      if (!can(role, "ticket.assign")) return fail("Forbidden.", 403);
+      return respond(await assignTicket(id, body.assigneeId ?? null, actor, body.assignmentGroupId));
+    case "resolve":
+      if (!can(role, "ticket.resolve")) return fail("Forbidden.", 403);
+      return respond(await agentResolve(id, actor, body.reply, body.resolutionNotes));
+    case "close":
+      if (!can(role, "ticket.resolve")) return fail("Forbidden.", 403);
+      return respond(await agentClose(id, actor));
+    case "reopen":
+      return respond(await reopenTicket(id, actor));
+    case "feedback":
+      if (!body.satisfaction) return fail("satisfaction is required for feedback.");
+      return respond(await submitFeedback(id, body.satisfaction, body.comment));
+    case "run_ai":
+      if (!can(role, "ticket.write")) return fail("Forbidden.", 403);
+      return respond(await resolveTicket(id));
+    case "accept_suggestion":
+      if (!can(role, "ticket.resolve")) return fail("Forbidden.", 403);
+      return respond(await acceptSuggestion(id, actor.name));
+    default:
+      return fail("Unknown action.");
+  }
+}
+
+function respond<T>(result: T | null) {
+  return result ? ok(result) : fail("Ticket not found.", 404);
+}

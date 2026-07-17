@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.github
+.data
+.data-test
+.env
+.env.local
+npm-debug.log*
+*.md
+comparison.html
+gaps.html
+workflow*.html

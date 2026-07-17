@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Helpdesk — Workflow Design for Netlink Software Group America</title>
+<!-- 2D layered architecture · swimlane · scenarios · integrations · KPIs -->
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8faff;
+    --border: #e4e8f3;
+    --text: #0f172a;
+    --text-secondary: #334155;
+    --muted: #64748b;
+    --brand: #6366f1;
+    --brand-dark: #4338ca;
+    --gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 55%, #ec4899 100%);
+    --gradient-soft: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 55%, #fdf2f8 100%);
+    --success-bg: #d1fae5;  --success-fg: #047857;  --success: #10b981;
+    --warning-bg: #fef3c7;  --warning-fg: #b45309;  --warning: #f59e0b;
+    --danger-bg:  #fee2e2;  --danger-fg:  #b91c1c;  --danger:  #ef4444;
+    --info-bg:    #dbeafe;  --info-fg:    #1d4ed8;  --info:    #3b82f6;
+
+    /* layer colors for the 3D stack */
+    --L1: #ec4899; --L1d: #be185d;
+    --L2: #f59e0b; --L2d: #b45309;
+    --L3: #6366f1; --L3d: #4338ca;
+    --L4: #10b981; --L4d: #047857;
+    --L5: #06b6d4; --L5d: #0e7490;
+    --L6: #64748b; --L6d: #334155;
+
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.05);
+    --shadow-md: 0 6px 18px -4px rgba(15,23,42,0.08), 0 2px 6px rgba(15,23,42,0.05);
+    --shadow-brand: 0 10px 30px -10px rgba(99,102,241,0.45);
+    --shadow-3d: 0 25px 60px -20px rgba(15,23,42,0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+  }
+  body {
+    background-image:
+      radial-gradient(900px 500px at 15% -10%, rgba(99,102,241,0.10), transparent 60%),
+      radial-gradient(800px 450px at 100% 0%,  rgba(236,72,153,0.08), transparent 65%),
+      radial-gradient(700px 500px at 50% 110%, rgba(6,182,212,0.07), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+  .container { max-width: 1180px; margin: 0 auto; }
+
+  /* ===================== HERO ===================== */
+  .hero {
+    background: var(--gradient);
+    border-radius: 1.25rem;
+    padding: 2.2rem 2.4rem;
+    color: #fff;
+    box-shadow: var(--shadow-md);
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(600px 280px at 100% 0%, rgba(255,255,255,0.18), transparent 60%);
+    pointer-events: none;
+  }
+  .hero .eyebrow {
+    font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(255,255,255,0.85); margin-bottom: 0.5rem;
+  }
+  .hero h1 {
+    margin: 0; font-size: 2.1rem; font-weight: 800;
+    letter-spacing: -0.025em;
+  }
+  .hero .company {
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.28);
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.75rem; font-weight: 700;
+    letter-spacing: 0.05em;
+    display: inline-block;
+    margin-bottom: 0.6rem;
+  }
+  .hero p {
+    margin: 0.6rem 0 0;
+    font-size: 1rem;
+    color: rgba(255,255,255,0.92);
+    max-width: 760px;
+  }
+  .score-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.9rem;
+    margin: 1.4rem 0 0;
+  }
+  .score {
+    background: rgba(255,255,255,0.13);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 0.8rem;
+    padding: 0.75rem 0.9rem;
+    backdrop-filter: blur(6px);
+  }
+  .score .label {
+    font-size: 0.65rem; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+  }
+  .score .val {
+    margin-top: 0.2rem;
+    font-size: 1.2rem; font-weight: 800; color: #fff;
+  }
+
+  /* ===================== SECTION HEADING ===================== */
+  .section-heading { margin: 2.6rem 0 1.2rem; }
+  .section-heading h2 {
+    margin: 0;
+    font-size: 1.45rem; font-weight: 800;
+    letter-spacing: -0.02em;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .section-heading p {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  /* ===================== 2D LAYERED STACK ===================== */
+  .stage-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    padding: 1.6rem 1.5rem 1.4rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .stack-2d {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  .layer-row {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 16px;
+    align-items: stretch;
+  }
+  .layer-side {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .layer-side .pill {
+    display: inline-block;
+    font-size: 0.62rem; font-weight: 800;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    color: #fff;
+    width: fit-content;
+    margin-bottom: 0.35rem;
+  }
+  .layer-side h4 {
+    margin: 0 0 0.2rem;
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .layer-side p {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+  .layer {
+    border-radius: 14px;
+    padding: 0.9rem 1.1rem 1rem;
+    color: #fff;
+    box-shadow: var(--shadow-md);
+    position: relative;
+    overflow: hidden;
+  }
+  .layer::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.16), transparent 45%);
+    pointer-events: none;
+  }
+  .layer .lbl {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px;
+    position: relative;
+  }
+  .layer .lbl .num {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.22);
+    border: 1px solid rgba(255,255,255,0.35);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 0.85rem;
+  }
+  .layer .lbl .name {
+    font-size: 0.92rem; font-weight: 800; letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .layer .nodes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    position: relative;
+  }
+  .node {
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.32);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .node .dot {
+    width: 7px; height: 7px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.85);
+    flex-shrink: 0;
+  }
+
+  /* per-layer gradient colors */
+  .L1 { background: linear-gradient(135deg, var(--L1) 0%, var(--L1d) 100%); }
+  .L2 { background: linear-gradient(135deg, var(--L2) 0%, var(--L2d) 100%); }
+  .L3 { background: linear-gradient(135deg, var(--L3) 0%, var(--L3d) 100%); }
+  .L4 { background: linear-gradient(135deg, var(--L4) 0%, var(--L4d) 100%); }
+  .L5 { background: linear-gradient(135deg, var(--L5) 0%, var(--L5d) 100%); }
+  .L6 { background: linear-gradient(135deg, var(--L6) 0%, var(--L6d) 100%); }
+
+  .SL1 .pill { background: var(--L1d); }
+  .SL2 .pill { background: var(--L2d); }
+  .SL3 .pill { background: var(--L3d); }
+  .SL4 .pill { background: var(--L4d); }
+  .SL5 .pill { background: var(--L5d); }
+  .SL6 .pill { background: var(--L6d); }
+
+  /* down-arrow connector between layers */
+  .layer-arrow {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 16px;
+    align-items: center;
+    height: 28px;
+  }
+  .layer-arrow .spacer { /* empty cell under the side label */ }
+  .layer-arrow .down {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%;
+    color: var(--brand);
+    font-size: 1.4rem; font-weight: 900;
+    opacity: 0.55;
+    line-height: 1;
+  }
+
+  .stage-legend {
+    display: flex; flex-wrap: wrap; gap: 0.5rem;
+    justify-content: center;
+    margin-top: 1.1rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .stage-legend .pill {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+
+  /* ===================== 2D SWIMLANE ===================== */
+  .swim {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    padding: 1.2rem;
+    box-shadow: var(--shadow-sm);
+    overflow-x: auto;
+  }
+  .swim-grid {
+    display: grid;
+    grid-template-columns: 150px repeat(8, minmax(110px, 1fr));
+    grid-auto-rows: minmax(70px, auto);
+    gap: 6px;
+    min-width: 1080px;
+  }
+  .lane-head {
+    background: var(--gradient-soft);
+    border: 1px solid #e0e7ff;
+    border-radius: 10px;
+    display: flex; align-items: center;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--brand-dark);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .col-head {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0.45rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  .lane-cell { /* empty filler */ }
+  .step-cell {
+    border-radius: 10px;
+    padding: 0.55rem 0.7rem;
+    display: flex; flex-direction: column; justify-content: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+  }
+  .step-cell small {
+    display: block;
+    font-size: 0.66rem;
+    font-weight: 500;
+    opacity: 0.88;
+    margin-top: 2px;
+  }
+  .sc-req  { background: linear-gradient(135deg, #ec4899, #be185d); }
+  .sc-ch   { background: linear-gradient(135deg, #f59e0b, #b45309); }
+  .sc-ai   { background: linear-gradient(135deg, #6366f1, #4338ca); }
+  .sc-ag   { background: linear-gradient(135deg, #10b981, #047857); }
+  .sc-da   { background: linear-gradient(135deg, #64748b, #334155); }
+  .step-cell.arrow::after {
+    content: "→";
+    position: absolute;
+    right: -10px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--brand);
+    font-size: 1.1rem;
+    font-weight: 800;
+    opacity: 0.6;
+    z-index: 2;
+  }
+  .span-2 { grid-column: span 2; }
+
+  /* ===================== USE-CASE CARDS ===================== */
+  .cases {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+  .case {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1.15rem 1.2rem;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+  }
+  .case::before {
+    content: "";
+    position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: var(--gradient);
+  }
+  .case .ico {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: var(--gradient-soft);
+    color: var(--brand-dark);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    border: 1px solid #e0e7ff;
+    margin-bottom: 0.6rem;
+  }
+  .case h3 {
+    margin: 0 0 0.2rem;
+    font-size: 1rem; font-weight: 800;
+  }
+  .case .who {
+    font-size: 0.72rem; font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 0.05em; text-transform: uppercase;
+    margin-bottom: 0.7rem;
+  }
+  .case ol {
+    margin: 0 0 0.5rem;
+    padding-left: 1.1rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+  }
+  .case ol li { margin: 0.2rem 0; line-height: 1.45; }
+  .case .out {
+    margin-top: 0.6rem;
+    border-top: 1px dashed var(--border);
+    padding-top: 0.55rem;
+    font-size: 0.78rem;
+    color: var(--success-fg);
+    font-weight: 700;
+  }
+
+  /* ===================== INTEGRATION CONSTELLATION ===================== */
+  .integrations {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1.4rem 1.2rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .const-wrap {
+    position: relative;
+    height: 380px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .core {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 150px; height: 150px;
+    border-radius: 50%;
+    background: var(--gradient);
+    color: #fff;
+    box-shadow: var(--shadow-brand);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    font-weight: 800;
+    z-index: 2;
+  }
+  .core .t { font-size: 0.95rem; }
+  .core .s { font-size: 0.72rem; font-weight: 600; opacity: 0.9; margin-top: 4px; }
+  .sat {
+    position: absolute;
+    width: 130px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.55rem 0.65rem;
+    box-shadow: var(--shadow-sm);
+    font-size: 0.78rem;
+    font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sat small {
+    display: block;
+    font-size: 0.66rem;
+    font-weight: 500;
+    color: var(--muted);
+  }
+  .sat .dot {
+    width: 10px; height: 10px; border-radius: 999px; flex-shrink: 0;
+  }
+  .sat.azure  .dot { background: #0078d4; }
+  .sat.teams  .dot { background: #5059c9; }
+  .sat.conf   .dot { background: #1868db; }
+  .sat.jira   .dot { background: #0052cc; }
+  .sat.snow   .dot { background: #62d84e; }
+  .sat.intune .dot { background: #00bcf2; }
+  .sat.slack  .dot { background: #e01e5a; }
+  .sat.sf     .dot { background: #00a1e0; }
+
+  /* arrange satellites around the core */
+  .s1 { left: 0;        top: 8%; }
+  .s2 { left: 40%;      top: -4%; }
+  .s3 { right: 0;       top: 8%; }
+  .s4 { right: -2%;     top: 44%; }
+  .s5 { right: 0;       bottom: 8%; }
+  .s6 { left: 40%;      bottom: -4%; }
+  .s7 { left: 0;        bottom: 8%; }
+  .s8 { left: -2%;      top: 44%; }
+
+  .const-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  /* ===================== KPI ROW ===================== */
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.9rem;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1rem 1.1rem;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi::before {
+    content: "";
+    position: absolute; right: -30px; top: -30px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: var(--gradient-soft);
+    opacity: 0.5;
+  }
+  .kpi .label {
+    font-size: 0.65rem; font-weight: 800;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted);
+    position: relative;
+  }
+  .kpi .val {
+    margin-top: 0.2rem;
+    font-size: 1.7rem;
+    font-weight: 800;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    position: relative;
+  }
+  .kpi .desc {
+    margin-top: 0.15rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    position: relative;
+  }
+
+  /* ===================== FOOTER ===================== */
+  .foot {
+    margin-top: 2.5rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .foot a {
+    color: var(--brand-dark);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  /* ===================== MOBILE ===================== */
+  @media (max-width: 980px) {
+    .score-strip { grid-template-columns: repeat(2, 1fr); }
+    .layer-row,
+    .layer-arrow { grid-template-columns: 1fr; gap: 8px; }
+    .layer-arrow { height: auto; }
+    .layer-arrow .spacer { display: none; }
+    .layer .nodes { grid-template-columns: repeat(2, 1fr); }
+    .cases { grid-template-columns: 1fr; }
+    .kpis  { grid-template-columns: repeat(2, 1fr); }
+    .const-wrap { height: auto; min-height: 460px; }
+    .hero h1 { font-size: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="eyebrow">Workflow Design · Tailored Build</div>
+    <span class="company">For Netlink Software Group America, Inc.</span>
+    <h1>An AI-first helpdesk for Netlink — how it should actually work.</h1>
+    <p>
+      A complete operating picture for Netlink's internal IT &amp; HR support and
+      its managed-services client desks. Below: a layered architecture, an end-to-end
+      swimlane, the three primary scenarios at Netlink, and the integration map for the
+      tools you already run on (Azure AD, Microsoft 365, Teams, Confluence, Jira, ServiceNow).
+    </p>
+
+    <div class="score-strip">
+      <div class="score"><div class="label">Audience</div><div class="val">Internal + MSP clients</div></div>
+      <div class="score"><div class="label">Target deflection</div><div class="val">60–80% L1</div></div>
+      <div class="score"><div class="label">Compliance ready</div><div class="val">SOC 2 · ISO 27001</div></div>
+      <div class="score"><div class="label">Time-to-pilot</div><div class="val">~6 weeks</div></div>
+    </div>
+  </header>
+
+  <!-- ===================== 2D LAYERED STACK ===================== -->
+  <div class="section-heading">
+    <h2>The layered architecture — six layers, one pipeline</h2>
+    <p>Every ticket flows top → bottom through these layers. Each layer is independent, so any piece can be swapped without touching the others.</p>
+  </div>
+
+  <section class="stage-wrap">
+    <div class="stack-2d">
+
+      <!-- Layer 1: Channels -->
+      <div class="layer-row">
+        <aside class="layer-side SL1">
+          <span class="pill">Layer 1</span>
+          <h4>Where tickets come from</h4>
+          <p>Email, Teams, portal, chat, plus existing helpdesks (Zendesk/SNOW) for migration.</p>
+        </aside>
+        <div class="layer L1">
+          <div class="lbl"><span class="num">1</span><span class="name">Channels</span></div>
+          <div class="nodes">
+            <div class="node"><span class="dot"></span>Outlook email</div>
+            <div class="node"><span class="dot"></span>Teams bot</div>
+            <div class="node"><span class="dot"></span>Web portal</div>
+            <div class="node"><span class="dot"></span>Chat widget</div>
+            <div class="node"><span class="dot"></span>Zendesk webhook</div>
+            <div class="node"><span class="dot"></span>ServiceNow webhook</div>
+            <div class="node"><span class="dot"></span>Jira SM</div>
+            <div class="node"><span class="dot"></span>Phone / Twilio</div>
+            <div class="node"><span class="dot"></span>REST API</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-arrow"><div class="spacer"></div><div class="down">↓</div></div>
+
+      <!-- Layer 2: Ingest & Normalize -->
+      <div class="layer-row">
+        <aside class="layer-side SL2">
+          <span class="pill">Layer 2</span>
+          <h4>Make every ticket look the same</h4>
+          <p>Normalize, redact PII, detect tenant + category + priority, dedup.</p>
+        </aside>
+        <div class="layer L2">
+          <div class="lbl"><span class="num">2</span><span class="name">Ingest &amp; Normalize</span></div>
+          <div class="nodes">
+            <div class="node"><span class="dot"></span>Webhook adapters</div>
+            <div class="node"><span class="dot"></span>Email parser</div>
+            <div class="node"><span class="dot"></span>PII redactor</div>
+            <div class="node"><span class="dot"></span>Tenant resolver</div>
+            <div class="node"><span class="dot"></span>Category classifier</div>
+            <div class="node"><span class="dot"></span>Priority detector</div>
+            <div class="node"><span class="dot"></span>Language detect</div>
+            <div class="node"><span class="dot"></span>Dedup &amp; merge</div>
+            <div class="node"><span class="dot"></span>Schema normalize</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-arrow"><div class="spacer"></div><div class="down">↓</div></div>
+
+      <!-- Layer 3: RAG Engine -->
+      <div class="layer-row">
+        <aside class="layer-side SL3">
+          <span class="pill">Layer 3</span>
+          <h4>The brain — retrieve, ground, answer</h4>
+          <p>Per-tenant KB search, grounded generation, citations, confidence score.</p>
+        </aside>
+        <div class="layer L3">
+          <div class="lbl"><span class="num">3</span><span class="name">RAG Engine</span></div>
+          <div class="nodes">
+            <div class="node"><span class="dot"></span>MiniLM embedder</div>
+            <div class="node"><span class="dot"></span>pgvector store</div>
+            <div class="node"><span class="dot"></span>kNN retrieval</div>
+            <div class="node"><span class="dot"></span>Grounded prompt</div>
+            <div class="node"><span class="dot"></span>Gemini / Llama</div>
+            <div class="node"><span class="dot"></span>Citation tagger</div>
+            <div class="node"><span class="dot"></span>Confidence scorer</div>
+            <div class="node"><span class="dot"></span>Hallucination guard</div>
+            <div class="node"><span class="dot"></span>Tenant KB scope</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-arrow"><div class="spacer"></div><div class="down">↓</div></div>
+
+      <!-- Layer 4: Decision & Routing -->
+      <div class="layer-row">
+        <aside class="layer-side SL4">
+          <span class="pill">Layer 4</span>
+          <h4>Decide and route</h4>
+          <p>Auto-resolve, draft for agent, or escalate — plus client-tier SLA &amp; assignment.</p>
+        </aside>
+        <div class="layer L4">
+          <div class="lbl"><span class="num">4</span><span class="name">Decision &amp; Routing</span></div>
+          <div class="nodes">
+            <div class="node"><span class="dot"></span>Auto-resolve ≥ 78%</div>
+            <div class="node"><span class="dot"></span>Suggest 55–78%</div>
+            <div class="node"><span class="dot"></span>Escalate &lt; 55%</div>
+            <div class="node"><span class="dot"></span>Urgent guardrail</div>
+            <div class="node"><span class="dot"></span>Skill-based assign</div>
+            <div class="node"><span class="dot"></span>Round-robin</div>
+            <div class="node"><span class="dot"></span>SLA timer start</div>
+            <div class="node"><span class="dot"></span>Client tier (Gold/Silver)</div>
+            <div class="node"><span class="dot"></span>Business-hours calendar</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-arrow"><div class="spacer"></div><div class="down">↓</div></div>
+
+      <!-- Layer 5: Action & Engagement -->
+      <div class="layer-row">
+        <aside class="layer-side SL5">
+          <span class="pill">Layer 5</span>
+          <h4>Close the loop</h4>
+          <p>Send replies, push to Jira/ServiceNow, notify Teams, capture CSAT.</p>
+        </aside>
+        <div class="layer L5">
+          <div class="lbl"><span class="num">5</span><span class="name">Action &amp; Engagement</span></div>
+          <div class="nodes">
+            <div class="node"><span class="dot"></span>Send reply</div>
+            <div class="node"><span class="dot"></span>Agent draft inbox</div>
+            <div class="node"><span class="dot"></span>Teams notify</div>
+            <div class="node"><span class="dot"></span>Slack notify</div>
+            <div class="node"><span class="dot"></span>Push to Jira/SNOW</div>
+            <div class="node"><span class="dot"></span>CSAT survey</div>
+            <div class="node"><span class="dot"></span>Status email</div>
+            <div class="node"><span class="dot"></span>Knowledge feedback</div>
+            <div class="node"><span class="dot"></span>Auto-close stale</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-arrow"><div class="spacer"></div><div class="down">↓</div></div>
+
+      <!-- Layer 6: Data, Audit & Observability -->
+      <div class="layer-row">
+        <aside class="layer-side SL6">
+          <span class="pill">Layer 6</span>
+          <h4>Remember &amp; prove it</h4>
+          <p>Postgres + hash-chained audit + observability = SOC 2 / ISO 27001 evidence.</p>
+        </aside>
+        <div class="layer L6">
+          <div class="lbl"><span class="num">6</span><span class="name">Data, Audit &amp; Observability</span></div>
+          <div class="nodes">
+            <div class="node"><span class="dot"></span>Postgres + pgvector</div>
+            <div class="node"><span class="dot"></span>SHA-256 audit chain</div>
+            <div class="node"><span class="dot"></span>Metrics warehouse</div>
+            <div class="node"><span class="dot"></span>Sentry errors</div>
+            <div class="node"><span class="dot"></span>Structured logs</div>
+            <div class="node"><span class="dot"></span>Rate-limit (Upstash)</div>
+            <div class="node"><span class="dot"></span>Backups + PITR</div>
+            <div class="node"><span class="dot"></span>SOC 2 evidence</div>
+            <div class="node"><span class="dot"></span>Data residency (US)</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="stage-legend">
+      <span class="pill">Top layer = entry point</span>
+      <span class="pill">Arrows = data flow direction</span>
+      <span class="pill">Bottom layer = source of truth</span>
+    </div>
+  </section>
+
+  <!-- ===================== 2D SWIMLANE ===================== -->
+  <div class="section-heading">
+    <h2>The 2D end-to-end flow — who does what, in order</h2>
+    <p>A flat swimlane that maps the same pipeline onto the actors. Read left to right.</p>
+  </div>
+
+  <section class="swim">
+    <div class="swim-grid">
+      <!-- header row -->
+      <div class="lane-head">Lane</div>
+      <div class="col-head">T+0s</div>
+      <div class="col-head">T+1s</div>
+      <div class="col-head">T+2s</div>
+      <div class="col-head">T+3s</div>
+      <div class="col-head">T+4s</div>
+      <div class="col-head">T+5s</div>
+      <div class="col-head">Later</div>
+      <div class="col-head">Closed</div>
+
+      <!-- Requester lane -->
+      <div class="lane-head">Requester</div>
+      <div class="step-cell sc-req arrow">Submits request<small>email · Teams · portal</small></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="step-cell sc-req arrow">Receives reply<small>with citations</small></div>
+      <div class="step-cell sc-req arrow">Rates answer<small>satisfied / not</small></div>
+      <div class="step-cell sc-req">Resolved<small>or re-opens</small></div>
+
+      <!-- Channel lane -->
+      <div class="lane-head">Channel adapter</div>
+      <div class="lane-cell"></div>
+      <div class="step-cell sc-ch arrow">Normalize &amp; tag<small>tenant · category · priority</small></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+
+      <!-- Helpdesk AI lane -->
+      <div class="lane-head">Helpdesk AI</div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="step-cell sc-ai arrow">Retrieve KB<small>pgvector kNN</small></div>
+      <div class="step-cell sc-ai arrow">Generate &amp; cite<small>grounded LLM</small></div>
+      <div class="step-cell sc-ai arrow">Score &amp; decide<small>auto · suggest · escalate</small></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+
+      <!-- Agent lane -->
+      <div class="lane-head">Agent</div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="lane-cell"></div>
+      <div class="step-cell sc-ag arrow">Reviews draft<small>if suggested</small></div>
+      <div class="step-cell sc-ag arrow">Approves or edits<small>sends reply</small></div>
+      <div class="step-cell sc-ag arrow">Handles escalations<small>direct work</small></div>
+      <div class="step-cell sc-ag">Updates KB<small>feedback loop</small></div>
+
+      <!-- Data & Audit lane -->
+      <div class="lane-head">Data &amp; Audit</div>
+      <div class="step-cell sc-da arrow">Persist ticket<small>Postgres</small></div>
+      <div class="step-cell sc-da arrow">Log event<small>hash-chain block</small></div>
+      <div class="step-cell sc-da arrow">Log retrieval<small>blocks 2–3</small></div>
+      <div class="step-cell sc-da arrow">Log decision<small>block 4</small></div>
+      <div class="step-cell sc-da arrow">Log reply<small>block 5</small></div>
+      <div class="step-cell sc-da arrow">Update SLA<small>timer</small></div>
+      <div class="step-cell sc-da arrow">Update metrics<small>warehouse</small></div>
+      <div class="step-cell sc-da">Audit verifiable<small>SOC 2 evidence</small></div>
+    </div>
+  </section>
+
+  <!-- ===================== NETLINK SCENARIOS ===================== -->
+  <div class="section-heading">
+    <h2>Three real scenarios at Netlink</h2>
+    <p>How the same engine serves very different parts of the business.</p>
+  </div>
+
+  <section class="cases">
+
+    <article class="case">
+      <div class="ico">💻</div>
+      <h3>Internal IT helpdesk</h3>
+      <div class="who">Netlink employees (US + India)</div>
+      <ol>
+        <li>Engineer emails <em>"VPN won't connect from home"</em>.</li>
+        <li>Tenant = <code>netlink-internal</code>; category = <em>Network</em>; priority = <em>medium</em>.</li>
+        <li>RAG hits the <em>Cisco AnyConnect troubleshooting</em> KB article.</li>
+        <li>Confidence 0.84 → <strong>auto-resolved</strong>: reply with 4-step fix + citation.</li>
+        <li>If still broken, requester clicks "Not satisfied" → escalates to IT Ops with full context.</li>
+      </ol>
+      <div class="out">Outcome: deflects ~70% of repeat L1 IT tickets.</div>
+    </article>
+
+    <article class="case">
+      <div class="ico">👥</div>
+      <h3>Internal HR helpdesk</h3>
+      <div class="who">Netlink employees · HR team</div>
+      <ol>
+        <li>New joiner asks <em>"How many days of casual leave do I get?"</em> via Teams bot.</li>
+        <li>Tenant = <code>netlink-hr</code>; category = <em>HR / Leave</em>; PII redacted.</li>
+        <li>RAG retrieves the Netlink leave policy (region-aware: US vs India).</li>
+        <li>Confidence 0.91 → <strong>auto-resolved</strong>: reply cites policy section.</li>
+        <li>Audit block records the exact policy version that answered — proof for HR disputes.</li>
+      </ol>
+      <div class="out">Outcome: HR answers 24×7, consistent policy interpretation.</div>
+    </article>
+
+    <article class="case">
+      <div class="ico">🏢</div>
+      <h3>Client managed-services desk</h3>
+      <div class="who">External MSP clients · Tier-1 / Tier-2</div>
+      <ol>
+        <li>Client raises <em>"Production job XYZ failed at 03:14"</em> in their portal.</li>
+        <li>Tenant = <code>acme-corp</code>; tier = <em>Gold (15-min SLA)</em>; priority = <em>high</em>.</li>
+        <li>RAG searches <strong>only Acme's KB</strong>; finds runbook RB-204.</li>
+        <li>Confidence 0.72 → <strong>drafted</strong>; assigned round-robin to Acme's pod in Bhopal.</li>
+        <li>Engineer approves in 4 min, reply sent, ticket auto-pushed back to client's Jira SM.</li>
+      </ol>
+      <div class="out">Outcome: Gold SLAs met, engineers spend time on real work.</div>
+    </article>
+
+  </section>
+
+  <!-- ===================== INTEGRATION CONSTELLATION ===================== -->
+  <div class="section-heading">
+    <h2>Plugs into the stack Netlink already runs</h2>
+    <p>Reuse identities, knowledge, and ticketing you've already paid for — no rip-and-replace.</p>
+  </div>
+
+  <section class="integrations">
+    <div class="const-wrap">
+      <svg class="const-svg" viewBox="0 0 800 380" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"  stop-color="#6366f1" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#ec4899" stop-opacity="0.55"/>
+          </linearGradient>
+        </defs>
+        <!-- core center ~ (400, 190) -->
+        <g stroke="url(#lg)" stroke-width="2" fill="none" stroke-dasharray="4 5">
+          <line x1="65"  y1="55"  x2="400" y2="190"/>
+          <line x1="400" y1="20"  x2="400" y2="190"/>
+          <line x1="735" y1="55"  x2="400" y2="190"/>
+          <line x1="735" y1="190" x2="400" y2="190"/>
+          <line x1="735" y1="325" x2="400" y2="190"/>
+          <line x1="400" y1="360" x2="400" y2="190"/>
+          <line x1="65"  y1="325" x2="400" y2="190"/>
+          <line x1="65"  y1="190" x2="400" y2="190"/>
+        </g>
+      </svg>
+
+      <div class="core">
+        <div class="t">Helpdesk</div>
+        <div class="s">RAG · Audit · API</div>
+      </div>
+
+      <div class="sat azure s1"><span class="dot"></span><div>Azure AD<small>SSO + SCIM</small></div></div>
+      <div class="sat teams s2"><span class="dot"></span><div>MS Teams<small>bot + notify</small></div></div>
+      <div class="sat conf  s3"><span class="dot"></span><div>Confluence<small>KB import</small></div></div>
+      <div class="sat jira  s4"><span class="dot"></span><div>Jira SM<small>2-way sync</small></div></div>
+      <div class="sat snow  s5"><span class="dot"></span><div>ServiceNow<small>webhook + push</small></div></div>
+      <div class="sat intune s6"><span class="dot"></span><div>Intune / M365<small>device context</small></div></div>
+      <div class="sat slack s7"><span class="dot"></span><div>Slack<small>client desks</small></div></div>
+      <div class="sat sf    s8"><span class="dot"></span><div>Salesforce<small>contact sync</small></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== KPI / ROI ===================== -->
+  <div class="section-heading">
+    <h2>What success looks like for Netlink</h2>
+    <p>The numbers we should track from week one, and the realistic targets at steady state.</p>
+  </div>
+
+  <section class="kpis">
+    <div class="kpi">
+      <div class="label">Deflection rate</div>
+      <div class="val">60–80%</div>
+      <div class="desc">L1 tickets auto-resolved end-to-end across IT, HR &amp; client desks.</div>
+    </div>
+    <div class="kpi">
+      <div class="label">First response</div>
+      <div class="val">&lt; 30 s</div>
+      <div class="desc">Median time from ticket receipt to first reply (AI or agent draft).</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Containment</div>
+      <div class="val">~90%</div>
+      <div class="desc">Tickets where the bot at least drafted an answer — agents start from "edit", not "blank".</div>
+    </div>
+    <div class="kpi">
+      <div class="label">SLA breach rate</div>
+      <div class="val">&lt; 2%</div>
+      <div class="desc">For Gold-tier MSP clients with 15-min response SLAs.</div>
+    </div>
+    <div class="kpi">
+      <div class="label">CSAT</div>
+      <div class="val">≥ 4.4 / 5</div>
+      <div class="desc">Post-resolution survey, weighted across internal + external desks.</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Audit integrity</div>
+      <div class="val">100%</div>
+      <div class="desc">Hash chain verifies clean on every nightly job — SOC 2 evidence.</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Hours saved / wk</div>
+      <div class="val">~120 h</div>
+      <div class="desc">Across a 25-engineer L1 pool — billable hours unlocked.</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Pilot ROI</div>
+      <div class="val">&lt; 3 mo</div>
+      <div class="desc">Payback vs. licensed alternatives (Zendesk + Fin + add-ons).</div>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <p class="foot">
+    Helpdesk — Workflow Design for <strong>Netlink Software Group America, Inc.</strong> ·
+    companion to <a href="./workflow.html">workflow.html</a> and
+    <a href="./gaps.html">gaps.html</a>.
+  </p>
+
+</div>
+</body>
+</html>

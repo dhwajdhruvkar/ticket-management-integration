@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Helpdesk — How It Works</title>
+<style>
+  :root {
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8faff;
+    --border: #e4e8f3;
+    --text: #0f172a;
+    --text-secondary: #334155;
+    --muted: #64748b;
+    --brand: #6366f1;
+    --brand-dark: #4338ca;
+    --gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 55%, #ec4899 100%);
+    --gradient-soft: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 55%, #fdf2f8 100%);
+    --success-bg: #d1fae5;  --success-fg: #047857;  --success: #10b981;
+    --warning-bg: #fef3c7;  --warning-fg: #b45309;  --warning: #f59e0b;
+    --danger-bg:  #fee2e2;  --danger-fg:  #b91c1c;  --danger:  #ef4444;
+    --info-bg:    #dbeafe;  --info-fg:    #1d4ed8;  --info:    #3b82f6;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.05);
+    --shadow-md: 0 6px 18px -4px rgba(15,23,42,0.08), 0 2px 6px rgba(15,23,42,0.05);
+    --shadow-brand: 0 10px 30px -10px rgba(99,102,241,0.45);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.55;
+  }
+
+  body {
+    background-image:
+      radial-gradient(900px 500px at 15% -10%, rgba(99,102,241,0.10), transparent 60%),
+      radial-gradient(800px 450px at 100% 0%,  rgba(236,72,153,0.08), transparent 65%),
+      radial-gradient(700px 500px at 50% 110%, rgba(6,182,212,0.07), transparent 60%);
+    background-attachment: fixed;
+    min-height: 100vh;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+
+  .container { max-width: 1080px; margin: 0 auto; }
+
+  /* ----- Hero ----- */
+  .hero {
+    background: var(--gradient);
+    border-radius: 1.25rem;
+    padding: 2.2rem 2.4rem;
+    color: #fff;
+    box-shadow: var(--shadow-md);
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: radial-gradient(600px 280px at 100% 0%, rgba(255,255,255,0.18), transparent 60%);
+    pointer-events: none;
+  }
+  .hero .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.85);
+    margin-bottom: 0.5rem;
+  }
+  .hero h1 {
+    margin: 0;
+    font-size: 2.1rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+  }
+  .hero p {
+    margin: 0.6rem 0 0;
+    font-size: 1rem;
+    color: rgba(255,255,255,0.92);
+    max-width: 680px;
+  }
+
+  /* ----- Section heading ----- */
+  .section-heading {
+    margin: 2.4rem 0 1.1rem;
+  }
+  .section-heading h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .section-heading p {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  /* ----- Pipeline (the main visual) ----- */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+    align-items: stretch;
+    margin-bottom: 1rem;
+  }
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1.1rem 1.1rem 1.2rem;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    z-index: 1;
+  }
+  .step + .step { margin-left: -10px; }
+  .step .num {
+    width: 30px; height: 30px;
+    border-radius: 999px;
+    background: var(--gradient);
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.85rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    box-shadow: var(--shadow-brand);
+    margin-bottom: 0.6rem;
+  }
+  .step h3 {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+  }
+  .step p {
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* Arrows between steps */
+  .arrows {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    margin: -22px 0 0;
+    pointer-events: none;
+  }
+  .arrows .arrow {
+    height: 22px;
+    position: relative;
+    grid-column-end: span 1;
+  }
+  .arrows .arrow:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    right: -10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--brand);
+    font-weight: 900;
+    font-size: 1.4rem;
+    opacity: 0.55;
+  }
+
+  /* ----- Decision branches ----- */
+  .branches {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+  .branch {
+    border-radius: 1rem;
+    padding: 1.15rem 1.2rem;
+    border: 1px solid;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+  }
+  .branch.success { background: var(--success-bg); border-color: #a7f3d0; }
+  .branch.warning { background: var(--warning-bg); border-color: #fde68a; }
+  .branch.danger  { background: var(--danger-bg);  border-color: #fecaca; }
+
+  .branch .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    margin-bottom: 0.6rem;
+  }
+  .branch.success .badge { background: var(--success); color: #fff; }
+  .branch.warning .badge { background: var(--warning); color: #fff; }
+  .branch.danger  .badge { background: var(--danger);  color: #fff; }
+
+  .branch h3 {
+    margin: 0 0 0.4rem;
+    font-size: 1rem;
+    font-weight: 800;
+  }
+  .branch.success h3 { color: var(--success-fg); }
+  .branch.warning h3 { color: var(--warning-fg); }
+  .branch.danger  h3 { color: var(--danger-fg); }
+
+  .branch p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+  .branch .threshold {
+    margin-top: 0.7rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    opacity: 0.75;
+    font-family: ui-monospace, monospace;
+  }
+
+  /* ----- Example walkthrough ----- */
+  .example {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1rem;
+    padding: 1.3rem 1.5rem;
+    box-shadow: var(--shadow-sm);
+  }
+  .example .row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 1rem;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+  }
+  .example .row:last-child { border-bottom: none; }
+  .example .row .k {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 2px;
+  }
+  .example .row .v {
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .example .v code {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.4rem;
+    border-radius: 5px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.82rem;
+  }
+  .example .row .v.success { color: var(--success-fg); font-weight: 700; }
+
+  /* ----- Audit trail card ----- */
+  .audit {
+    background: var(--gradient-soft);
+    border: 1px solid #c7d2fe;
+    border-radius: 1rem;
+    padding: 1.3rem 1.5rem;
+    box-shadow: var(--shadow-sm);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1.1rem;
+    align-items: center;
+  }
+  .audit .icon {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    background: var(--gradient);
+    color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 1.7rem;
+    box-shadow: var(--shadow-brand);
+  }
+  .audit h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--brand-dark);
+  }
+  .audit p {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+  }
+
+  /* ----- Footer ----- */
+  .foot {
+    margin-top: 2.5rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .foot a {
+    color: var(--brand-dark);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  /* ----- Mobile ----- */
+  @media (max-width: 880px) {
+    .pipeline { grid-template-columns: 1fr; gap: 0.7rem; }
+    .step + .step { margin-left: 0; }
+    .arrows { display: none; }
+    .branches { grid-template-columns: 1fr; }
+    .example .row { grid-template-columns: 1fr; gap: 0.25rem; }
+    .audit { grid-template-columns: 1fr; text-align: center; }
+    .audit .icon { margin: 0 auto; }
+    .hero h1 { font-size: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <div class="eyebrow">How Helpdesk Works</div>
+    <h1>From ticket to answer in seconds — automatically.</h1>
+    <p>
+      Helpdesk takes incoming tickets, searches your knowledge base, writes a grounded answer,
+      and decides whether to send it, draft it for an agent, or escalate to a human.
+      Every step is logged in a tamper-proof audit trail.
+    </p>
+  </header>
+
+  <!-- ===================== PIPELINE ===================== -->
+  <div class="section-heading">
+    <h2>The 5-step pipeline</h2>
+    <p>Each ticket flows through these stages in order, every time.</p>
+  </div>
+
+  <section class="pipeline">
+    <div class="step">
+      <div class="num">1</div>
+      <h3>Ticket arrives</h3>
+      <p>A request comes in from email, the portal, or a connected helpdesk (Zendesk, Freshdesk) via webhook.</p>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <h3>Search the KB</h3>
+      <p>The assistant uses semantic search to find the most relevant knowledge base articles — by meaning, not just keywords.</p>
+    </div>
+    <div class="step">
+      <div class="num">3</div>
+      <h3>Write an answer</h3>
+      <p>An LLM (Groq · Llama 3.3 70B) writes a step-by-step reply using <em>only</em> the retrieved articles, with citations.</p>
+    </div>
+    <div class="step">
+      <div class="num">4</div>
+      <h3>Score confidence</h3>
+      <p>Blends how relevant the top match is with how far it beats the runner-up. Score is 0–100%.</p>
+    </div>
+    <div class="step">
+      <div class="num">5</div>
+      <h3>Decide &amp; act</h3>
+      <p>Auto-resolve, draft for an agent, or escalate to a human — based on the confidence score.</p>
+    </div>
+  </section>
+
+  <div class="arrows" aria-hidden="true">
+    <div class="arrow"></div>
+    <div class="arrow"></div>
+    <div class="arrow"></div>
+    <div class="arrow"></div>
+    <div class="arrow"></div>
+  </div>
+
+  <!-- ===================== DECISION BRANCHES ===================== -->
+  <div class="section-heading">
+    <h2>Three possible outcomes</h2>
+    <p>What happens at step 5 depends on the confidence score and a few safety guardrails.</p>
+  </div>
+
+  <section class="branches">
+    <div class="branch success">
+      <span class="badge">✓ Auto-resolved</span>
+      <h3>Send the reply, close the ticket</h3>
+      <p>The assistant is confident. The answer is delivered to the requester and the ticket is closed — no agent needed.</p>
+      <div class="threshold">confidence ≥ 78%</div>
+    </div>
+    <div class="branch warning">
+      <span class="badge">✎ Drafted for agent</span>
+      <h3>Save as a draft, wait for review</h3>
+      <p>The assistant has an answer but isn't sure enough. An agent reviews it, edits if needed, and sends.</p>
+      <div class="threshold">confidence 55–78%</div>
+    </div>
+    <div class="branch danger">
+      <span class="badge">↗ Escalated</span>
+      <h3>Send straight to a human</h3>
+      <p>No good match in the knowledge base. The ticket goes to a person to handle from scratch.</p>
+      <div class="threshold">confidence &lt; 55%</div>
+    </div>
+  </section>
+
+  <p style="margin: 0.9rem 0 0; font-size: 0.82rem; color: var(--muted);">
+    <strong style="color: var(--text);">Safety guardrail:</strong> tickets marked <em>urgent</em> are
+    never auto-closed — they're always at least drafted for a human, even when confidence is high.
+  </p>
+
+  <!-- ===================== EXAMPLE ===================== -->
+  <div class="section-heading">
+    <h2>A real example</h2>
+    <p>This is what actually happens when someone emails “I forgot my password”.</p>
+  </div>
+
+  <section class="example">
+    <div class="row">
+      <div class="k">Step 1 — Ticket</div>
+      <div class="v">
+        <code>Subject: I forgot my password</code> — sent by <code>alex@acme.com</code> via email.
+      </div>
+    </div>
+    <div class="row">
+      <div class="k">Step 2 — Search</div>
+      <div class="v">
+        Best match: <code>Reset your corporate password</code> (score 0.81). Runner-up:
+        <code>MFA device replacement</code> (score 0.42).
+      </div>
+    </div>
+    <div class="row">
+      <div class="k">Step 3 — Answer</div>
+      <div class="v">
+        “Go to <code>passwordreset.acme.local</code>, click <em>Forgot password</em>, complete
+        the MFA challenge… [1]” — written by the LLM, cites the article.
+      </div>
+    </div>
+    <div class="row">
+      <div class="k">Step 4 — Score</div>
+      <div class="v">
+        Relevance 0.81, dominance 0.39 → <strong>confidence 87%</strong>.
+      </div>
+    </div>
+    <div class="row">
+      <div class="k">Step 5 — Decision</div>
+      <div class="v success">✓ Auto-resolved — reply sent, ticket closed in 2.4 seconds.</div>
+    </div>
+  </section>
+
+  <!-- ===================== AUDIT TRAIL ===================== -->
+  <div class="section-heading">
+    <h2>Everything is logged</h2>
+    <p>Every action — receive, search, decide, send — gets a tamper-proof record.</p>
+  </div>
+
+  <section class="audit">
+    <div class="icon" aria-hidden="true">⛓</div>
+    <div>
+      <h3>Tamper-proof audit trail</h3>
+      <p>
+        Each event is hashed and chained to the previous one (like a blockchain). If anyone edits
+        a past record, the chain breaks and the system flags it on the Audit page — perfect for
+        compliance and disputes.
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <p class="foot">
+    Helpdesk — Ticket Auto-Resolution. Open the live app at
+    <a href="http://localhost:3000">localhost:3000</a>.
+  </p>
+
+</div>
+</body>
+</html>
