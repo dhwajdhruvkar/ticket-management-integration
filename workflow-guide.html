@@ -208,6 +208,8 @@
       <a href="#w24"><span class="n">24</span> Analytics &amp; reports</a>
       <a href="#w25"><span class="n">25</span> AI translation</a>
       <a href="#w26"><span class="n">26</span> Audit trail</a>
+      <a href="#w27"><span class="n">27</span> Attachments</a>
+      <a href="#w28"><span class="n">28</span> Email provider (Graph / Brevo)</a>
       <a href="#testing"><span class="n">A</span> Testing appendix</a>
       <a href="#reference"><span class="n">B</span> Reference tables</a>
     </div>
@@ -331,8 +333,11 @@ npm run dev
     <div class="wf-body">
       <p>
         The unified intake endpoint accepts portal/email/chat/API/phone/Teams/monitoring-alert payloads. Provider
-        webhooks (<code>/api/webhooks/{generic,zendesk,freshdesk,slack}</code>), M365 email polling, and a Teams bot all
-        feed the same pipeline. In demo mode you can act as any user with the <code>x-actor</code> header.
+        webhooks (<code>/api/webhooks/{generic,zendesk,freshdesk,slack,brevo}</code>), email (Microsoft&nbsp;365 polling
+        or Brevo Inbound Parsing), and a Teams bot all feed the same pipeline. Inbound provider webhooks are
+        HMAC-signed (generic/Zendesk/Freshdesk via <code>WEBHOOK_SECRET</code>, Slack via its v0 scheme, Brevo via a
+        shared token); the email backend is selected by <code>EMAIL_PROVIDER</code> (see workflow&nbsp;28). In demo mode
+        you can act as any user with the <code>x-actor</code> header.
       </p>
       <div class="test">
         <div class="test-h"><span class="who">Terminal (demo mode)</span> Test it</div>
@@ -404,7 +409,7 @@ npm run dev
         <li><strong>Access &amp; Identity</strong> → Access · <strong>Network Operations</strong> → Network · <strong>Endpoint &amp; Hardware</strong> → Hardware · <strong>Software &amp; Apps</strong> → Software</li>
         <li><strong>Service Desk</strong> (generalist) → IT, Billing, Other · <strong>People Operations</strong> → HR</li>
       </ul>
-      <p>Specialist groups use the <code>manual</code> strategy, so intake routes a ticket to the group but leaves it <em>unassigned</em> for the dispatcher.</p>
+      <p>Each group has an <strong>assignment strategy</strong>: <code>manual</code> (route to the group, leave it unassigned for the dispatcher — the default for specialists), <code>round_robin</code> (rotate through active members), or <code>least_loaded</code> (pick the member with the fewest open tickets). With an auto strategy, intake assigns an individual on the spot and notifies them; VIP requesters are prioritized. Change a group's strategy in <span class="chip where">Settings → Assignment groups</span>.</p>
       <div class="test">
         <div class="test-h"><span class="who">Sign in as Priya</span> Test it</div>
         <ol>
@@ -747,6 +752,49 @@ npm run dev
     </div>
   </div>
 
+  <!-- ===================== FILES & EMAIL ===================== -->
+  <div class="section-heading">
+    <h2>Files &amp; email delivery</h2>
+    <p>Ticket attachments and the pluggable email provider (Microsoft 365 or Brevo), both feeding the same pipeline.</p>
+  </div>
+
+  <div class="wf" id="w27">
+    <div class="wf-head"><span class="wf-num">27</span><h3>Attachments</h3><span class="new">new</span><span class="chip role">agent+ · requester</span></div>
+    <div class="wf-body">
+      <p>Upload files to a ticket — agents on any ticket, requesters on their own. Uploads are validated (MIME allow-list, size cap via <code>ATTACHMENT_MAX_BYTES</code>, executable-extension blocklist) and always download with <code>Content-Disposition: attachment</code> + <code>X-Content-Type-Options: nosniff</code> so nothing can execute in the app origin. Binaries live on local disk by default, or Azure Blob when <code>AZURE_STORAGE_CONNECTION_STRING</code> is set. Inbound email attachments are extracted and attached automatically.</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Sign in as Arjun</span> Test it</div>
+        <ol>
+          <li>Open a ticket; find the <strong>Attachments</strong> panel in the details column.</li>
+          <li>Click <strong>Attach</strong> and pick a file (e.g. a screenshot or PDF); it lists with its size.</li>
+          <li>Click the file to download it; try an <code>.exe</code> to see it rejected.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> allowed files upload and list; downloads force-save; blocked types return a clear error. Each add/remove is written to the audit chain.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wf" id="w28">
+    <div class="wf-head"><span class="wf-num">28</span><h3>Email provider switch (Graph / Brevo)</h3><span class="new">new</span><span class="chip where">EMAIL_PROVIDER</span></div>
+    <div class="wf-body">
+      <p>Email — both ingestion and outbound notifications — runs on either <strong>Microsoft&nbsp;365 (Graph)</strong> or <strong>Brevo</strong>, chosen by one env var. <code>EMAIL_PROVIDER = graph | brevo | none</code> (or <code>auto</code>, the default: prefer Brevo when a Brevo key is present, else Graph when Graph is configured, else record-only in the in-app feed). The switch flips <em>both</em> directions so they stay symmetric.</p>
+      <ul>
+        <li><strong>Graph = pull</strong> — the background scheduler polls the support mailbox.</li>
+        <li><strong>Brevo = push</strong> — Brevo Inbound Parsing POSTs parsed mail to <code>/api/webhooks/brevo</code>, authenticated by a shared <code>BREVO_INBOUND_SECRET</code> (<code>?token=</code> or the <code>x-brevo-secret</code> header). Attachment binaries are fetched with <code>BREVO_API_KEY</code>.</li>
+      </ul>
+      <p>Either way, mail runs the same ingestion: full HTML→text body, attachments, dedupe by <code>internetMessageId</code>, auto-reply/loop and per-sender spam guards, and reply threading (subject <code>[REF]</code> token, <code>In-Reply-To</code>/<code>References</code>, or conversation id).</p>
+      <div class="test">
+        <div class="test-h"><span class="who">Terminal (EMAIL_PROVIDER=brevo)</span> Test it</div>
+        <ol>
+          <li>Start the app with <code>EMAIL_PROVIDER=brevo</code> and <code>BREVO_INBOUND_SECRET</code> set.</li>
+          <li>POST a Brevo Inbound Parsing payload (an <code>items[]</code> array) to <code>/api/webhooks/brevo?token=&lt;secret&gt;</code>.</li>
+          <li>POST a second mail whose subject carries the ticket's <code>[INC-…]</code> token.</li>
+        </ol>
+        <div class="expect"><strong>Expect:</strong> the first mail creates a ticket via the <code>email</code> channel; the second threads onto it (no duplicate). When the provider isn't <code>brevo</code>, the route returns <code>503</code> — proof the switch disables the inactive path.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===================== TESTING APPENDIX ===================== -->
   <div class="section-heading" id="testing">
     <h2>A · Testing appendix</h2>
@@ -862,6 +910,8 @@ powershell -File scripts/e2e-smoke.ps1</code></pre>
         <tr><td><code>GEMINI_API_KEY</code> / <code>GROQ_API_KEY</code></td><td>Enable a real LLM; absent → offline heuristics.</td></tr>
         <tr><td><code>AUTH_MICROSOFT_ENTRA_ID_*</code></td><td>Entra ID SSO for production sign-in.</td></tr>
         <tr><td><code>MS_GRAPH_*</code> / <code>SLACK_*</code></td><td>Email polling, Teams, and Slack channels.</td></tr>
+        <tr><td><code>EMAIL_PROVIDER</code> / <code>BREVO_*</code></td><td><code>graph</code> · <code>brevo</code> · <code>none</code> (auto). Selects email in + out; Brevo needs <code>BREVO_API_KEY</code> + <code>BREVO_INBOUND_SECRET</code>.</td></tr>
+        <tr><td><code>AZURE_STORAGE_CONNECTION_STRING</code></td><td>Store attachments in Azure Blob (else local disk).</td></tr>
       </table>
     </div>
   </div>
@@ -871,6 +921,7 @@ powershell -File scripts/e2e-smoke.ps1</code></pre>
     <a href="./overview.html">overview.html</a> ·
     <a href="./workflow.html">workflow.html</a> ·
     <a href="./comparison.html">comparison.html</a> ·
+    <a href="./instruction.md">instruction.md</a> ·
     <a href="./README.md">README.md</a>
   </p>
 
