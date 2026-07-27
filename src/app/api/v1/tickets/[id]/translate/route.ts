@@ -1,9 +1,6 @@
-import { currentActor } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
-import { can, isAgentRole } from "@/server/auth/rbac";
-import { getTicket } from "@/server/services/ticketService";
+import { isResponse, loadTicket, requirePermission } from "@/server/guards";
 import { translateText } from "@/server/ai/aiService";
-import type { Role } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,16 +19,12 @@ interface TranslateBody {
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  const role = actor.role as Role;
-  if (!can(role, "ticket.read")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
 
-  const ticket = await getTicket(id);
-  if (!ticket) return fail("Ticket not found.", 404);
-  // Record security: requesters only ever act on their own tickets.
-  if (!isAgentRole(role) && ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()) {
-    return fail("Forbidden.", 403);
-  }
+  // Tenant scope for everyone; requesters additionally only see their own.
+  const ticket = await loadTicket(ctx, id);
+  if (isResponse(ticket)) return ticket;
 
   const body = await readJson<TranslateBody>(req);
   if (!body?.text?.trim() || !body?.targetLang?.trim()) {

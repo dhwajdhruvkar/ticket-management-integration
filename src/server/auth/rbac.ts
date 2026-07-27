@@ -15,10 +15,14 @@ export type Permission =
   | "ticket.resolve"
   | "kb.read"
   | "kb.write"
+  | "problem.read"
   | "problem.write"
+  | "change.read"
   | "change.write"
   | "change.approve"
+  | "asset.read"
   | "asset.write"
+  | "automation.read"
   | "automation.write"
   | "report.read"
   | "audit.read"
@@ -31,9 +35,13 @@ const AGENT: Permission[] = [
   "ticket.assign",
   "ticket.resolve",
   "kb.write",
+  "problem.read",
   "problem.write",
+  "change.read",
   "change.write",
+  "asset.read",
   "asset.write",
+  "automation.read",
   "audit.read",
   "report.read",
 ];

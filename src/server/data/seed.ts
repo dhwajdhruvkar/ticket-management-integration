@@ -752,6 +752,8 @@ export async function buildSeed(): Promise<SeedData> {
       tenantId,
       key: "cost_center",
       label: "Cost center",
+      description:
+        "The internal budget code this work is charged to. Finance uses it to attribute support costs back to the requesting team.",
       type: "text",
       options: [],
       required: false,
@@ -764,6 +766,8 @@ export async function buildSeed(): Promise<SeedData> {
       tenantId,
       key: "environment",
       label: "Environment",
+      description:
+        "Which environment the issue occurs in. Production issues are treated as higher urgency than staging or development.",
       type: "select",
       options: ["Production", "Staging", "Development"],
       required: false,

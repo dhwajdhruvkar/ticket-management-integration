@@ -1,14 +1,12 @@
-import { currentActor } from "@/server/context";
 import { fail, ok } from "@/server/http";
+import { actorContext, isResponse, loadTicket } from "@/server/guards";
 import { can, isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
-import { getStore } from "@/server/data";
 import {
   AttachmentError,
   listAttachments,
   saveAttachment,
 } from "@/server/services/attachmentService";
-import type { Role } from "@/server/domain/models";
 
 // =============================================================================
 // /api/v1/tickets/[id]/attachments
@@ -22,22 +20,17 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function guard(req: Request, ticketId: string, write: boolean) {
-  const actor = await currentActor(req);
-  const role = actor.role as Role;
-  const store = await getStore();
-  const ticket = await store.tickets.get(ticketId);
-  if (!ticket) return { error: fail("Ticket not found.", 404) };
+  const ctx = await actorContext(req);
+  // Tenant scope for everyone; requesters additionally only see their own.
+  const ticket = await loadTicket(ctx, ticketId);
+  if (isResponse(ticket)) return { error: ticket };
 
-  if (isAgentRole(role)) {
-    if (write && !can(role, "ticket.write")) return { error: fail("Forbidden.", 403) };
-    if (!write && !can(role, "ticket.read")) return { error: fail("Forbidden.", 403) };
-    return { actor, ticket };
+  if (isAgentRole(ctx.role)) {
+    const needed = write ? "ticket.write" : "ticket.read";
+    if (!can(ctx.role, needed)) return { error: fail("Forbidden.", 403) };
   }
-  // Requesters: own tickets only (read and upload both allowed).
-  if (ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()) {
-    return { error: fail("Forbidden.", 403) };
-  }
-  return { actor, ticket };
+  // Requesters may read and upload on their own tickets.
+  return { actor: ctx.actor, ticket };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {

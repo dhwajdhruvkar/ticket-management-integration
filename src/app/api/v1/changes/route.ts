@@ -1,8 +1,6 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 import { createChange, listChanges, type NewChangeInput } from "@/server/services/changeService";
-import type { Role } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,15 +12,15 @@ export const dynamic = "force-dynamic";
 // =============================================================================
 
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
-  return ok(await listChanges(tenantId));
+  const ctx = await requirePermission(req, "change.read");
+  if (isResponse(ctx)) return ctx;
+  return ok(await listChanges(ctx.tenantId));
 }
 
 export async function POST(req: Request) {
-  const tenantId = await currentTenantId(req);
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "change.write")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "change.write");
+  if (isResponse(ctx)) return ctx;
   const body = await readJson<NewChangeInput>(req);
   if (!body?.title || !body?.description) return fail("title and description are required.");
-  return ok(await createChange(tenantId, body), { status: 201 });
+  return ok(await createChange(ctx.tenantId, body), { status: 201 });
 }

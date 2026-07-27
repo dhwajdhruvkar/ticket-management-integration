@@ -34,6 +34,7 @@ export default function KBManager() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"all" | TicketCategory>("all");
   const [drawer, setDrawer] = useState<DrawerState>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const toast = useToast();
 
   const refresh = useCallback(() => {
@@ -73,7 +74,9 @@ export default function KBManager() {
   }, [articles, query, category]);
 
   async function remove(id: string) {
+    if (deleting) return;
     if (!confirm("Delete this article? It will be removed from the vector index.")) return;
+    setDeleting(id);
     try {
       await apiSend(`/kb/${id}`, "DELETE");
       setDrawer(null);
@@ -84,6 +87,8 @@ export default function KBManager() {
         title: "Could not delete article",
         description: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -759,12 +764,13 @@ function ArticleForm({
 
       <div style={{ flex: 1, overflow: "auto", padding: "1.25rem 1.35rem", display: "grid", gap: 14, alignContent: "start" }}>
         <div>
-          <label className="label" style={{ marginBottom: 6, display: "block" }}>Title</label>
-          <input className="input" placeholder="e.g. Reset your VPN password" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <label className="label" htmlFor="kb-title" style={{ marginBottom: 6, display: "block" }}>Title</label>
+          <input id="kb-title" className="input" placeholder="e.g. Reset your VPN password" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div>
-          <label className="label" style={{ marginBottom: 6, display: "block" }}>Content</label>
+          <label className="label" htmlFor="kb-content" style={{ marginBottom: 6, display: "block" }}>Content</label>
           <textarea
+            id="kb-content"
             className="textarea"
             rows={14}
             placeholder="Step-by-step instructions. Plain text — keep each step on its own line."
@@ -774,8 +780,8 @@ function ArticleForm({
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
           <div>
-            <label className="label" style={{ marginBottom: 6, display: "block" }}>Category</label>
-            <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <label className="label" htmlFor="kb-category" style={{ marginBottom: 6, display: "block" }}>Category</label>
+            <select id="kb-category" className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -784,8 +790,9 @@ function ArticleForm({
             </select>
           </div>
           <div>
-            <label className="label" style={{ marginBottom: 6, display: "block" }}>Tags</label>
+            <label className="label" htmlFor="kb-tags" style={{ marginBottom: 6, display: "block" }}>Tags</label>
             <input
+              id="kb-tags"
               className="input"
               placeholder="vpn, remote, password"
               value={tags}

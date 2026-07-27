@@ -15,6 +15,7 @@ import { resolveTicket } from "../ai/resolver";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
 import { notifyTemplate } from "../notify/templates";
+import { withRetry } from "../resilience";
 import { applySla } from "./slaService";
 import { requestTicketApproval } from "./approvalService";
 import { routeTicketToGroup } from "./groupService";
@@ -83,7 +84,8 @@ export async function intakeTicket(
   if (created.catalogItemId) {
     const store = await getStore();
     const item = await store.catalogItems.get(created.catalogItemId);
-    if (item?.requiresApproval) {
+    // A catalog id from another tenant must not drive this tenant's workflow.
+    if (item && item.tenantId === tenantId && item.requiresApproval) {
       await requestTicketApproval(created, item);
       return (await getTicket(created.id)) ?? created;
     }
@@ -104,7 +106,11 @@ export async function processTicketPipeline(
   const ticket = await getTicket(ticketId);
   if (!ticket) return;
 
-  await routeTicketToGroup(ticket).catch((err) => console.error("[routing] failed:", err));
+  await withRetry(() => routeTicketToGroup(ticket), {
+    step: "routing",
+    tenantId: ticket.tenantId,
+    ticketId,
+  });
   await runAutomationsSafe(ticket.tenantId, "ticket.created", ticketId);
 
   const afterRules = await getTicket(ticketId);
@@ -114,6 +120,10 @@ export async function processTicketPipeline(
     (afterRules.type === "incident" || afterRules.type === "service_request") &&
     opts.autoResolve !== false
   ) {
-    await resolveTicket(ticketId).catch((err) => console.error("[resolve] failed:", err));
+    await withRetry(() => resolveTicket(ticketId), {
+      step: "ai_triage",
+      tenantId: ticket.tenantId,
+      ticketId,
+    });
   }
 }

@@ -14,6 +14,7 @@ import { now } from "../domain/ids";
 import { derivePriority, priorityCode } from "../domain/priority";
 import { notifyTemplate } from "../notify/templates";
 import { addMessage, getTicket, mutateTicket } from "./ticketService";
+import { applySla } from "./slaService";
 import type {
   ImpactLevel,
   MessageVisibility,
@@ -186,18 +187,22 @@ export async function assignTicket(
   let assigneeEmail: string | null = null;
   if (assigneeId) {
     const user = await store.users.get(assigneeId);
-    assigneeName = user?.name ?? assigneeId;
-    assigneeEmail = user?.email ?? null;
+    // Assigning across tenants would hand another organisation's staff a
+    // ticket they can neither see nor action.
+    if (!user || user.tenantId !== ctx.tenantId) return null;
+    assigneeName = user.name;
+    assigneeEmail = user.email;
   }
 
   const patch: Partial<TicketRow> = { assigneeId };
   let groupClause = "";
   if (assignmentGroupId !== undefined) {
-    patch.assignmentGroupId = assignmentGroupId;
     if (assignmentGroupId) {
       const group = await store.groups.get(assignmentGroupId);
-      if (group) groupClause = ` in the ${group.name} group`;
+      if (!group || group.tenantId !== ctx.tenantId) return null;
+      groupClause = ` in the ${group.name} group`;
     }
+    patch.assignmentGroupId = assignmentGroupId;
   }
 
   const updated = await mutateTicket(ticketId, patch, {
@@ -293,10 +298,16 @@ export async function updateTicketFields(
     !!ctx.ticket.urgency &&
     patch.priority !== derivePriority(impact, urgency);
 
-  const updated = await mutateTicket(ticketId, next, {
+  let updated = await mutateTicket(ticketId, next, {
     type: "agent_action",
     message: `${by.name} updated ${changes.join(", ")}.`,
   });
+  // SLA targets are per priority, so an escalation has to move the deadlines
+  // with it; otherwise a P3-turned-P1 keeps a 24-hour window and reports green
+  // while it is already late.
+  if (updated && next.priority && next.priority !== ctx.ticket.priority) {
+    updated = await applySla(updated);
+  }
   await appendAudit({
     tenantId: ctx.tenantId,
     actor: `agent:${by.name}`,

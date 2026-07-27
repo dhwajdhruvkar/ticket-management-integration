@@ -1,6 +1,5 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 import {
   createAutomation,
   dryRun,
@@ -8,7 +7,6 @@ import {
   type Action,
   type RuleConditions,
 } from "@/server/services/automationService";
-import type { Role } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,23 +19,32 @@ export const dynamic = "force-dynamic";
 // validating its trigger.
 // =============================================================================
 
+const TRIGGERS = ["ticket.created", "ticket.updated", "sla.at_risk", "sla.breached"];
+
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
+  const ctx = await requirePermission(req, "automation.read");
+  if (isResponse(ctx)) return ctx;
   const url = new URL(req.url);
   const dryRunTicket = url.searchParams.get("dryRun");
   if (dryRunTicket) {
-    return ok(await dryRun(tenantId, dryRunTicket, url.searchParams.get("trigger") ?? "ticket.created"));
+    return ok(
+      await dryRun(ctx.tenantId, dryRunTicket, url.searchParams.get("trigger") ?? "ticket.created")
+    );
   }
-  return ok(await listAutomations(tenantId));
+  return ok(await listAutomations(ctx.tenantId));
 }
 
 export async function POST(req: Request) {
-  const tenantId = await currentTenantId(req);
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "automation.write")) return fail("Forbidden.", 403);
-  const body = await readJson<{ name: string; trigger: string; conditions: RuleConditions; actions: Action[]; enabled?: boolean }>(req);
+  const ctx = await requirePermission(req, "automation.write");
+  if (isResponse(ctx)) return ctx;
+  const body = await readJson<{
+    name: string;
+    trigger: string;
+    conditions: RuleConditions;
+    actions: Action[];
+    enabled?: boolean;
+  }>(req);
   if (!body?.name || !body?.trigger) return fail("name and trigger are required.");
-  const TRIGGERS = ["ticket.created", "ticket.updated", "sla.at_risk", "sla.breached"];
   if (!TRIGGERS.includes(body.trigger)) return fail(`trigger must be one of: ${TRIGGERS.join(", ")}.`);
-  return ok(await createAutomation(tenantId, body), { status: 201 });
+  return ok(await createAutomation(ctx.tenantId, body, ctx.actor.name), { status: 201 });
 }

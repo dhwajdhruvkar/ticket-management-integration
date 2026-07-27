@@ -7,8 +7,9 @@ import { signOut } from "next-auth/react";
 import { usePersona } from "@/components/Persona";
 import { useTheme } from "@/components/Theme";
 import { useToast } from "@/components/Toast";
-import { StatusBadge, timeAgo } from "@/components/ui";
+import { LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
 import { apiGet, apiSend } from "@/lib/api";
+import { HINTS } from "@/lib/hints";
 import type { TicketRow, TicketStatus, UserPreferences } from "@/server/domain/models";
 
 // =============================================================================
@@ -70,6 +71,8 @@ interface StatTile {
   icon: React.ReactNode;
   href?: string;
   trend?: string;
+  /** Hover explanation for the metric behind this tile. */
+  info?: string;
 }
 
 function toForm(me: Me): ProfileForm {
@@ -162,6 +165,7 @@ export default function ProfileView() {
           hint: rated.length ? `${rated.length} rated` : "no ratings yet",
           tone: "warning",
           icon: <StarIcon />,
+          info: HINTS.csat,
         },
       ];
     }
@@ -173,7 +177,15 @@ export default function ProfileView() {
       { key: "raised", label: "Requests raised", value: tickets.length, tone: "brand", icon: <InboxIcon />, href: "/tickets" },
       { key: "open", label: "Open", value: open, tone: "info", icon: <FolderIcon />, href: "/tickets" },
       { key: "resolved", label: "Resolved", value: resolved, tone: "success", icon: <CheckIcon />, href: "/tickets" },
-      { key: "auto", label: "Instantly solved", value: auto, hint: "by the assistant", tone: "warning", icon: <SparklesIcon /> },
+      {
+        key: "auto",
+        label: "Instantly solved",
+        value: auto,
+        hint: "by the assistant",
+        tone: "warning",
+        icon: <SparklesIcon />,
+        info: HINTS.instantlySolved,
+      },
     ];
   }, [tickets, isAgent, persona.id]);
 
@@ -511,6 +523,7 @@ export default function ProfileView() {
                     icon={<UserIcon />}
                     checked={me.available !== false}
                     onChange={(v) => void setAvailable(v)}
+                    info={HINTS.availableForTickets}
                   />
                 ) : null}
                 <Toggle
@@ -542,6 +555,7 @@ export default function ProfileView() {
                   icon={<DigestIcon />}
                   checked={preferences.weeklyDigest}
                   onChange={(v) => void setPref("weeklyDigest", v)}
+                  info={HINTS.weeklyDigest}
                 />
                 {REPORT_ROLES.includes(persona.serverRole) ? (
                   <Toggle
@@ -754,6 +768,7 @@ function StatTileCard({ tile, onNav }: { tile: StatTile; onNav?: () => void }) {
       type="button"
       onClick={onNav}
       disabled={!clickable}
+      aria-label={tile.info ? `${tile.label}: ${tile.value}. ${tile.info}` : undefined}
       className={clickable ? "hover-lift stat-tile" : "stat-tile"}
       style={{
         display: "flex",
@@ -791,7 +806,9 @@ function StatTileCard({ tile, onNav }: { tile: StatTile; onNav?: () => void }) {
             marginTop: 6,
           }}
         >
-          {tile.label}
+          <LabelWithHint info={tile.info} nested>
+            {tile.label}
+          </LabelWithHint>
         </div>
         {tile.trend || tile.hint ? (
           <div
@@ -843,10 +860,12 @@ function SectionHeader({
   title,
   icon,
   right,
+  info,
 }: {
   title: string;
   icon?: React.ReactNode;
   right?: React.ReactNode;
+  info?: string;
 }) {
   return (
     <div
@@ -864,7 +883,7 @@ function SectionHeader({
           className="label"
           style={{ fontSize: "0.7rem", letterSpacing: "0.06em", margin: 0 }}
         >
-          {title}
+          <LabelWithHint info={info}>{title}</LabelWithHint>
         </span>
       </div>
       {right}
@@ -1050,12 +1069,14 @@ function Toggle({
   icon,
   checked,
   onChange,
+  info,
 }: {
   label: string;
   hint?: string;
   icon?: React.ReactNode;
   checked: boolean;
   onChange: (v: boolean) => void;
+  info?: string;
 }) {
   return (
     <div
@@ -1072,7 +1093,9 @@ function Toggle({
           <IconTile tone="brand">{icon}</IconTile>
         ) : null}
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text)" }}>{label}</div>
+          <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text)" }}>
+            <LabelWithHint info={info}>{label}</LabelWithHint>
+          </div>
           {hint ? <div className="muted" style={{ fontSize: "0.72rem" }}>{hint}</div> : null}
         </div>
       </div>
@@ -1168,10 +1191,12 @@ function ThemeToggle({ theme, onToggle }: { theme: string; onToggle: () => void 
   );
 }
 
-function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+function Row({ k, v, mono, info }: { k: string; v: string; mono?: boolean; info?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "0.4rem 0" }}>
-      <span className="muted" style={{ fontSize: "0.8rem" }}>{k}</span>
+      <span className="muted" style={{ fontSize: "0.8rem" }}>
+        <LabelWithHint info={info}>{k}</LabelWithHint>
+      </span>
       <span
         style={{
           fontSize: "0.82rem",

@@ -1,5 +1,5 @@
-import { currentTenantId } from "@/server/context";
 import { ok } from "@/server/http";
+import { isResponse, requirePermission } from "@/server/guards";
 import { getStore } from "@/server/data";
 import type { TicketPriority } from "@/server/domain/models";
 
@@ -11,9 +11,10 @@ export const dynamic = "force-dynamic";
 const ORDER: TicketPriority[] = ["critical", "high", "medium", "low", "very_low"];
 
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
+  const ctx = await requirePermission(req, "report.read");
+  if (isResponse(ctx)) return ctx;
   const store = await getStore();
-  const policies = await store.slaPolicies.list({ tenantId });
+  const policies = await store.slaPolicies.list({ tenantId: ctx.tenantId });
   policies.sort((a, b) => ORDER.indexOf(a.priority) - ORDER.indexOf(b.priority));
   return ok(policies);
 }

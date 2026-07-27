@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import type { AuditRow } from "@/server/domain/models";
-import { auditActionLabel, timeAgo } from "./ui";
+import { auditActionLabel, LabelWithHint, timeAgo } from "./ui";
+import { HINTS } from "@/lib/hints";
 import { usePersona } from "./Persona";
 import { useToast } from "./Toast";
 import { AuditSkeleton } from "./Skeleton";
+import { EmptyState } from "./primitives";
+import { ShieldAlert } from "lucide-react";
 
 // =============================================================================
 // AuditViewer — tamper-evident audit chain.
@@ -31,6 +34,7 @@ export default function AuditViewer() {
   const [records, setRecords] = useState<AuditRow[] | null>(null);
   const [check, setCheck] = useState<AuditVerification | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [actionFilter, setActionFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -45,6 +49,7 @@ export default function AuditViewer() {
   const verify = useCallback(
     async (announce: boolean) => {
       setVerifying(true);
+      setError(null);
       try {
         const [recs, result] = await Promise.all([
           apiGet<AuditRow[]>("/audit"),
@@ -66,8 +71,17 @@ export default function AuditViewer() {
           }
         }
       } catch (err) {
-        setRecords([]);
-        setCheck({ valid: true, length: 0, brokenAt: null, reason: err instanceof Error ? err.message : null });
+        // A failed request is not a verdict. Reporting "chain verified" here
+        // would be the single most misleading thing this screen could say.
+        setError(err instanceof Error ? err.message : String(err));
+        setRecords(null);
+        setCheck(null);
+        if (announce) {
+          toast.error({
+            title: "Could not verify the chain",
+            description: err instanceof Error ? err.message : String(err),
+          });
+        }
       } finally {
         setVerifying(false);
       }
@@ -111,6 +125,32 @@ export default function AuditViewer() {
     }
   }
 
+  if (error) {
+    return (
+      <div className="page-pad">
+        <div style={{ maxWidth: 560, margin: "8vh auto 0" }}>
+          <EmptyState
+            icon={ShieldAlert}
+            title="Could not verify the audit chain"
+            description={
+              <>
+                {error}
+                <br />
+                Integrity is unknown until this check succeeds — treat the log as unverified, not as
+                intact.
+              </>
+            }
+            action={
+              <button className="btn btn-primary" onClick={() => verify(true)} disabled={verifying}>
+                {verifying ? "Verifying…" : "Retry verification"}
+              </button>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (records === null || check === null)
     return (
       <div className="page-pad">
@@ -149,6 +189,7 @@ export default function AuditViewer() {
             tone={{ bg: "var(--brand-50)", fg: "var(--brand-700)" }}
             value={String(check.length)}
             label="Records in chain"
+            info={HINTS.auditRecords}
           />
           <StatTile
             icon={check.valid ? <ShieldCheckIcon /> : <ShieldOffIcon />}
@@ -159,6 +200,7 @@ export default function AuditViewer() {
             }
             value={check.valid ? "Intact" : "Broken"}
             label={check.valid ? "No tampering detected" : check.reason ?? `Broken at #${check.brokenAt}`}
+            info={HINTS.auditChain}
           />
           <StatTile
             icon={<ClockIcon />}
@@ -323,7 +365,9 @@ export default function AuditViewer() {
                                 letterSpacing: "0.04em",
                               }}
                             >
-                              Block #{r.index}
+                              <LabelWithHint info={HINTS.auditBlock} size={10} nested>
+                                Block #{r.index}
+                              </LabelWithHint>
                             </span>
                             <span style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text)" }}>
                               {auditActionLabel(r.action)}
@@ -374,18 +418,26 @@ export default function AuditViewer() {
                         className="panel-2 anim-fade-in"
                         style={{ marginTop: 10, marginLeft: 44, padding: "0.85rem 0.95rem", fontSize: "0.74rem" }}
                       >
-                        <HashField label="hash" value={r.hash} copied={copiedHash === r.hash} onCopy={() => void copyHash(r.hash)} />
+                        <HashField
+                          label="hash"
+                          value={r.hash}
+                          copied={copiedHash === r.hash}
+                          onCopy={() => void copyHash(r.hash)}
+                          info={HINTS.auditHash}
+                        />
                         <HashField
                           label="prevHash"
                           value={r.prevHash}
                           copied={copiedHash === r.prevHash}
                           onCopy={() => void copyHash(r.prevHash)}
+                          info={HINTS.auditPrevHash}
                         />
                         <HashField
                           label="payloadHash"
                           value={r.payloadHash}
                           copied={copiedHash === r.payloadHash}
                           onCopy={() => void copyHash(r.payloadHash)}
+                          info={HINTS.auditPayloadHash}
                         />
                         <div className="label" style={{ marginTop: 10, marginBottom: 4 }}>
                           payload
@@ -432,11 +484,13 @@ function StatTile({
   tone,
   value,
   label,
+  info,
 }: {
   icon: React.ReactNode;
   tone: { bg: string; fg: string };
   value: string;
   label: string;
+  info?: string;
 }) {
   return (
     <div
@@ -472,7 +526,9 @@ function StatTile({
           {value}
         </div>
         <div className="muted" style={{ fontSize: "0.74rem", marginTop: 2 }}>
-          {label}
+          <LabelWithHint info={info} size={12}>
+            {label}
+          </LabelWithHint>
         </div>
       </div>
     </div>
@@ -484,16 +540,20 @@ function HashField({
   value,
   copied,
   onCopy,
+  info,
 }: {
   label: string;
   value: string;
   copied: boolean;
   onCopy: () => void;
+  info?: string;
 }) {
   return (
     <div style={{ display: "flex", gap: 10, marginBottom: 5, alignItems: "center" }}>
       <span className="muted" style={{ width: 86, flexShrink: 0 }}>
-        {label}
+        <LabelWithHint info={info} side="right" size={11}>
+          {label}
+        </LabelWithHint>
       </span>
       <span
         className="mono"

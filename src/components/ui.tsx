@@ -6,6 +6,10 @@ import type {
   TicketStatus,
 } from "@/server/domain/models";
 import type { SlaLevel } from "@/server/services/slaService";
+import { HINTS } from "@/lib/hints";
+import { InfoHint, type HintSide } from "./InfoHint";
+
+export { InfoHint, type HintSide };
 
 // =============================================================================
 // Shared presentation helpers.
@@ -98,7 +102,7 @@ export function DecisionBadge({ decision }: { decision: ResolutionDecision }) {
   return pill(DECISION_STYLES[decision], DECISION_STYLES[decision].label);
 }
 
-export function PriorityBadge({ priority }: { priority: TicketPriority }) {
+export function PriorityBadge({ priority, hint }: { priority: TicketPriority; hint?: boolean }) {
   const tone = PRIORITY_STYLES[priority];
   return pill(
     tone,
@@ -106,9 +110,17 @@ export function PriorityBadge({ priority }: { priority: TicketPriority }) {
       <strong style={{ fontWeight: 800, letterSpacing: "0.01em" }}>{PRIORITY_CODE[priority]}</strong>
       <span aria-hidden style={{ opacity: 0.55 }}>·</span>
       {tone.label}
+      {hint ? <InfoHint text={HINTS.derivedPriority} size={11} /> : null}
     </>
   );
 }
+
+const SLA_HINTS: Record<SlaLevel, string> = {
+  met: "This ticket was answered and resolved inside its SLA targets.",
+  on_track: "Still comfortably inside the SLA window.",
+  at_risk: HINTS.slaAtRisk,
+  breached: HINTS.slaBreached,
+};
 
 const SLA_STYLES: Record<SlaLevel, Tone> = {
   met: { label: "Within SLA", bg: "var(--success-bg)", fg: "var(--success-fg)", border: "var(--success-border)" },
@@ -117,11 +129,14 @@ const SLA_STYLES: Record<SlaLevel, Tone> = {
   breached: { label: "Breached", bg: "var(--danger-bg)", fg: "var(--danger-fg)", border: "var(--danger-border)" },
 };
 
-export function SlaBadge({ level, paused }: { level: SlaLevel; paused?: boolean }) {
+export function SlaBadge({ level, paused, hint }: { level: SlaLevel; paused?: boolean; hint?: boolean }) {
   if (paused) {
     return pill(
       { label: "Paused", bg: "var(--neutral-bg)", fg: "var(--neutral-fg)", border: "var(--neutral-border)" },
-      "SLA paused"
+      <>
+        SLA paused
+        {hint ? <InfoHint text={HINTS.slaPaused} size={11} /> : null}
+      </>
     );
   }
   const tone = SLA_STYLES[level];
@@ -145,6 +160,7 @@ export function SlaBadge({ level, paused }: { level: SlaLevel; paused?: boolean 
         />
       ) : null}
       {tone.label}
+      {hint ? <InfoHint text={SLA_HINTS[level]} size={11} /> : null}
     </span>
   );
 }
@@ -172,8 +188,9 @@ export function ConfidenceBar({ value }: { value: number }) {
   return (
     <div style={{ minWidth: 120 }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-        <span className="muted" style={{ fontSize: "0.72rem" }}>
+        <span className="muted" style={{ fontSize: "0.72rem", display: "inline-flex", alignItems: "center", gap: 4 }}>
           confidence
+          <InfoHint text={HINTS.aiConfidence} size={11} />
         </span>
         <span style={{ fontSize: "0.78rem", fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
           {pct}%
@@ -201,20 +218,47 @@ export function ConfidenceBar({ value }: { value: number }) {
   );
 }
 
+/** Wraps a label with an optional trailing InfoHint, keeping the two aligned. */
+export function LabelWithHint({
+  children,
+  info,
+  side = "top",
+  size = 13,
+  nested = false,
+}: {
+  children: ReactNode;
+  info?: string;
+  side?: HintSide;
+  size?: number;
+  nested?: boolean;
+}) {
+  if (!info) return <>{children}</>;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+      {children}
+      <InfoHint text={info} side={side} size={size} nested={nested} />
+    </span>
+  );
+}
+
 export function StatCard({
   label,
   value,
   sub,
   accent,
+  info,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   accent?: string;
+  info?: string;
 }) {
   return (
     <div className="stat-card" style={{ minWidth: 0 }}>
-      <div className="label">{label}</div>
+      <div className="label">
+        <LabelWithHint info={info}>{label}</LabelWithHint>
+      </div>
       <div className="stat-value" style={{ marginTop: 8, color: accent ?? "var(--text)" }}>
         {value}
       </div>
@@ -553,15 +597,19 @@ export function SectionHeader({
   title,
   sub,
   action,
+  info,
 }: {
   title: ReactNode;
   sub?: ReactNode;
   action?: ReactNode;
+  info?: string;
 }) {
   return (
     <div className="section-head">
       <div style={{ minWidth: 0 }}>
-        <div className="section-title">{title}</div>
+        <div className="section-title">
+          <LabelWithHint info={info}>{title}</LabelWithHint>
+        </div>
         {sub ? (
           <div className="muted" style={{ fontSize: "0.76rem", marginTop: 2 }}>
             {sub}
@@ -590,6 +638,7 @@ export function AIPanel({
   action,
   children,
   style,
+  info,
 }: {
   title: ReactNode;
   /** 0..1 — renders a "NN% Confidence"-style chip when provided. */
@@ -597,6 +646,7 @@ export function AIPanel({
   action?: ReactNode;
   children: ReactNode;
   style?: CSSProperties;
+  info?: string;
 }) {
   return (
     <div className="ai-panel" style={{ padding: "0.95rem 1.05rem", ...style }}>
@@ -613,6 +663,7 @@ export function AIPanel({
         >
           <SparkleIcon />
           {title}
+          {info ? <InfoHint text={info} /> : null}
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {typeof confidence === "number" ? (
@@ -625,6 +676,7 @@ export function AIPanel({
               }}
             >
               {Math.round(confidence * 100)}% confidence
+              <InfoHint text={HINTS.aiConfidence} side="left" size={12} />
             </span>
           ) : null}
           {action}

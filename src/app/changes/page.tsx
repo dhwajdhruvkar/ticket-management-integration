@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiGet, apiSend } from "@/lib/api";
-import { AIPanel, Avatar } from "@/components/ui";
-import { usePersona } from "@/components/Persona";
+import { AIPanel, Avatar, InfoHint, LabelWithHint } from "@/components/ui";
+import { HINTS } from "@/lib/hints";
+import { useAgentOnly, usePersona } from "@/components/Persona";
 import { useToast } from "@/components/Toast";
 import type { UserRow } from "@/server/domain/models";
 
@@ -51,6 +52,7 @@ const NEXT_STEP: Record<string, { label: string; status: string } | undefined> =
 
 export default function ChangesPage() {
   const { persona } = usePersona();
+  const isAgent = useAgentOnly();
   const toast = useToast();
   const canApprove = ["manager", "tenant_admin", "super_admin"].includes(persona.serverRole);
   const [changes, setChanges] = useState<Change[] | null>(null);
@@ -72,9 +74,10 @@ export default function ChangesPage() {
   }, []);
 
   useEffect(() => {
+    if (!isAgent) return;
     refresh();
     apiGet<UserRow[]>("/users").then(setUsers).catch(() => {});
-  }, [refresh]);
+  }, [isAgent, refresh]);
 
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) {
     setBusy(key);
@@ -137,6 +140,8 @@ export default function ChangesPage() {
     );
   }
 
+  if (!isAgent) return <div className="page-pad" />;
+
   return (
     <div className="page-pad">
       <header
@@ -158,11 +163,23 @@ export default function ChangesPage() {
         <div className="panel anim-fade-up" style={{ padding: "1.2rem", marginBottom: 16 }}>
           <input className="input" placeholder="Change title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ marginBottom: 8 }} />
           <textarea className="textarea" rows={3} placeholder="What is changing and why" value={description} onChange={(e) => setDescription(e.target.value)} style={{ marginBottom: 8 }} />
-          <select className="select" value={type} onChange={(e) => setType(e.target.value)} style={{ marginBottom: 8, maxWidth: 220 }}>
-            <option value="standard">Standard (pre-approved)</option>
-            <option value="normal">Normal</option>
-            <option value="emergency">Emergency</option>
-          </select>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <select
+              className="select"
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              style={{ maxWidth: 220 }}
+              aria-label="Change type"
+            >
+              <option value="standard">Standard (pre-approved)</option>
+              <option value="normal">Normal</option>
+              <option value="emergency">Emergency</option>
+            </select>
+            <InfoHint
+              text={`${HINTS.changeStandard} ${HINTS.changeNormal} ${HINTS.changeEmergency}`}
+              side="right"
+            />
+          </div>
           <div>
             <button className="btn btn-primary" onClick={create} disabled={busy === "create" || !title.trim() || !description.trim()}>
               {busy === "create" ? "Assessing risk…" : "Create change"}
@@ -218,7 +235,11 @@ export default function ChangesPage() {
                 <div style={{ fontWeight: 700, fontSize: "0.98rem", marginTop: 10 }}>{c.title}</div>
                 <p className="muted" style={{ fontSize: "0.85rem", margin: "4px 0 6px", lineHeight: 1.5 }}>{c.description}</p>
                 {c.riskRationale ? (
-                  <AIPanel title="AI risk assessment" style={{ margin: "0 0 8px", padding: "0.65rem 0.8rem" }}>
+                  <AIPanel
+                    title="AI risk assessment"
+                    style={{ margin: "0 0 8px", padding: "0.65rem 0.8rem" }}
+                    info={HINTS.aiRiskScore}
+                  >
                     <span style={{ lineHeight: 1.5, fontSize: "0.78rem" }}>{c.riskRationale}</span>
                   </AIPanel>
                 ) : null}
@@ -226,7 +247,9 @@ export default function ChangesPage() {
                 {c.approvals.length > 0 ? (
                   <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginTop: 6 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-                      <div className="label" style={{ margin: 0 }}>CAB approvals</div>
+                      <div className="label" style={{ margin: 0 }}>
+                        <LabelWithHint info={HINTS.cab}>CAB approvals</LabelWithHint>
+                      </div>
                       <CabVoteMeter approvals={c.approvals} />
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -369,6 +392,7 @@ function CabStepper({ status }: { status: string }) {
       }}
       aria-label={`Change stage: ${STAGE_LABEL[status] ?? status}`}
     >
+      <InfoHint text={HINTS.cabStages} side="right" size={12} />
       {CAB_STAGES.map((stage, i) => {
         const done = currentIdx > i;
         const active = currentIdx === i;
@@ -455,6 +479,7 @@ function RiskGauge({ score }: { score?: number | null }) {
         style={{ background: tone.bg, color: tone.fg, borderColor: tone.border }}
       >
         Risk: {value ?? "—"}
+        <InfoHint text={HINTS.changeRisk} side="left" size={11} />
       </span>
     </span>
   );

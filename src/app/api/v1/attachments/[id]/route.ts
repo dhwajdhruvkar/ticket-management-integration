@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { currentActor } from "@/server/context";
 import { fail } from "@/server/http";
-import { can, isAgentRole } from "@/server/auth/rbac";
+import { actorContext, isResponse, loadTicket, requirePermission } from "@/server/guards";
+import { can } from "@/server/auth/rbac";
 import { getStore } from "@/server/data";
 import { deleteAttachment, readAttachment } from "@/server/services/attachmentService";
-import type { Role } from "@/server/domain/models";
 
 // =============================================================================
 // /api/v1/attachments/[id]
@@ -20,20 +19,15 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const ctx = await actorContext(req);
+  if (!can(ctx.role, "ticket.read")) return fail("Forbidden.", 403);
+
   const found = await readAttachment(id);
   if (!found) return fail("Attachment not found.", 404);
 
-  const actor = await currentActor(req);
-  const role = actor.role as Role;
-  const store = await getStore();
-  const ticket = await store.tickets.get(found.record.ticketId);
-  if (!ticket) return fail("Attachment not found.", 404);
-
-  if (isAgentRole(role)) {
-    if (!can(role, "ticket.read")) return fail("Forbidden.", 403);
-  } else if (ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()) {
-    return fail("Forbidden.", 403);
-  }
+  // Access follows the parent ticket, which carries the tenant and the owner.
+  const ticket = await loadTicket(ctx, found.record.ticketId);
+  if (isResponse(ticket)) return fail("Attachment not found.", 404);
 
   const encodedName = encodeURIComponent(found.record.fileName);
   return new NextResponse(new Uint8Array(found.bytes), {
@@ -50,9 +44,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "ticket.write")) return fail("Forbidden.", 403);
-  const removed = await deleteAttachment(id, actor.name);
+  const ctx = await requirePermission(req, "ticket.write");
+  if (isResponse(ctx)) return ctx;
+
+  const store = await getStore();
+  const record = await store.attachments.get(id);
+  if (!record) return fail("Attachment not found.", 404);
+  const ticket = await loadTicket(ctx, record.ticketId);
+  if (isResponse(ticket)) return fail("Attachment not found.", 404);
+
+  const removed = await deleteAttachment(id, ctx.actor.name);
   if (!removed) return fail("Attachment not found.", 404);
   return NextResponse.json({ ok: true, data: { deleted: true } });
 }

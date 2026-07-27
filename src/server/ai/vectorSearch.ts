@@ -23,11 +23,21 @@ export interface SearchResult {
   model: string;
 }
 
-export async function search(tenantId: string, query: string, k = 4): Promise<SearchResult> {
+export interface SearchOptions {
+  /** Restrict to articles marked public, for requester-facing search. */
+  publicOnly?: boolean;
+}
+
+export async function search(
+  tenantId: string,
+  query: string,
+  k = 4,
+  options: SearchOptions = {}
+): Promise<SearchResult> {
   const store = await getStore();
   const { vector, model } = await embed(query);
   const articles = (await store.articles.list({ tenantId })).filter(
-    (a) => a.status === "published"
+    (a) => a.status === "published" && (!options.publicOnly || a.isPublic)
   );
   if (articles.length === 0) return { hits: [], model };
 

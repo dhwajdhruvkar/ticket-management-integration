@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 
 // =============================================================================
@@ -256,8 +257,14 @@ export default function SignInClient({
 
           <p className="signin-legal">
             By signing in you agree to Netlink Support&apos;s{" "}
-            <a href="#" className="signin-legal-link">Acceptable Use Policy</a> and{" "}
-            <a href="#" className="signin-legal-link">Privacy Notice</a>.
+            <Link href="/legal/acceptable-use" className="signin-legal-link">
+              Acceptable Use Policy
+            </Link>{" "}
+            and{" "}
+            <Link href="/legal/privacy" className="signin-legal-link">
+              Privacy Notice
+            </Link>
+            .
           </p>
         </div>
       </main>

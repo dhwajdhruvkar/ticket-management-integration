@@ -11,6 +11,7 @@ import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
 import { newId, now } from "../domain/ids";
 import { notifyTemplate } from "../notify/templates";
+import { withRetry } from "../resilience";
 import { getTicket, mutateTicket } from "./ticketService";
 import type { ApprovalRow, CatalogItemRow, TicketRow, UserRow } from "../domain/models";
 
@@ -142,6 +143,10 @@ export async function decideTicketApproval(
   // Resume the intake pipeline (routing -> automations -> AI). Dynamic import
   // avoids a static intake <-> approvals cycle.
   const { processTicketPipeline } = await import("./intake");
-  await processTicketPipeline(ticketId).catch((err) => console.error("[approval] pipeline failed:", err));
+  await withRetry(() => processTicketPipeline(ticketId), {
+    step: "approval_pipeline",
+    tenantId: ticket.tenantId,
+    ticketId,
+  });
   return (await getTicket(ticketId)) ?? reopened;
 }

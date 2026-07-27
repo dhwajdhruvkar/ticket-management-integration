@@ -1,8 +1,7 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 import { createCI, linkCIs, listCIs } from "@/server/services/assetService";
-import type { CIType, Role } from "@/server/domain/models";
+import type { CIType } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,14 +14,14 @@ export const dynamic = "force-dynamic";
 // =============================================================================
 
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
-  return ok(await listCIs(tenantId));
+  const ctx = await requirePermission(req, "asset.read");
+  if (isResponse(ctx)) return ctx;
+  return ok(await listCIs(ctx.tenantId));
 }
 
 export async function POST(req: Request) {
-  const tenantId = await currentTenantId(req);
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "asset.write")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "asset.write");
+  if (isResponse(ctx)) return ctx;
   const body = await readJson<{
     name?: string;
     type?: CIType;
@@ -31,9 +30,11 @@ export async function POST(req: Request) {
   }>(req);
 
   if (body?.link) {
-    const rel = await linkCIs(body.link.sourceId, body.link.targetId, body.link.kind);
+    const rel = await linkCIs(body.link.sourceId, body.link.targetId, body.link.kind, ctx.tenantId);
     return rel ? ok(rel, { status: 201 }) : fail("Could not link CIs.", 400);
   }
   if (!body?.name) return fail("name is required.");
-  return ok(await createCI(tenantId, { name: body.name, type: body.type, assetId: body.assetId }), { status: 201 });
+  return ok(await createCI(ctx.tenantId, { name: body.name, type: body.type, assetId: body.assetId }), {
+    status: 201,
+  });
 }

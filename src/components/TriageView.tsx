@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { apiGet, apiSend } from "@/lib/api";
 import { usePersona } from "@/components/Persona";
 import { useToast } from "@/components/Toast";
-import { PriorityBadge, timeAgo } from "@/components/ui";
+import { LabelWithHint, PriorityBadge, timeAgo } from "@/components/ui";
+import { HINTS } from "@/lib/hints";
 import type { AssignmentGroupRow, TicketRow } from "@/server/domain/models";
 import type { TriageAgent, TriageBoard } from "@/server/services/triageService";
 
@@ -110,7 +111,9 @@ export default function TriageView() {
           {/* Queue --------------------------------------------------------- */}
           <section className="panel" style={{ padding: "1rem 1.1rem", minWidth: 0 }}>
             <div className="label" style={{ marginBottom: 10 }}>
-              Unassigned queue · {board.queue.length}
+              <LabelWithHint info={HINTS.triageQueue} side="right">
+                Unassigned queue · {board.queue.length}
+              </LabelWithHint>
             </div>
             {board.queue.length === 0 ? (
               <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
@@ -141,6 +144,7 @@ export default function TriageView() {
                     maxLoad={maxLoad}
                     busy={busy}
                     onAssign={assign}
+                    info={HINTS.triageSpecialists}
                   />
                   <AgentGroup
                     title={`Common${generalist ? ` · ${generalist.name}` : ""}`}
@@ -148,6 +152,7 @@ export default function TriageView() {
                     maxLoad={maxLoad}
                     busy={busy}
                     onAssign={assign}
+                    info={HINTS.triageCommon}
                   />
                 </>
               ) : (
@@ -159,7 +164,9 @@ export default function TriageView() {
 
             <div className="panel" style={{ padding: "1rem 1.1rem" }}>
               <div className="label" style={{ marginBottom: 10 }}>
-                Team workload
+                <LabelWithHint info={HINTS.teamWorkload} side="right">
+                  Team workload
+                </LabelWithHint>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {board.agents.map((a) => (
@@ -228,16 +235,22 @@ function AgentGroup({
   maxLoad,
   busy,
   onAssign,
+  info,
 }: {
   title: string;
   agents: TriageAgent[];
   maxLoad: number;
   busy: string | null;
   onAssign: (id: string) => void;
+  info?: string;
 }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <div className="label" style={{ fontSize: "0.62rem", marginBottom: 6 }}>{title}</div>
+      <div className="label" style={{ fontSize: "0.62rem", marginBottom: 6 }}>
+        <LabelWithHint info={info} side="right" size={11}>
+          {title}
+        </LabelWithHint>
+      </div>
       {agents.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>No members.</p>
       ) : (

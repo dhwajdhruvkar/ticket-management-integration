@@ -8,7 +8,7 @@
 // scroll lock. EmptyState is a consistent, elegant placeholder. All presentational.
 // =============================================================================
 
-import { useEffect } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { X, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion, EASE_OUT } from "@/components/motion";
 
@@ -138,6 +138,113 @@ export function Drawer({
         </motion.div>
       ) : null}
     </AnimatePresence>
+  );
+}
+
+/**
+ * In-app replacement for `window.prompt`. The native dialog is unstyled, blocks
+ * the whole tab, is suppressed outright in some browsers, and cannot show the
+ * context an audited override needs, so anywhere the product asks for a line of
+ * text it uses this instead.
+ */
+export function PromptDialog({
+  open,
+  title,
+  description,
+  label,
+  placeholder,
+  initialValue = "",
+  confirmLabel = "Save",
+  required = false,
+  multiline = false,
+  busy = false,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description?: React.ReactNode;
+  label: string;
+  placeholder?: string;
+  initialValue?: string;
+  confirmLabel?: string;
+  /** Block confirm until the field has non-whitespace content. */
+  required?: boolean;
+  multiline?: boolean;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: (value: string) => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const fieldId = useId();
+  const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setValue(initialValue);
+    const t = setTimeout(() => fieldRef.current?.focus(), 60);
+    return () => clearTimeout(t);
+  }, [open, initialValue]);
+
+  const canSubmit = !busy && (!required || value.trim().length > 0);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    onConfirm(value.trim());
+  }
+
+  return (
+    <Modal open={open} onClose={onCancel} ariaLabel={title} maxWidth={480}>
+      <form onSubmit={submit} style={{ padding: "1.1rem 1.2rem 1.2rem" }}>
+        <div className="flex items-center justify-between" style={{ gap: 12, marginBottom: 6 }}>
+          <h2 style={{ fontSize: "1rem", fontWeight: 750, margin: 0 }}>{title}</h2>
+          <CloseButton onClick={onCancel} />
+        </div>
+        {description ? (
+          <p className="muted" style={{ fontSize: "0.82rem", margin: "0 0 12px", lineHeight: 1.5 }}>
+            {description}
+          </p>
+        ) : null}
+        <label className="label" htmlFor={fieldId} style={{ display: "block", marginBottom: 6 }}>
+          {label}
+        </label>
+        {multiline ? (
+          <textarea
+            id={fieldId}
+            ref={(el) => {
+              fieldRef.current = el;
+            }}
+            className="input"
+            rows={3}
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => setValue(e.target.value)}
+            style={{ width: "100%", resize: "vertical" }}
+          />
+        ) : (
+          <input
+            id={fieldId}
+            ref={(el) => {
+              fieldRef.current = el;
+            }}
+            className="input"
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => setValue(e.target.value)}
+            style={{ width: "100%" }}
+          />
+        )}
+        <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 14 }}>
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
+            {busy ? "Working…" : confirmLabel}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

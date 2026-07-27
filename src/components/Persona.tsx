@@ -120,6 +120,24 @@ export function usePersona(): PersonaApi {
 }
 
 /**
+ * Guard for the agent-only workspace pages (problems, changes, assets, audit,
+ * settings). The API rejects requesters anyway; this stops them from landing on
+ * a page of empty panels and error toasts. Returns false until the session is
+ * known so callers can hold off rendering.
+ */
+export function useAgentOnly(): boolean {
+  const { persona, ready } = usePersona();
+  const router = useRouter();
+  const isAgent = ready && persona.role !== "requester";
+
+  useEffect(() => {
+    if (ready && persona.role === "requester") router.replace("/portal");
+  }, [ready, persona.role, router]);
+
+  return isAgent;
+}
+
+/**
  * User menu: shows the signed-in user, profile/settings shortcuts, demo user
  * switching (demo mode only — a real credentials sign-in), and sign out.
  */

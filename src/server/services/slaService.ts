@@ -53,7 +53,15 @@ async function policyFor(tenantId: string, priority: TicketPriority): Promise<Sl
   return policies[0] ?? null;
 }
 
-/** Compute and persist due times for a freshly created/updated ticket. */
+/**
+ * Compute and persist due times for a ticket.
+ *
+ * Called at intake and again whenever the priority changes, because the
+ * targets are per priority: an escalated ticket that kept its old deadlines
+ * would report green while it is actually late. Recomputing always starts from
+ * `createdAt` and then re-applies `slaPausedMins`, so time the ticket spent on
+ * hold is not silently clawed back by the recalculation.
+ */
 export async function applySla(ticket: TicketRow): Promise<TicketRow> {
   const store = await getStore();
   const policy = await policyFor(ticket.tenantId, ticket.priority);
@@ -66,10 +74,14 @@ export async function applySla(ticket: TicketRow): Promise<TicketRow> {
   const businessOnly = policy?.businessHoursOnly ?? false;
 
   const created = new Date(ticket.createdAt);
-  const due = (mins: number) =>
-    calendar
+  // Pause credit is wall-clock, matching how slaPausePatch shifts the dates.
+  const pauseShiftMs = Math.max(0, ticket.slaPausedMins ?? 0) * 60_000;
+  const due = (mins: number) => {
+    const base = calendar
       ? addCalendarMinutes(created, mins, calendar)
       : addMinutes(created, mins, businessOnly);
+    return new Date(base.getTime() + pauseShiftMs);
+  };
 
   const updated = await store.tickets.update(ticket.id, {
     dueResponseAt: due(target.responseMins).toISOString(),
@@ -137,6 +149,10 @@ export function slaStatus(ticket: TicketRow, nowMs = Date.now()): SlaStatus {
  * SLA pause bookkeeping for a status transition. Entering `pending` stamps the
  * pause; leaving it accumulates the paused minutes and shifts both due dates
  * forward so the clock effectively stopped while waiting.
+ *
+ * `slaPausedMins` is the authoritative running total of hold time. The due
+ * dates already include it, so nothing downstream should subtract it again;
+ * `applySla` re-applies it when it recomputes deadlines from scratch.
  */
 export function slaPausePatch(
   ticket: TicketRow,
@@ -166,19 +182,26 @@ export function slaPausePatch(
   return {};
 }
 
+/**
+ * Default Mon-Fri 09:00-18:00 window in the server's own timezone, used when a
+ * policy sets `businessHoursOnly` without naming a calendar.
+ */
+function defaultBusinessCalendar(): CalendarSpec {
+  return {
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    workDays: [1, 2, 3, 4, 5],
+    startHour: BUSINESS_START_HOUR,
+    endHour: BUSINESS_END_HOUR,
+    holidays: [],
+  };
+}
+
 function addMinutes(from: Date, mins: number, businessOnly: boolean): Date {
   if (!businessOnly) return new Date(from.getTime() + mins * 60000);
-  // Walk minute-by-minute in hour steps, only counting business hours Mon-Fri.
-  const result = new Date(from);
-  let remaining = mins;
-  while (remaining > 0) {
-    const day = result.getDay();
-    const hour = result.getHours();
-    const isBusiness = day >= 1 && day <= 5 && hour >= BUSINESS_START_HOUR && hour < BUSINESS_END_HOUR;
-    if (isBusiness) remaining -= 60;
-    result.setHours(result.getHours() + 1);
-  }
-  return result;
+  // Same walker as named calendars, so a 15-minute P1 target stays 15 minutes.
+  // The previous implementation consumed a whole hour per step, which turned
+  // every sub-hour target into an hour and quietly inflated every P1 deadline.
+  return addCalendarMinutes(from, mins, defaultBusinessCalendar());
 }
 
 // ---------------------------------------------------------------------------

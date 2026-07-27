@@ -13,12 +13,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGet, ApiError, apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
 import type { AssignmentGroupRow, CIRow, CustomFieldDefRow, UserRow } from "@/server/domain/models";
 import {
   AIPanel,
   DecisionBadge,
+  InfoHint,
+  LabelWithHint,
   PriorityBadge,
   SlaBadge,
   SparkleIcon,
@@ -26,6 +28,7 @@ import {
   formatDuration,
   timeAgo,
 } from "@/components/ui";
+import { HINTS } from "@/lib/hints";
 import TicketComposer from "@/components/TicketComposer";
 import TicketProperties from "@/components/TicketProperties";
 import ConversationThread from "@/components/ConversationThread";
@@ -46,11 +49,24 @@ export default function TicketDetailPage() {
   const [groups, setGroups] = useState<AssignmentGroupRow[]>([]);
   const [cis, setCis] = useState<CIRow[]>([]);
   const [customFieldDefs, setCustomFieldDefs] = useState<CustomFieldDefRow[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     apiGet<TicketView>(`/tickets/${id}`)
-      .then(setTicket)
-      .catch(() => setTicket(null));
+      .then((t) => {
+        setTicket(t);
+        setLoadError(null);
+      })
+      .catch((err: unknown) => {
+        // Only a real 404 means "no such ticket". A dropped connection or a
+        // server error must not tell the user their ticket has vanished.
+        if (err instanceof ApiError && err.notFound) {
+          setTicket(null);
+          setLoadError(null);
+        } else {
+          setLoadError(err instanceof Error ? err.message : String(err));
+        }
+      });
   }, [id]);
 
   // Realtime: server-side changes (replies, status, assignment) re-fetch the
@@ -71,6 +87,25 @@ export default function TicketDetailPage() {
       apiGet<CustomFieldDefRow[]>("/custom-fields").then(setCustomFieldDefs).catch(() => {});
     }
   }, [ready, persona.role, persona.id, refresh]);
+
+  if (loadError && ticket === undefined) {
+    return (
+      <div className="page-pad">
+        <div className="panel" style={{ padding: "2rem", textAlign: "center" }}>
+          <p style={{ fontWeight: 700, marginBottom: 6 }}>Could not load this ticket</p>
+          <p className="muted" style={{ fontSize: "0.85rem", marginBottom: 14 }}>{loadError}</p>
+          <div className="flex items-center justify-center" style={{ gap: 8 }}>
+            <button className="btn btn-primary" onClick={refresh}>
+              Try again
+            </button>
+            <Link href="/tickets" className="btn btn-ghost">
+              ← Back
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (ticket === undefined || !ready)
     return (
@@ -136,9 +171,22 @@ function AgentView({
       <ApprovalPanel ticket={ticket} onChanged={onChanged} />
 
       <div className="label" style={{ marginBottom: 12 }}>
-        Properties
+        <LabelWithHint
+          info="The classification and routing fields for this ticket. Editing any of them is recorded in the audit trail, and changing impact or urgency recalculates the priority."
+          side="right"
+        >
+          Properties
+        </LabelWithHint>
       </div>
-      <TicketProperties ticket={ticket} users={users} groups={groups} cis={cis} customFieldDefs={customFieldDefs} onChanged={onChanged} />
+      <TicketProperties
+        key={ticket.id}
+        ticket={ticket}
+        users={users}
+        groups={groups}
+        cis={cis}
+        customFieldDefs={customFieldDefs}
+        onChanged={onChanged}
+      />
 
       <RelatedTicketsPanel ticket={ticket} onChanged={onChanged} />
 
@@ -298,8 +346,12 @@ function SlaPanel({ ticket }: { ticket: TicketView }) {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "1.25rem 0 10px" }}>
-        <span className="label" style={{ margin: 0 }}>SLA</span>
-        <SlaBadge level={sla.level} paused={sla.paused} />
+        <span className="label" style={{ margin: 0 }}>
+          <LabelWithHint info={HINTS.sla} side="right">
+            SLA
+          </LabelWithHint>
+        </span>
+        <SlaBadge level={sla.level} paused={sla.paused} hint />
       </div>
       <div
         className="panel-2"
@@ -308,7 +360,9 @@ function SlaPanel({ ticket }: { ticket: TicketView }) {
         <div>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <span style={{ fontSize: "0.76rem", fontWeight: 600, color: "var(--text-secondary)" }}>
-              First response
+              <LabelWithHint info={HINTS.slaFirstResponse} side="right">
+                First response
+              </LabelWithHint>
             </span>
             <span
               style={{
@@ -338,7 +392,9 @@ function SlaPanel({ ticket }: { ticket: TicketView }) {
         <div>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <span style={{ fontSize: "0.76rem", fontWeight: 600, color: "var(--text-secondary)" }}>
-              Resolution
+              <LabelWithHint info={HINTS.slaResolution} side="right">
+                Resolution
+              </LabelWithHint>
             </span>
             <span
               style={{
@@ -381,6 +437,7 @@ function SlaPanel({ ticket }: { ticket: TicketView }) {
           >
             <PauseGlyph /> Clock paused
             {ticket.slaPausedMins ? ` · ${ticket.slaPausedMins}m accrued` : ""}
+            <InfoHint text={HINTS.slaPaused} side="right" size={11} />
           </div>
         ) : null}
       </div>
@@ -407,6 +464,7 @@ function ContextPane({ ticket }: { ticket: TicketView }) {
             title="AI analysis"
             confidence={res.confidence}
             style={{ marginBottom: 10 }}
+            info={HINTS.aiAnalysis}
           >
             <div style={{ marginBottom: 8 }}>
               <DecisionBadge decision={res.decision} />
@@ -416,7 +474,9 @@ function ContextPane({ ticket }: { ticket: TicketView }) {
           {res.citations.length > 0 ? (
             <>
               <div className="label" style={{ margin: "14px 0 8px" }}>
-                Sources
+                <LabelWithHint info={HINTS.aiSources} side="right">
+                  Sources
+                </LabelWithHint>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {res.citations.map((c, i) => (
@@ -430,8 +490,12 @@ function ContextPane({ ticket }: { ticket: TicketView }) {
                       <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>
                         [{i + 1}] {c.title}
                       </span>
-                      <span className="muted" style={{ fontSize: "0.72rem" }}>
+                      <span
+                        className="muted"
+                        style={{ fontSize: "0.72rem", display: "inline-flex", alignItems: "center", gap: 4 }}
+                      >
                         {(c.score * 100).toFixed(0)}%
+                        <InfoHint text={HINTS.aiCitationScore} side="left" size={11} nested />
                       </span>
                     </div>
                   </Link>
@@ -488,7 +552,12 @@ function ApprovalPanel({ ticket, onChanged }: { ticket: TicketView; onChanged: (
   return (
     <div style={{ marginBottom: 18 }}>
       <div className="label" style={{ marginBottom: 8 }}>
-        Approval
+        <LabelWithHint
+          info="Some catalogue items need a manager to sign off before work starts. The ticket stays on hold, with its SLA clock paused, until the decision is made."
+          side="right"
+        >
+          Approval
+        </LabelWithHint>
       </div>
       {pending ? (
         <div
@@ -522,7 +591,9 @@ function ApprovalPanel({ ticket, onChanged }: { ticket: TicketView; onChanged: (
                 Waiting on {pending.approverName}
               </div>
               <div className="muted" style={{ fontSize: "0.72rem" }}>
-                SLA clock paused while pending
+                <LabelWithHint info={HINTS.slaPaused} side="right" size={11}>
+                  SLA clock paused while pending
+                </LabelWithHint>
               </div>
             </div>
           </div>
@@ -645,7 +716,11 @@ function ThreadSummary({ ticketId }: { ticketId: string }) {
   return (
     <div style={{ marginBottom: 12 }}>
       {summary ? (
-        <AIPanel title="AI thread summary" style={{ marginBottom: 8, padding: "0.7rem 0.85rem" }}>
+        <AIPanel
+          title="AI thread summary"
+          style={{ marginBottom: 8, padding: "0.7rem 0.85rem" }}
+          info={HINTS.aiSummary}
+        >
           <p style={{ fontSize: "0.8rem", lineHeight: 1.5, margin: 0 }}>{summary}</p>
         </AIPanel>
       ) : null}
@@ -675,9 +750,17 @@ function RequesterView({
       <div className="label" style={{ marginBottom: 12 }}>
         Request details
       </div>
-      <Row label="Reference" value={ticket.reference} />
+      <Row
+        label="Reference"
+        value={ticket.reference}
+        info="Quote this reference when you follow up. INC is an incident (something broken), REQ is a service request."
+      />
       <Row label="Status" value={<StatusBadge status={ticket.status} />} />
-      <Row label="Category" value={`${ticket.category}${ticket.subcategory ? ` › ${ticket.subcategory}` : ""}`} />
+      <Row
+        label="Category"
+        value={`${ticket.category}${ticket.subcategory ? ` › ${ticket.subcategory}` : ""}`}
+        info={HINTS.category}
+      />
       <Row label="Created" value={timeAgo(ticket.createdAt)} />
       <Row label="Updated" value={timeAgo(ticket.updatedAt)} />
       {ticket.approvals.some((a) => a.state === "pending") ? (
@@ -785,8 +868,8 @@ function TicketHeader({ ticket, showSla }: { ticket: TicketView; showSla?: boole
             }}
           >
             <StatusBadge status={ticket.status} />
-            <PriorityBadge priority={ticket.priority} />
-            {showSla ? <SlaBadge level={ticket.sla.level} paused={ticket.sla.paused} /> : null}
+            <PriorityBadge priority={ticket.priority} hint />
+            {showSla ? <SlaBadge level={ticket.sla.level} paused={ticket.sla.paused} hint /> : null}
             <span
               className="badge"
               style={{
@@ -814,6 +897,7 @@ function TicketHeader({ ticket, showSla }: { ticket: TicketView; showSla?: boole
                 {ticket.linkedCIs.length === 1
                   ? ticket.linkedCIs[0].name
                   : `${ticket.linkedCIs.length} CIs`}
+                <InfoHint text={HINTS.affectedCIs} side="bottom" size={11} />
               </span>
             ) : null}
           </div>
@@ -1012,10 +1096,14 @@ function activityColor(type: string): string {
   return "var(--brand-600)";
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value, info }: { label: string; value: React.ReactNode; info?: string }) {
   return (
     <div className="flex items-center justify-between" style={{ fontSize: "0.83rem", marginBottom: 9 }}>
-      <span className="muted">{label}</span>
+      <span className="muted">
+        <LabelWithHint info={info} side="right">
+          {label}
+        </LabelWithHint>
+      </span>
       <span style={{ fontWeight: 600 }}>{value}</span>
     </div>
   );

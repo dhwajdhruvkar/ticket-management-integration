@@ -13,7 +13,16 @@ import type {
   UserRow,
 } from "@/server/domain/models";
 import { PRIORITY_ORDER } from "@/server/domain/priority";
-import { Avatar, IMPACT_LEVELS, PriorityBadge, SlaBadge, StatusBadge, timeAgo } from "./ui";
+import {
+  Avatar,
+  IMPACT_LEVELS,
+  LabelWithHint,
+  PriorityBadge,
+  SlaBadge,
+  StatusBadge,
+  timeAgo,
+} from "./ui";
+import { HINTS } from "@/lib/hints";
 import { usePersona } from "./Persona";
 import { useToast } from "./Toast";
 import { TableSkeleton } from "./Skeleton";
@@ -435,10 +444,16 @@ function AgentExplorer({
                   <Th>Status</Th>
                   <Th>Subject</Th>
                   <Th className="hide-sm">Requester</Th>
-                  <Th>Priority</Th>
-                  <Th className="hide-md">Group</Th>
-                  <Th className="hide-md">Assignee</Th>
-                  <Th className="hide-sm">SLA</Th>
+                  <Th info={HINTS.derivedPriority}>Priority</Th>
+                  <Th className="hide-md" info={HINTS.assignmentGroup}>
+                    Group
+                  </Th>
+                  <Th className="hide-md" info={HINTS.assignee}>
+                    Assignee
+                  </Th>
+                  <Th className="hide-sm" info={HINTS.sla}>
+                    SLA
+                  </Th>
                   <Th>Updated</Th>
                 </tr>
               </thead>
@@ -1641,7 +1656,11 @@ function NewTicketForm({
             <div className="label" style={{ marginBottom: 6 }}>Prioritisation</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
               <div>
-                <div className="muted" style={{ fontSize: "0.72rem", marginBottom: 4 }}>Impact (scope of effect)</div>
+                <div className="muted" style={{ fontSize: "0.72rem", marginBottom: 4 }}>
+                  <LabelWithHint info={HINTS.impact} size={12}>
+                    Impact (scope of effect)
+                  </LabelWithHint>
+                </div>
                 <select className="select" value={impact} onChange={(e) => setImpact(e.target.value as ImpactLevel)}>
                   {IMPACT_LEVELS.map((l) => (
                     <option key={l} value={l}>{l}</option>
@@ -1649,7 +1668,11 @@ function NewTicketForm({
                 </select>
               </div>
               <div>
-                <div className="muted" style={{ fontSize: "0.72rem", marginBottom: 4 }}>Urgency (time sensitivity)</div>
+                <div className="muted" style={{ fontSize: "0.72rem", marginBottom: 4 }}>
+                  <LabelWithHint info={HINTS.urgency} size={12}>
+                    Urgency (time sensitivity)
+                  </LabelWithHint>
+                </div>
                 <select className="select" value={urgency} onChange={(e) => setUrgency(e.target.value as ImpactLevel)}>
                   {IMPACT_LEVELS.map((l) => (
                     <option key={l} value={l}>{l}</option>
@@ -1677,7 +1700,15 @@ function NewTicketForm({
   );
 }
 
-function Th({ children, className }: { children: React.ReactNode; className?: string }) {
+function Th({
+  children,
+  className,
+  info,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  info?: string;
+}) {
   return (
     <th
       className={className}
@@ -1690,7 +1721,9 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
         whiteSpace: "nowrap",
       }}
     >
-      {children}
+      <LabelWithHint info={info} size={11}>
+        {children}
+      </LabelWithHint>
     </th>
   );
 }

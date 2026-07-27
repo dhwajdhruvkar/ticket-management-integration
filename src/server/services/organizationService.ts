@@ -29,9 +29,15 @@ function slugify(name: string): string {
   );
 }
 
-export async function listOrganizations(): Promise<TenantRow[]> {
+/**
+ * List organizations. Pass `onlyId` for a tenant admin: they administer one
+ * organization and have no business enumerating the others on the deployment.
+ */
+export async function listOrganizations(onlyId?: string): Promise<TenantRow[]> {
   const store = await getStore();
-  return (await store.tenants.list()).sort((a, b) => a.name.localeCompare(b.name));
+  const all = await store.tenants.list();
+  const scoped = onlyId ? all.filter((t) => t.id === onlyId) : all;
+  return scoped.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function createOrganization(

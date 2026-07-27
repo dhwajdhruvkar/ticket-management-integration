@@ -67,15 +67,35 @@ export async function listTickets(
   return rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
-export async function getTicket(id: string): Promise<TicketRow | null> {
-  const store = await getStore();
-  return store.tickets.get(id);
-}
-
-export async function getTicketView(id: string): Promise<TicketView | null> {
+/**
+ * Fetch a ticket by id. Pass `tenantId` from any request-facing caller so a
+ * guessed id from another tenant reads as missing.
+ */
+export async function getTicket(id: string, tenantId?: string): Promise<TicketRow | null> {
   const store = await getStore();
   const ticket = await store.tickets.get(id);
   if (!ticket) return null;
+  if (tenantId && ticket.tenantId !== tenantId) return null;
+  return ticket;
+}
+
+export interface TicketViewOptions {
+  /**
+   * Include internal notes. Defaults to false, so a requester-facing caller
+   * that forgets to pass this cannot leak agent-only commentary.
+   */
+  includeInternal?: boolean;
+  tenantId?: string;
+}
+
+export async function getTicketView(
+  id: string,
+  options: TicketViewOptions = {}
+): Promise<TicketView | null> {
+  const store = await getStore();
+  const ticket = await store.tickets.get(id);
+  if (!ticket) return null;
+  if (options.tenantId && ticket.tenantId !== options.tenantId) return null;
 
   const [messages, events, resolutions, approvals, assignee, group] = await Promise.all([
     store.messages.list({ ticketId: id }),
@@ -98,6 +118,10 @@ export async function getTicketView(id: string): Promise<TicketView | null> {
     resolution = { ...resolutions[0], citations };
   }
 
+  const visibleMessages = options.includeInternal
+    ? messages
+    : messages.filter((m) => m.visibility !== "internal");
+
   return {
     ...ticket,
     assignee: assignee ?? null,
@@ -105,7 +129,7 @@ export async function getTicketView(id: string): Promise<TicketView | null> {
     linkedCIs,
     approvals: approvals.sort(byCreatedAtAsc),
     sla: slaStatus(ticket),
-    messages: messages.sort(byCreatedAtAsc),
+    messages: visibleMessages.sort(byCreatedAtAsc),
     events: events.sort(byCreatedAtAsc),
     resolution,
   };

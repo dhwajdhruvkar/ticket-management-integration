@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { currentActor } from "@/server/context";
 import { fail, ok, parseBody } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, loadOwned, requirePermission } from "@/server/guards";
 import { CalendarError, deleteCalendar, updateCalendar } from "@/server/services/calendarService";
-import type { Role } from "@/server/domain/models";
 
 // PATCH/DELETE /api/v1/calendars/[id] — admin only.
 
@@ -22,13 +20,15 @@ const PatchSchema = z.object({
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "admin")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "admin");
+  if (isResponse(ctx)) return ctx;
+  const owned = await loadOwned(ctx, "calendars", id, "Calendar");
+  if (isResponse(owned)) return owned;
 
   const body = await parseBody(req, PatchSchema);
   if (body instanceof NextResponse) return body;
   try {
-    const updated = await updateCalendar(id, body, actor.name);
+    const updated = await updateCalendar(id, body, ctx.actor.name);
     return updated ? ok(updated) : fail("Calendar not found.", 404);
   } catch (err) {
     if (err instanceof CalendarError) return fail(err.message);
@@ -38,8 +38,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "admin")) return fail("Forbidden.", 403);
-  const removed = await deleteCalendar(id, actor.name);
+  const ctx = await requirePermission(req, "admin");
+  if (isResponse(ctx)) return ctx;
+  const owned = await loadOwned(ctx, "calendars", id, "Calendar");
+  if (isResponse(owned)) return owned;
+
+  const removed = await deleteCalendar(id, ctx.actor.name);
   return removed ? ok({ deleted: true }) : fail("Calendar not found.", 404);
 }

@@ -84,15 +84,19 @@ export async function listProblems(
   return rows.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-export async function getProblem(id: string): Promise<ProblemRow | null> {
-  const store = await getStore();
-  return store.problems.get(id);
-}
-
-export async function getProblemView(id: string): Promise<ProblemView | null> {
+export async function getProblem(id: string, tenantId?: string): Promise<ProblemRow | null> {
   const store = await getStore();
   const problem = await store.problems.get(id);
   if (!problem) return null;
+  if (tenantId && problem.tenantId !== tenantId) return null;
+  return problem;
+}
+
+export async function getProblemView(id: string, tenantId?: string): Promise<ProblemView | null> {
+  const store = await getStore();
+  const problem = await store.problems.get(id);
+  if (!problem) return null;
+  if (tenantId && problem.tenantId !== tenantId) return null;
 
   const linked = (await store.tickets.list({ tenantId: problem.tenantId })).filter(
     (t) => t.problemId === id
@@ -171,19 +175,36 @@ export interface ProblemPatch {
   assigneeId?: string | null;
 }
 
+export class ProblemStateError extends Error {}
+
 export async function updateProblem(
   id: string,
   patch: ProblemPatch,
-  actor = "system"
+  actor = "system",
+  tenantId?: string
 ): Promise<ProblemRow | null> {
   const store = await getStore();
   const existing = await store.problems.get(id);
   if (!existing) return null;
+  if (tenantId && existing.tenantId !== tenantId) return null;
 
   const next: Partial<ProblemRow> = { ...patch, updatedAt: now() };
   // Recompute priority if impact/urgency changed.
   if (patch.impact || patch.urgency) {
     next.priority = derivePriority(patch.impact ?? existing.impact, patch.urgency ?? existing.urgency);
+  }
+  // ITIL: a known error is a problem with a *documented* workaround. Without
+  // one the flag is a lie to every agent who sees the badge and goes looking.
+  const knownError = patch.knownError ?? existing.knownError;
+  const workaround = patch.workaround ?? existing.workaround;
+  if (knownError && !workaround?.trim()) {
+    throw new ProblemStateError("Document a workaround before marking this problem a known error.");
+  }
+  // Likewise, a problem is only "resolved" once the cause is established.
+  const status = patch.status ?? existing.status;
+  const rootCause = patch.rootCause ?? existing.rootCause;
+  if ((status === "resolved" || status === "closed") && !rootCause?.trim()) {
+    throw new ProblemStateError("Record the root cause before resolving or closing this problem.");
   }
   // Marking a known error implies it is at least investigated.
   if (patch.knownError && existing.status === "open") next.status = patch.status ?? "known_error";
@@ -199,11 +220,20 @@ export async function updateProblem(
   return updated;
 }
 
-export async function linkIncident(problemId: string, ticketId: string, actor = "system"): Promise<boolean> {
+export async function linkIncident(
+  problemId: string,
+  ticketId: string,
+  actor = "system",
+  tenantId?: string
+): Promise<boolean> {
   const store = await getStore();
   const problem = await store.problems.get(problemId);
   const ticket = await store.tickets.get(ticketId);
   if (!problem || !ticket) return false;
+  if (tenantId && problem.tenantId !== tenantId) return false;
+  // A problem and its incidents must live in the same tenant, or the linked
+  // incident list becomes a window into another organisation's tickets.
+  if (problem.tenantId !== ticket.tenantId) return false;
   await store.tickets.update(ticketId, { problemId, updatedAt: now() });
   await appendAudit({
     tenantId: problem.tenantId,
@@ -215,10 +245,16 @@ export async function linkIncident(problemId: string, ticketId: string, actor = 
   return true;
 }
 
-export async function unlinkIncident(problemId: string, ticketId: string, actor = "system"): Promise<boolean> {
+export async function unlinkIncident(
+  problemId: string,
+  ticketId: string,
+  actor = "system",
+  tenantId?: string
+): Promise<boolean> {
   const store = await getStore();
   const ticket = await store.tickets.get(ticketId);
   if (!ticket || ticket.problemId !== problemId) return false;
+  if (tenantId && ticket.tenantId !== tenantId) return false;
   await store.tickets.update(ticketId, { problemId: null, updatedAt: now() });
   await appendAudit({
     tenantId: ticket.tenantId,
@@ -230,10 +266,16 @@ export async function unlinkIncident(problemId: string, ticketId: string, actor 
   return true;
 }
 
-export async function addNote(id: string, author: string, body: string): Promise<ProblemRow | null> {
+export async function addNote(
+  id: string,
+  author: string,
+  body: string,
+  tenantId?: string
+): Promise<ProblemRow | null> {
   const store = await getStore();
   const problem = await store.problems.get(id);
   if (!problem || !body.trim()) return null;
+  if (tenantId && problem.tenantId !== tenantId) return null;
   const note: ProblemNote = { id: newId("note"), author, body: body.trim(), at: now() };
   const notes = [...(problem.notes ?? []), note];
   const updated = await store.problems.update(id, { notes, updatedAt: now() });
@@ -262,12 +304,16 @@ export async function createFromCluster(
   actor = "system"
 ): Promise<ProblemRow> {
   const store = await getStore();
-  const first = cluster.ticketIds[0] ? await store.tickets.get(cluster.ticketIds[0]) : null;
+  // Client-supplied ids: keep only tickets this tenant actually owns.
+  const candidates = await Promise.all(cluster.ticketIds.map((tid) => store.tickets.get(tid)));
+  const owned = candidates.filter((t) => t && t.tenantId === tenantId).map((t) => t!.id);
+
+  const first = owned[0] ? await store.tickets.get(owned[0]) : null;
   const problem = await createProblem(
     tenantId,
     {
       title: cluster.theme,
-      description: `Auto-created from ${cluster.ticketIds.length} similar incidents. Investigate the common root cause.`,
+      description: `Auto-created from ${owned.length} similar incidents. Investigate the common root cause.`,
       category: first?.category ?? "Other",
       impact: "medium",
       urgency: "medium",
@@ -275,15 +321,18 @@ export async function createFromCluster(
     actor
   );
   await store.problems.update(problem.id, { status: "investigating" });
-  for (const ticketId of cluster.ticketIds) {
-    await linkIncident(problem.id, ticketId, actor);
+  for (const ticketId of owned) {
+    await linkIncident(problem.id, ticketId, actor, tenantId);
   }
   return (await store.problems.get(problem.id)) ?? problem;
 }
 
 /** AI: propose a root cause from the problem and its linked incidents. */
-export async function aiSuggestRootCause(id: string): Promise<{ rootCause: string } | null> {
-  const view = await getProblemView(id);
+export async function aiSuggestRootCause(
+  id: string,
+  tenantId?: string
+): Promise<{ rootCause: string } | null> {
+  const view = await getProblemView(id, tenantId);
   if (!view) return null;
   const incidents = view.linkedIncidents.map((i) => `- ${i.subject}`).join("\n");
   const suggestion = await complete(
@@ -294,10 +343,17 @@ export async function aiSuggestRootCause(id: string): Promise<{ rootCause: strin
 }
 
 /** Publish the workaround to the knowledge base (Known Error -> self-service). */
-export async function publishWorkaroundToKb(id: string, actor = "system"): Promise<ProblemRow | null> {
+export async function publishWorkaroundToKb(
+  id: string,
+  actor = "system",
+  tenantId?: string
+): Promise<ProblemRow | null> {
   const store = await getStore();
   const problem = await store.problems.get(id);
   if (!problem || !problem.workaround) return null;
+  if (tenantId && problem.tenantId !== tenantId) return null;
+  // Republishing would create a second article for the same known error.
+  if (problem.publishedArticleId) return problem;
 
   const article = await createArticle(problem.tenantId, {
     title: `Workaround: ${problem.title}`,
@@ -323,10 +379,17 @@ export async function publishWorkaroundToKb(id: string, actor = "system"): Promi
 }
 
 /** Raise a Change for the permanent fix and link it to the problem. */
-export async function raiseChange(id: string, actor = "system"): Promise<{ problem: ProblemRow; changeId: string } | null> {
+export async function raiseChange(
+  id: string,
+  actor = "system",
+  tenantId?: string
+): Promise<{ problem: ProblemRow; changeId: string } | null> {
   const store = await getStore();
   const problem = await store.problems.get(id);
   if (!problem) return null;
+  if (tenantId && problem.tenantId !== tenantId) return null;
+  // One permanent-fix change per problem; the existing one is the answer.
+  if (problem.changeId) return { problem, changeId: problem.changeId };
 
   const change = await createChange(problem.tenantId, {
     title: `Permanent fix: ${problem.title}`,

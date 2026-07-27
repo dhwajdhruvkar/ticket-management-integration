@@ -59,7 +59,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const { appendAudit } = await import("@/server/audit/auditChain");
         const store = await getStore();
         const tenants = await store.tenants.list();
-        const tenantId = (user as { tenantId?: string }).tenantId ?? tenants[0]?.id;
+        const tenantId =
+          (user as { tenantId?: string }).tenantId ??
+          (tenants.find((t) => t.isInternal) ?? tenants[0])?.id;
         if (tenantId) {
           await appendAudit({
             tenantId,
@@ -79,7 +81,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const tenants = await store.tenants.list();
         const token =
           "token" in message ? (message.token as { email?: string; tenantId?: string } | null) : null;
-        const tenantId = token?.tenantId ?? tenants[0]?.id;
+        const tenantId = token?.tenantId ?? (tenants.find((t) => t.isInternal) ?? tenants[0])?.id;
         if (tenantId) {
           await appendAudit({
             tenantId,
@@ -126,7 +128,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (account?.provider === "microsoft-entra-id" && user.email) {
         const store = await getStore();
         const tenants = await store.tenants.list();
-        const tenantId = tenants[0]?.id;
+        // The operator's own organisation, not just whichever tenant happens
+        // to be first: a new SSO user must not land in a customer tenant.
+        const tenantId = (tenants.find((t) => t.isInternal) ?? tenants[0])?.id;
         if (tenantId) {
           const existing = (await store.users.list({ tenantId })).find(
             (u) => u.email.toLowerCase() === user.email!.toLowerCase()

@@ -1,5 +1,5 @@
-import { currentActor } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
+import { actorContext, isResponse, loadTicket } from "@/server/guards";
 import { can, isAgentRole } from "@/server/auth/rbac";
 import {
   agentClose,
@@ -9,8 +9,7 @@ import {
   submitFeedback,
 } from "@/server/services/agentActions";
 import { acceptSuggestion, resolveTicket } from "@/server/ai/resolver";
-import { getTicket } from "@/server/services/ticketService";
-import type { Role } from "@/server/domain/models";
+import type { TicketStatus } from "@/server/domain/models";
 
 // =============================================================================
 // POST /api/v1/tickets/[id]/actions — ticket lifecycle actions.
@@ -38,17 +37,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const body = await readJson<ActionBody>(req);
   if (!body?.action) return fail("action is required.");
-  const actor = await currentActor(req);
-  const role = actor.role as Role;
+  const ctx = await actorContext(req);
+  const { actor, role } = ctx;
+
+  // Tenant scope for everyone; requesters additionally only see their own.
+  const ticket = await loadTicket(ctx, id);
+  if (isResponse(ticket)) return ticket;
 
   // Requesters may only reopen or give feedback on their own tickets.
   if (!isAgentRole(role)) {
     if (body.action !== "reopen" && body.action !== "feedback") return fail("Forbidden.", 403);
-    const ticket = await getTicket(id);
-    if (!ticket) return fail("Ticket not found.", 404);
-    if (ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()) {
-      return fail("Forbidden.", 403);
-    }
     // Governance: a cancelled ticket (e.g. a rejected service request) cannot
     // be resurrected by its requester — that would bypass the approval flow.
     if (ticket.status === "cancelled") {
@@ -68,9 +66,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return respond(await agentClose(id, actor));
     case "reopen":
       return respond(await reopenTicket(id, actor));
-    case "feedback":
+    case "feedback": {
       if (!body.satisfaction) return fail("satisfaction is required for feedback.");
+      // CSAT is feedback on an outcome; there is no outcome to rate until the
+      // ticket has actually been resolved or closed.
+      if (!RATEABLE.has(ticket.status)) {
+        return fail("This ticket has not been resolved yet, so it cannot be rated.", 409);
+      }
       return respond(await submitFeedback(id, body.satisfaction, body.comment));
+    }
     case "run_ai":
       if (!can(role, "ticket.write")) return fail("Forbidden.", 403);
       return respond(await resolveTicket(id));
@@ -81,6 +85,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return fail("Unknown action.");
   }
 }
+
+const RATEABLE = new Set<TicketStatus>(["resolved", "auto_resolved", "closed"]);
 
 function respond<T>(result: T | null) {
   return result ? ok(result) : fail("Ticket not found.", 404);

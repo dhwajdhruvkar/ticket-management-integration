@@ -73,7 +73,7 @@ const PRIORITY_ORDER = ["critical", "high", "medium", "low", "very_low"];
 
 export async function computeMetrics(tenantId: string): Promise<Metrics> {
   const store = await getStore();
-  const [tickets, resolutions, articles, audit, users, groups, events] = await Promise.all([
+  const [tickets, allResolutions, articles, audit, users, groups, allEvents] = await Promise.all([
     store.tickets.list({ tenantId }),
     store.resolutions.list(),
     store.articles.list({ tenantId }),
@@ -82,6 +82,12 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
     store.groups.list({ tenantId }),
     store.events.list(),
   ]);
+
+  // Resolutions and events are keyed by ticket, not tenant, so scope them to
+  // this tenant's tickets before anything is counted.
+  const ticketIds = new Set(tickets.map((t) => t.id));
+  const resolutions = allResolutions.filter((r) => ticketIds.has(r.ticketId));
+  const events = allEvents.filter((e) => ticketIds.has(e.ticketId));
 
   const byType = countBy(tickets, (t) => t.type);
   const byStatus = countBy(tickets, (t) => t.status);
@@ -129,9 +135,8 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
   });
 
   // Reopen rate: tickets with at least one "reopened" lifecycle event.
-  const ticketIds = new Set(tickets.map((t) => t.id));
   const reopenedIds = new Set(
-    events.filter((e) => e.type === "reopened" && ticketIds.has(e.ticketId)).map((e) => e.ticketId)
+    events.filter((e) => e.type === "reopened").map((e) => e.ticketId)
   );
   const reopenRate = tickets.length ? reopenedIds.size / tickets.length : 0;
 

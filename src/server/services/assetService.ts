@@ -71,11 +71,21 @@ export async function createCI(
   return ci;
 }
 
-export async function linkCIs(sourceId: string, targetId: string, kind = "depends_on"): Promise<CIRelationshipRow | null> {
+export async function linkCIs(
+  sourceId: string,
+  targetId: string,
+  kind = "depends_on",
+  tenantId?: string
+): Promise<CIRelationshipRow | null> {
   const store = await getStore();
   const src = await store.cis.get(sourceId);
   const tgt = await store.cis.get(targetId);
   if (!src || !tgt) return null;
+  if (tenantId && src.tenantId !== tenantId) return null;
+  // A dependency edge across tenants would put another organisation's CIs into
+  // this tenant's impact analysis.
+  if (src.tenantId !== tgt.tenantId) return null;
+  if (sourceId === targetId) return null;
   const rel: CIRelationshipRow = { id: newId("rel"), sourceId, targetId, kind };
   await store.ciRelationships.create(rel);
   await appendAudit({ tenantId: src.tenantId, actor: "system", action: "ci.linked", payload: { sourceId, targetId, kind } });
@@ -89,10 +99,11 @@ export interface ImpactAnalysis {
 }
 
 /** What breaks if this CI goes down: dependents + open tickets referencing it. */
-export async function impactOf(ciId: string): Promise<ImpactAnalysis | null> {
+export async function impactOf(ciId: string, tenantId?: string): Promise<ImpactAnalysis | null> {
   const store = await getStore();
   const ci = await store.cis.get(ciId);
   if (!ci) return null;
+  if (tenantId && ci.tenantId !== tenantId) return null;
 
   // Walk the dependency graph (CIs that depend on this one), breadth-first.
   const rels = await store.ciRelationships.list();

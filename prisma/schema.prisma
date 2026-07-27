@@ -348,7 +348,6 @@ model Ticket {
   resolution  Resolution?
   approvals   Approval[]
   attachments Attachment[]
-  affectedCIs ConfigurationItem[] @relation("TicketCIs")
 
   @@index([tenantId, status])
   @@index([tenantId, type])
@@ -494,7 +493,6 @@ model Change {
   tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   approvals     Approval[]
   linkedTickets Ticket[]
-  affectedCIs   ConfigurationItem[] @relation("ChangeCIs")
 
   @@index([tenantId, status])
 }
@@ -556,11 +554,10 @@ model ConfigurationItem {
   asset  Asset? @relation(fields: [assetId], references: [id])
 
   // Self-referential dependency graph (CI -> depends on -> CI).
+  // Tickets and changes reference CIs through their `ciIds` scalar list, which
+  // both data drivers share; there is deliberately no join table here.
   dependsOn  CIRelationship[] @relation("Source")
   dependents CIRelationship[] @relation("Target")
-
-  affectedTickets Ticket[] @relation("TicketCIs")
-  affectedChanges Change[] @relation("ChangeCIs")
 
   @@index([tenantId, type])
 }
@@ -686,6 +683,8 @@ model CustomFieldDef {
   tenantId  String
   key       String
   label     String
+  // Admin-authored help text surfaced as the field's "i" tooltip.
+  description String?
   type      String   @default("text")
   options   String[] @default([])
   required  Boolean  @default(false)

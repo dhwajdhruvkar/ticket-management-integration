@@ -1,5 +1,6 @@
-import { currentTenantId } from "@/server/context";
 import { ok } from "@/server/http";
+import { isResponse, requirePermission } from "@/server/guards";
+import { isAgentRole } from "@/server/auth/rbac";
 import { search, snippetFor } from "@/server/ai/vectorSearch";
 
 export const runtime = "nodejs";
@@ -8,13 +9,18 @@ export const dynamic = "force-dynamic";
 // GET /api/v1/kb/search?q= — vector search over KB articles; returns ranked
 // hits with score + snippet (the same retrieval the AI resolver uses).
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
+  const ctx = await requirePermission(req, "kb.read");
+  if (isResponse(ctx)) return ctx;
+
   const url = new URL(req.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
-  const k = Number(url.searchParams.get("k") ?? 5);
+  const parsedK = Number(url.searchParams.get("k") ?? 5);
+  const k = Number.isFinite(parsedK) ? Math.min(Math.max(Math.trunc(parsedK), 1), 25) : 5;
   if (!q) return ok({ query: q, model: null, hits: [] });
 
-  const { hits, model } = await search(tenantId, q, k);
+  const { hits, model } = await search(ctx.tenantId, q, k, {
+    publicOnly: !isAgentRole(ctx.role),
+  });
   return ok({
     query: q,
     model,

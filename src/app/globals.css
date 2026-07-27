@@ -1026,6 +1026,67 @@ body {
   box-shadow: var(--shadow-md);
 }
 
+/* =========================================================
+   Info hints — the small circled "i" with a hover/focus bubble
+   ========================================================= */
+.info-hint {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  color: var(--muted-soft);
+  cursor: help;
+  border-radius: var(--r-pill);
+  outline: none;
+  transition: color var(--dur-1) var(--ease);
+}
+.info-hint:hover,
+.info-hint:focus-visible {
+  color: var(--brand-500);
+}
+.info-hint:focus-visible {
+  box-shadow: 0 0 0 3px var(--ring);
+}
+/* Portalled to <body> and positioned in viewport coordinates by InfoHint, so
+   the scrolling rails and panels it usually sits in cannot clip it. */
+.info-hint-bubble {
+  position: fixed;
+  z-index: 200;
+  width: max-content;
+  padding: 0.5rem 0.62rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  font-size: 0.74rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+  animation: hint-in var(--dur-1) var(--ease-out) both;
+}
+
+/* Each side eases in from the trigger it belongs to. */
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    transform: var(--hint-from, translateY(4px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.info-hint-top { --hint-from: translateY(4px); }
+.info-hint-bottom { --hint-from: translateY(-4px); }
+.info-hint-left { --hint-from: translateX(4px); }
+.info-hint-right { --hint-from: translateX(-4px); }
+
 /* Staggered section entrances (capped at 8 children) */
 .stagger > * {
   animation: fade-up var(--dur-3) var(--ease-out) both;

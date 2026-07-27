@@ -20,6 +20,21 @@ export async function readJson<T>(req: Request): Promise<T | null> {
 }
 
 /**
+ * Narrow a row fetched by primary key to the caller's tenant.
+ *
+ * Returns the row when it belongs to `tenantId`, otherwise `null`. Callers
+ * should answer 404 rather than 403 on a miss: telling an outsider that an id
+ * exists in another tenant is itself a leak.
+ */
+export function assertTenant<T extends { tenantId: string }>(
+  row: T | null | undefined,
+  tenantId: string
+): T | null {
+  if (!row) return null;
+  return row.tenantId === tenantId ? row : null;
+}
+
+/**
  * Parse + validate a JSON body against a zod schema. Returns the typed value,
  * or a `NextResponse` 400 carrying the first validation issue.
  */

@@ -1,10 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { apiGet, apiSend } from "@/lib/api";
-import { AIPanel } from "@/components/ui";
+import { HINTS } from "@/lib/hints";
+import { AIPanel, LabelWithHint } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { useNarrow } from "@/components/useNarrow";
+import { useAgentOnly } from "@/components/Persona";
+import { EmptyState } from "@/components/primitives";
+import { AlertTriangle } from "lucide-react";
 
 // =============================================================================
 // Route /problems — ITIL Problem Management (agent+).
@@ -59,6 +64,7 @@ const FILTERS: { id: string; label: string }[] = [
 
 export default function ProblemsPage() {
   const toast = useToast();
+  const isAgent = useAgentOnly();
   const narrow = useNarrow(1000);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -71,26 +77,45 @@ export default function ProblemsPage() {
   const [showForm, setShowForm] = useState(false);
   const [rca, setRca] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refreshList = useCallback(async () => {
-    const [m, list, cl, inc] = await Promise.all([
-      apiGet<Metrics>("/problems?metrics=1"),
-      apiGet<Problem[]>("/problems"),
-      apiGet<Cluster[]>("/problems?suggest=1").catch(() => []),
-      apiGet<Incident[]>("/tickets?type=incident").catch(() => []),
-    ]);
-    setMetrics(m);
-    setProblems(list);
-    setClusters(cl);
-    setIncidents(inc);
+    try {
+      const [m, list, cl, inc] = await Promise.all([
+        apiGet<Metrics>("/problems?metrics=1"),
+        apiGet<Problem[]>("/problems"),
+        apiGet<Cluster[]>("/problems?suggest=1").catch(() => []),
+        apiGet<Incident[]>("/tickets?type=incident").catch(() => []),
+      ]);
+      setMetrics(m);
+      setProblems(list);
+      setClusters(cl);
+      setIncidents(inc);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
+    }
   }, []);
 
-  const loadDetail = useCallback(async (id: string) => {
-    setRca(null);
-    setDetail(await apiGet<Problem>(`/problems/${id}`));
-  }, []);
+  const loadDetail = useCallback(
+    async (id: string) => {
+      setRca(null);
+      try {
+        setDetail(await apiGet<Problem>(`/problems/${id}`));
+      } catch (err) {
+        setDetail(null);
+        toast.error({
+          title: "Could not open that problem",
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [toast]
+  );
 
-  useEffect(() => { refreshList(); }, [refreshList]);
+  useEffect(() => {
+    if (isAgent) refreshList();
+  }, [isAgent, refreshList]);
   useEffect(() => { if (selectedId) loadDetail(selectedId); }, [selectedId, loadDetail]);
 
   async function refreshAll() {
@@ -150,6 +175,27 @@ export default function ProblemsPage() {
     return true;
   });
 
+  if (!isAgent) return <div className="page-pad" />;
+
+  if (loadError) {
+    return (
+      <div className="page-pad">
+        <div style={{ maxWidth: 560, margin: "8vh auto 0" }}>
+          <EmptyState
+            icon={AlertTriangle}
+            title="Could not load problem management"
+            description={loadError}
+            action={
+              <button className="btn btn-primary" onClick={() => void refreshList()}>
+                Try again
+              </button>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* Header + metrics */}
@@ -172,10 +218,10 @@ export default function ProblemsPage() {
           <div className="stagger" style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
             <Stat label="Total" value={metrics.total} active={filter === "all"} onClick={() => setFilter("all")} />
             <Stat label="Open" value={metrics.open} color="var(--danger-solid)" active={filter === "open"} onClick={() => setFilter(filter === "open" ? "all" : "open")} />
-            <Stat label="Investigating" value={metrics.investigating} color="var(--info-solid)" active={filter === "investigating"} onClick={() => setFilter(filter === "investigating" ? "all" : "investigating")} />
-            <Stat label="Known errors" value={metrics.knownErrors} color="var(--warning-solid)" active={filter === "flag:known_error"} onClick={() => setFilter(filter === "flag:known_error" ? "all" : "flag:known_error")} />
+            <Stat label="Investigating" value={metrics.investigating} color="var(--info-solid)" active={filter === "investigating"} onClick={() => setFilter(filter === "investigating" ? "all" : "investigating")} info="Problems where root cause analysis is under way but no cause has been confirmed yet." />
+            <Stat label="Known errors" value={metrics.knownErrors} color="var(--warning-solid)" active={filter === "flag:known_error"} onClick={() => setFilter(filter === "flag:known_error" ? "all" : "flag:known_error")} info={HINTS.knownError} />
             <Stat label="Resolved" value={metrics.resolved} color="var(--success-solid)" active={filter === "resolved"} onClick={() => setFilter(filter === "resolved" ? "all" : "resolved")} />
-            <Stat label="Incidents linked" value={metrics.incidentsLinked} />
+            <Stat label="Incidents linked" value={metrics.incidentsLinked} info={HINTS.linkedIncidents} />
           </div>
         ) : null}
       </div>
@@ -186,6 +232,7 @@ export default function ProblemsPage() {
         <div className="anim-fade-up" style={{ margin: "0.9rem 1.5rem 0" }}>
           <AIPanel
             title={`AI incident cluster analysis — ${clusters.length} recurring ${clusters.length === 1 ? "pattern" : "patterns"}`}
+            info={HINTS.aiClusters}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {clusters.map((c, i) => (
@@ -398,36 +445,52 @@ function Stat({
   color,
   active,
   onClick,
+  info,
 }: {
   label: string;
   value: number;
   color?: string;
   active?: boolean;
   onClick?: () => void;
+  info?: string;
 }) {
   const clickable = !!onClick;
+  const surface: React.CSSProperties = {
+    background: active ? "var(--brand-50)" : "var(--surface)",
+    border: `1px solid ${active ? "var(--brand-500)" : "var(--border)"}`,
+    borderRadius: 10,
+    padding: "0.45rem 0.75rem",
+    minWidth: 92,
+    textAlign: "left",
+    boxShadow: active ? "var(--shadow-sm)" : "none",
+    transition:
+      "border-color var(--dur-2) var(--ease), background var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease), transform var(--dur-2) var(--ease-out)",
+  };
+  const body = (
+    <>
+      <div style={{ fontSize: "1.1rem", fontWeight: 800, color: color ?? "var(--text)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      <div className="muted" style={{ fontSize: "0.66rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        <LabelWithHint info={info} nested={clickable} size={11}>
+          {label}
+        </LabelWithHint>
+      </div>
+    </>
+  );
+
+  // Non-filtering stats render as a plain chip rather than a permanently
+  // disabled button, which reads as broken to both users and screen readers.
+  if (!clickable) return <div style={surface}>{body}</div>;
+
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={!clickable}
       aria-pressed={active}
-      className={clickable ? "hover-lift" : undefined}
-      style={{
-        background: active ? "var(--brand-50)" : "var(--surface)",
-        border: `1px solid ${active ? "var(--brand-500)" : "var(--border)"}`,
-        borderRadius: 10,
-        padding: "0.45rem 0.75rem",
-        minWidth: 92,
-        textAlign: "left",
-        cursor: clickable ? "pointer" : "default",
-        boxShadow: active ? "var(--shadow-sm)" : "none",
-        transition:
-          "border-color var(--dur-2) var(--ease), background var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease), transform var(--dur-2) var(--ease-out)",
-      }}
+      aria-label={info ? `${label}: ${value}. ${info}` : undefined}
+      className="hover-lift"
+      style={{ ...surface, cursor: "pointer" }}
     >
-      <div style={{ fontSize: "1.1rem", fontWeight: 800, color: color ?? "var(--text)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
-      <div className="muted" style={{ fontSize: "0.66rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+      {body}
     </button>
   );
 }
@@ -451,9 +514,9 @@ function NewProblemForm({ busy, onCreate }: { busy: boolean; onCreate: (b: Recor
       <input className="input" placeholder="Problem title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ marginBottom: 8 }} />
       <textarea className="textarea" rows={2} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} style={{ marginBottom: 8 }} />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <Labeled label="Impact"><select className="select" value={impact} onChange={(e) => setImpact(e.target.value)}><option>low</option><option>medium</option><option>high</option></select></Labeled>
-        <Labeled label="Urgency"><select className="select" value={urgency} onChange={(e) => setUrgency(e.target.value)}><option>low</option><option>medium</option><option>high</option></select></Labeled>
-        <Labeled label="Category"><select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>{["IT","HR","Access","Software","Hardware","Network","Billing","Other"].map((c) => <option key={c}>{c}</option>)}</select></Labeled>
+        <Labeled label="Impact" info={HINTS.impact}><select className="select" value={impact} onChange={(e) => setImpact(e.target.value)}><option>low</option><option>medium</option><option>high</option></select></Labeled>
+        <Labeled label="Urgency" info={HINTS.urgency}><select className="select" value={urgency} onChange={(e) => setUrgency(e.target.value)}><option>low</option><option>medium</option><option>high</option></select></Labeled>
+        <Labeled label="Category" info={HINTS.category}><select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>{["IT","HR","Access","Software","Hardware","Network","Billing","Other"].map((c) => <option key={c}>{c}</option>)}</select></Labeled>
       </div>
       <button className="btn btn-primary" disabled={busy || !title.trim() || !description.trim()} onClick={() => onCreate({ title, description, impact, urgency, category })}>
         {busy ? "Creating…" : "Create problem"}
@@ -462,8 +525,17 @@ function NewProblemForm({ busy, onCreate }: { busy: boolean; onCreate: (b: Recor
   );
 }
 
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
-  return <div><div className="label" style={{ fontSize: "0.62rem", marginBottom: 2 }}>{label}</div>{children}</div>;
+function Labeled({ label, children, info }: { label: string; children: ReactNode; info?: string }) {
+  return (
+    <div>
+      <div className="label" style={{ fontSize: "0.62rem", marginBottom: 2 }}>
+        <LabelWithHint info={info} size={11}>
+          {label}
+        </LabelWithHint>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 function ProblemDetail({
@@ -515,7 +587,9 @@ function ProblemDetail({
         >
           <WarnGlyph />
           <div>
-            <div style={{ fontSize: "0.82rem", fontWeight: 700 }}>Known error</div>
+            <div style={{ fontSize: "0.82rem", fontWeight: 700 }}>
+              <LabelWithHint info={HINTS.knownError}>Known error</LabelWithHint>
+            </div>
             <div style={{ fontSize: "0.74rem", opacity: 0.85 }}>
               {p.workaround ? "Workaround documented — see below." : "No workaround documented yet."}
             </div>
@@ -526,23 +600,23 @@ function ProblemDetail({
       {/* status transitions */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "0.6rem 0 1rem" }}>
         {STATUSES.filter((s) => s !== p.status).map((s) => (
-          <button key={s} className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => onPatch({ status: s })}>→ {cap(s)}</button>
+          <button key={s} className="btn btn-ghost" disabled={busy} style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => onPatch({ status: s })}>→ {cap(s)}</button>
         ))}
-        <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => onPatch({ knownError: !p.knownError })}>
+        <button className="btn btn-ghost" disabled={busy} style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => onPatch({ knownError: !p.knownError })}>
           {p.knownError ? "Unmark known error" : "Mark known error"}
         </button>
       </div>
 
       {/* RCA */}
-      <Section title="Root cause analysis" icon={<RcaGlyph />}>
+      <Section title="Root cause analysis" icon={<RcaGlyph />} info={HINTS.rootCause}>
         <p style={{ fontSize: "0.85rem", margin: "0 0 8px", color: p.rootCause ? "var(--text)" : "var(--muted)" }}>
           {p.rootCause || "No root cause recorded yet."}
         </p>
         {rca ? (
           <div className="anim-scale-in" style={{ marginBottom: 8 }}>
-            <AIPanel title="AI suggested root cause">
+            <AIPanel title="AI suggested root cause" info={HINTS.aiRootCause}>
               <p style={{ fontSize: "0.84rem", margin: "0 0 8px", lineHeight: 1.55, color: "var(--text)" }}>{rca}</p>
-              <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.25rem 0.6rem", marginRight: 6 }} onClick={() => onApplyRca(rca)}>Apply</button>
+              <button className="btn btn-primary" disabled={busy} style={{ fontSize: "0.72rem", padding: "0.25rem 0.6rem", marginRight: 6 }} onClick={() => onApplyRca(rca)}>Apply</button>
               <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.25rem 0.6rem" }} onClick={onDismissRca}>Dismiss</button>
             </AIPanel>
           </div>
@@ -566,13 +640,13 @@ function ProblemDetail({
       </Section>
 
       {/* Workaround / KEDB */}
-      <Section title="Workaround (known error)" icon={<WrenchGlyph />}>
+      <Section title="Workaround (known error)" icon={<WrenchGlyph />} info={HINTS.workaround}>
         <textarea className="textarea" rows={2} defaultValue={p.workaround ?? ""} placeholder="Document the workaround…"
           onBlur={(e) => { if (e.target.value !== (p.workaround ?? "")) onPatch({ workaround: e.target.value }); }} style={{ marginBottom: 6 }} />
         {p.publishedArticleId ? (
           <span className="badge" style={{ background: "var(--success-bg)", color: "var(--success-fg)" }}>Published to knowledge base ✓</span>
         ) : (
-          <button className="btn btn-ghost" style={{ fontSize: "0.74rem" }} disabled={!p.workaround} onClick={() => onAction({ action: "publish_workaround" })}>
+          <button className="btn btn-ghost" style={{ fontSize: "0.74rem" }} disabled={busy || !p.workaround} onClick={() => onAction({ action: "publish_workaround" })}>
             Publish workaround to KB
           </button>
         )}
@@ -582,15 +656,21 @@ function ProblemDetail({
       <Section
         title={`Linked incidents (${p.linkedIncidents?.length ?? 0}${p.openIncidentCount ? ` · ${p.openIncidentCount} open` : ""})`}
         icon={<LinkGlyph />}
+        info={HINTS.linkedIncidents}
       >
         {p.linkedIncidents && p.linkedIncidents.length > 0 ? (
           <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
             {p.linkedIncidents.map((i) => (
               <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.82rem" }}>
-                <span className="mono" style={{ fontSize: "0.7rem", color: "var(--muted)" }}>{i.reference}</span>
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.subject}</span>
+                <Link
+                  href={`/tickets/${i.id}`}
+                  style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, textDecoration: "none", color: "inherit" }}
+                >
+                  <span className="mono" style={{ fontSize: "0.7rem", color: "var(--muted)" }}>{i.reference}</span>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.subject}</span>
+                </Link>
                 <span className="badge" style={{ fontSize: "0.62rem" }}>{cap(i.status)}</span>
-                <button className="btn btn-ghost" style={{ fontSize: "0.68rem", padding: "0.2rem 0.45rem" }} onClick={() => onAction({ action: "unlink_incident", ticketId: i.id })}>Unlink</button>
+                <button className="btn btn-ghost" disabled={busy} style={{ fontSize: "0.68rem", padding: "0.2rem 0.45rem" }} onClick={() => onAction({ action: "unlink_incident", ticketId: i.id })}>Unlink</button>
               </div>
             ))}
           </div>
@@ -600,16 +680,16 @@ function ProblemDetail({
             <option value="">Link an incident…</option>
             {linkable.map((i) => <option key={i.id} value={i.id}>{i.reference} — {i.subject.slice(0, 40)}</option>)}
           </select>
-          <button className="btn btn-ghost" disabled={!linkPick} onClick={async () => { await onAction({ action: "link_incident", ticketId: linkPick }); setLinkPick(""); }}>Link</button>
+          <button className="btn btn-ghost" disabled={busy || !linkPick} onClick={async () => { await onAction({ action: "link_incident", ticketId: linkPick }); setLinkPick(""); }}>Link</button>
         </div>
       </Section>
 
       {/* Permanent fix */}
-      <Section title="Permanent fix" icon={<HammerGlyph />}>
+      <Section title="Permanent fix" icon={<HammerGlyph />} info={HINTS.permanentFix}>
         {p.changeId ? (
           <span className="badge" style={{ background: "var(--info-bg)", color: "var(--info-fg)" }}>Change raised ✓</span>
         ) : (
-          <button className="btn btn-ghost" style={{ fontSize: "0.74rem" }} onClick={() => onAction({ action: "raise_change" })}>Raise a change for the permanent fix →</button>
+          <button className="btn btn-ghost" disabled={busy} style={{ fontSize: "0.74rem" }} onClick={() => onAction({ action: "raise_change" })}>Raise a change for the permanent fix →</button>
         )}
       </Section>
 
@@ -634,12 +714,24 @@ function ProblemDetail({
   );
 }
 
-function Section({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
+function Section({
+  title,
+  icon,
+  children,
+  info,
+}: {
+  title: string;
+  icon?: ReactNode;
+  children: ReactNode;
+  info?: string;
+}) {
   return (
     <div style={{ borderTop: "1px solid var(--border)", paddingTop: 12, marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
         {icon ? <span style={{ color: "var(--muted)", display: "inline-flex" }}>{icon}</span> : null}
-        <span className="label" style={{ margin: 0 }}>{title}</span>
+        <span className="label" style={{ margin: 0 }}>
+          <LabelWithHint info={info}>{title}</LabelWithHint>
+        </span>
       </div>
       {children}
     </div>

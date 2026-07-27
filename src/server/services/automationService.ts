@@ -10,7 +10,9 @@
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
 import { newId, now } from "../domain/ids";
+import { withRetry } from "../resilience";
 import { getTicket, mutateTicket, recordEvent } from "./ticketService";
+import { applySla } from "./slaService";
 import { notify } from "../notify/notifier";
 import type { AutomationRow, TicketRow } from "../domain/models";
 
@@ -48,7 +50,8 @@ export async function listAutomations(tenantId: string): Promise<AutomationRow[]
 
 export async function createAutomation(
   tenantId: string,
-  input: { name: string; trigger: string; conditions: RuleConditions; actions: Action[]; enabled?: boolean }
+  input: { name: string; trigger: string; conditions: RuleConditions; actions: Action[]; enabled?: boolean },
+  actor = "system"
 ): Promise<AutomationRow> {
   const store = await getStore();
   const rule: AutomationRow = {
@@ -64,13 +67,28 @@ export async function createAutomation(
     updatedAt: now(),
   };
   await store.automations.create(rule);
-  await appendAudit({ tenantId, actor: "system", action: "automation.created", payload: { name: rule.name } });
+  await appendAudit({ tenantId, actor, action: "automation.created", payload: { name: rule.name } });
   return rule;
 }
 
-export async function toggleAutomation(id: string, enabled: boolean): Promise<AutomationRow | null> {
+export async function toggleAutomation(
+  id: string,
+  enabled: boolean,
+  actor = "system"
+): Promise<AutomationRow | null> {
   const store = await getStore();
-  return store.automations.update(id, { enabled, updatedAt: now() });
+  const existing = await store.automations.get(id);
+  if (!existing) return null;
+  const updated = await store.automations.update(id, { enabled, updatedAt: now() });
+  // Silently disabling a rule changes how every future ticket is handled, so
+  // it belongs on the audit chain alongside the rest of the config history.
+  await appendAudit({
+    tenantId: existing.tenantId,
+    actor,
+    action: enabled ? "automation.enabled" : "automation.disabled",
+    payload: { id, name: existing.name },
+  });
+  return updated;
 }
 
 function matchOne(ticket: TicketRow, c: Condition): boolean {
@@ -81,9 +99,20 @@ function matchOne(ticket: TicketRow, c: Condition): boolean {
     case "neq":
       return actual !== c.value;
     case "contains":
+      // On an array field (tags, ciIds) "contains" means membership, not
+      // substring — `tags contains vip` should not match the tag "vipn".
+      if (Array.isArray(actual)) {
+        return actual.some((v) => String(v).toLowerCase() === String(c.value).toLowerCase());
+      }
       return String(actual ?? "").toLowerCase().includes(String(c.value).toLowerCase());
-    case "in":
-      return Array.isArray(c.value) && (c.value as unknown[]).includes(actual);
+    case "in": {
+      if (!Array.isArray(c.value)) return false;
+      const options = c.value as unknown[];
+      // For an array field, "in" asks whether the field intersects the option
+      // list; comparing the array itself would never be equal to anything.
+      if (Array.isArray(actual)) return actual.some((v) => options.includes(v));
+      return options.includes(actual);
+    }
     default:
       return false;
   }
@@ -106,8 +135,7 @@ export async function runAutomations(
   ticketId: string
 ): Promise<{ applied: string[] }> {
   const store = await getStore();
-  const ticket = await getTicket(ticketId);
-  if (!ticket) return { applied: [] };
+  if (!(await getTicket(ticketId, tenantId))) return { applied: [] };
 
   const rules = (await store.automations.list({ tenantId, enabled: true })).filter(
     (r) => r.trigger === trigger
@@ -115,7 +143,11 @@ export async function runAutomations(
 
   const applied: string[] = [];
   for (const rule of rules) {
-    if (!evaluate(ticket, rule.conditions as RuleConditions)) continue;
+    // Re-read per rule: an earlier rule in this same pass may have changed the
+    // priority or status that this one is testing.
+    const current = await getTicket(ticketId, tenantId);
+    if (!current) break;
+    if (!evaluate(current, rule.conditions as RuleConditions)) continue;
 
     const actions = (rule.actions as Action[]) ?? [];
     for (const action of actions) {
@@ -135,9 +167,11 @@ export async function runAutomations(
   return { applied };
 }
 
-// Tickets currently inside an automation run: actions that mutate the ticket
-// (set_status etc.) re-enter mutateTicket, which fires ticket.updated — the
-// guard stops that from cascading into infinite rule loops.
+// Ticket+trigger pairs currently inside an automation run: actions that mutate
+// the ticket (set_status etc.) re-enter mutateTicket, which fires
+// ticket.updated — the guard stops that cascading into an infinite rule loop.
+// Keying by trigger as well as ticket matters: an sla.breached rule must still
+// be able to run while a ticket.updated pass is in flight for the same ticket.
 const inFlight = new Set<string>();
 
 /** Reentrancy-safe wrapper used by event-driven triggers (ticket.updated, sla.*). */
@@ -146,22 +180,30 @@ export async function runAutomationsSafe(
   trigger: string,
   ticketId: string
 ): Promise<{ applied: string[] }> {
-  if (inFlight.has(ticketId)) return { applied: [] };
-  inFlight.add(ticketId);
+  const key = `${ticketId}::${trigger}`;
+  if (inFlight.has(key)) return { applied: [] };
+  inFlight.add(key);
   try {
     return await runAutomations(tenantId, trigger, ticketId);
   } catch (err) {
-    console.error(`[automation] ${trigger} failed:`, err);
+    // Never let a bad rule take down intake, but do not lose the failure
+    // either: it lands on the audit chain via withRetry's dead-letter.
+    await withRetry(() => Promise.reject(err), {
+      step: `automation.${trigger}`,
+      tenantId,
+      ticketId,
+      attempts: 1,
+    });
     return { applied: [] };
   } finally {
-    inFlight.delete(ticketId);
+    inFlight.delete(key);
   }
 }
 
 /** Evaluate rules without applying — returns which rules would run. */
 export async function dryRun(tenantId: string, ticketId: string, trigger: string): Promise<string[]> {
   const store = await getStore();
-  const ticket = await getTicket(ticketId);
+  const ticket = await getTicket(ticketId, tenantId);
   if (!ticket) return [];
   const rules = (await store.automations.list({ tenantId, enabled: true })).filter(
     (r) => r.trigger === trigger
@@ -170,15 +212,28 @@ export async function dryRun(tenantId: string, ticketId: string, trigger: string
 }
 
 async function applyAction(tenantId: string, ticketId: string, action: Action): Promise<void> {
-  const ticket = await getTicket(ticketId);
+  const ticket = await getTicket(ticketId, tenantId);
   if (!ticket) return;
 
   switch (action.type) {
     case "assign":
-      if (action.assigneeId) await mutateTicket(ticketId, { assigneeId: action.assigneeId });
+      if (action.assigneeId) {
+        // Only assign to a member of this tenant, and only to someone who can
+        // actually work tickets.
+        const store = await getStore();
+        const assignee = await store.users.get(action.assigneeId);
+        if (assignee && assignee.tenantId === tenantId) {
+          await mutateTicket(ticketId, { assigneeId: action.assigneeId });
+        }
+      }
       break;
     case "set_priority":
-      if (action.priority) await mutateTicket(ticketId, { priority: action.priority });
+      if (action.priority && action.priority !== ticket.priority) {
+        const updated = await mutateTicket(ticketId, { priority: action.priority });
+        // The SLA targets are per priority, so a rule that escalates a ticket
+        // must move its deadlines too, not leave the old ones in place.
+        if (updated) await applySla(updated);
+      }
       break;
     case "set_status":
       if (action.status) await mutateTicket(ticketId, { status: action.status });

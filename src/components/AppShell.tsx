@@ -58,8 +58,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setDrawerOpen(false);
   }, [pathname]);
 
-  // The sign-in screen stands alone — no workspace chrome around it.
-  if (pathname.startsWith("/signin")) {
+  // Sign-in and the public policy pages stand alone — no workspace chrome, and
+  // no nav rail for a visitor who has not signed in yet.
+  if (pathname.startsWith("/signin") || pathname.startsWith("/legal")) {
     return <main style={{ height: "100vh", overflow: "auto" }}>{children}</main>;
   }
 

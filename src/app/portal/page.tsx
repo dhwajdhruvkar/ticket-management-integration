@@ -5,7 +5,9 @@ import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiSend } from "@/lib/api";
 import { usePersona } from "@/components/Persona";
-import { StatusBadge, timeAgo } from "@/components/ui";
+import { InfoHint, LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
+import { CloseButton, Drawer } from "@/components/primitives";
+import { HINTS } from "@/lib/hints";
 import type { TicketCategory, TicketRow, TicketStatus } from "@/server/domain/models";
 
 // =============================================================================
@@ -21,9 +23,10 @@ interface Article {
   id: string;
   title: string;
   category: TicketCategory;
-  body?: string;
+  content?: string;
   tags?: string[];
   status?: string;
+  updatedAt?: string;
 }
 interface SearchHit { id: string; title: string; snippet: string; score: number }
 interface CatalogItem {
@@ -72,6 +75,9 @@ export default function PortalPage() {
   const [email, setEmail] = useState("");
   const [created, setCreated] = useState<CreatedTicket | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState<Article | null>(null);
+  const [readingBusy, setReadingBusy] = useState(false);
+  const [readingError, setReadingError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -95,6 +101,25 @@ export default function PortalPage() {
       setHits(res.hits);
     } catch {
       setHits([]);
+    }
+  }
+
+  /**
+   * Open the reader. List and search payloads are trimmed (no body, or only a
+   * snippet), so the full article is fetched on demand and the drawer shows the
+   * summary it already has while that is in flight.
+   */
+  async function openArticle(seed: Article) {
+    setReading(seed);
+    setReadingError(null);
+    if (seed.content) return;
+    setReadingBusy(true);
+    try {
+      setReading(await apiGet<Article>(`/kb/${seed.id}`));
+    } catch (err) {
+      setReadingError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReadingBusy(false);
     }
   }
 
@@ -311,20 +336,45 @@ export default function PortalPage() {
           </div>
           <div style={{ display: "grid", gap: 6 }}>
             {hits.map((h) => (
-              <div
+              <button
                 key={h.id}
+                type="button"
+                onClick={() =>
+                  void openArticle(
+                    articles.find((a) => a.id === h.id) ?? {
+                      id: h.id,
+                      title: h.title,
+                      category: "Other",
+                    }
+                  )
+                }
                 style={{
                   padding: "0.55rem 0.65rem",
                   borderRadius: 10,
                   transition: "background var(--dur-1) var(--ease)",
+                  textAlign: "left",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "inherit",
+                  font: "inherit",
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 10,
                 }}
                 className="hit-row"
               >
-                <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>{h.title}</div>
-                <p className="muted" style={{ fontSize: "0.8rem", margin: "2px 0 0" }}>
-                  {h.snippet}
-                </p>
-              </div>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: "0.9rem", display: "block" }}>{h.title}</span>
+                  <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: 2 }}>
+                    {h.snippet}
+                  </span>
+                </span>
+                <span className="muted" aria-hidden style={{ fontSize: "0.9rem", flexShrink: 0 }}>
+                  →
+                </span>
+              </button>
             ))}
           </div>
         </section>
@@ -538,10 +588,7 @@ export default function PortalPage() {
               <button
                 key={a.id}
                 type="button"
-                onClick={() => {
-                  runSearch(a.title);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
+                onClick={() => void openArticle(a)}
                 className="article-card"
                 style={{
                   textAlign: "left",
@@ -649,6 +696,25 @@ export default function PortalPage() {
         />
       ) : null}
 
+      {/* Article reader ---------------------------------------------------- */}
+      <ArticleReader
+        article={reading}
+        loading={readingBusy}
+        error={readingError}
+        onClose={() => {
+          setReading(null);
+          setReadingError(null);
+        }}
+        onRaiseRequest={(a) => {
+          setReading(null);
+          setSelectedCatalog(null);
+          setSubject(`Help with: ${a.title}`);
+          setBody(`I read “${a.title}” in the help center and still need help.\n\nWhat I tried:\n`);
+          setCreated(null);
+          setDialogOpen(true);
+        }}
+      />
+
       <style jsx>{`
         .grid-thirds {
           display: grid;
@@ -694,6 +760,120 @@ export default function PortalPage() {
 /* ==============================================================
    Sub-components
    ============================================================== */
+
+/** Read a help-center article without leaving the portal. */
+function ArticleReader({
+  article,
+  loading,
+  error,
+  onClose,
+  onRaiseRequest,
+}: {
+  article: Article | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRaiseRequest: (article: Article) => void;
+}) {
+  return (
+    <Drawer open={article !== null} onClose={onClose} ariaLabel={article?.title ?? "Article"} width={640}>
+      {article ? (
+        <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
+          <header
+            style={{
+              padding: "1.1rem 1.35rem",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <span
+                  className="badge"
+                  style={{ background: "var(--brand-50)", color: "var(--brand-700)", borderColor: "var(--brand-100)" }}
+                >
+                  {article.category}
+                </span>
+                {article.updatedAt ? (
+                  <span className="muted" style={{ fontSize: "0.72rem" }}>
+                    updated {timeAgo(article.updatedAt)}
+                  </span>
+                ) : null}
+              </div>
+              <h2 style={{ fontSize: "1.15rem", fontWeight: 800, letterSpacing: "-0.02em", margin: 0, lineHeight: 1.3 }}>
+                {article.title}
+              </h2>
+            </div>
+            <CloseButton onClick={onClose} />
+          </header>
+
+          <div style={{ flex: 1, padding: "1.25rem 1.35rem" }}>
+            {loading ? (
+              <p className="muted" style={{ fontSize: "0.88rem", margin: 0 }}>
+                Loading the full article…
+              </p>
+            ) : error ? (
+              <p style={{ fontSize: "0.88rem", margin: 0, color: "var(--danger-fg)" }}>
+                This article could not be loaded: {error}
+              </p>
+            ) : (
+              <div
+                style={{
+                  fontSize: "0.92rem",
+                  lineHeight: 1.7,
+                  color: "var(--text-secondary)",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {article.content}
+              </div>
+            )}
+            {article.tags?.length ? (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 20 }}>
+                {article.tags.map((t) => (
+                  <span
+                    key={t}
+                    className="badge"
+                    style={{ background: "var(--surface-3)", color: "var(--muted)", fontSize: "0.7rem" }}
+                  >
+                    #{t}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <footer
+            style={{
+              padding: "0.9rem 1.35rem",
+              borderTop: "1px solid var(--border)",
+              background: "var(--surface-2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              flexWrap: "wrap",
+            }}
+          >
+            <span className="muted" style={{ fontSize: "0.8rem" }}>
+              Did this solve it?
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-ghost" onClick={onClose}>
+                Yes, thanks
+              </button>
+              <button className="btn btn-primary" onClick={() => onRaiseRequest(article)}>
+                Still need help
+              </button>
+            </div>
+          </footer>
+        </div>
+      ) : null}
+    </Drawer>
+  );
+}
 
 function RequestDialog(props: {
   onClose: () => void;
@@ -805,7 +985,9 @@ function RequestDialog(props: {
           >
             <div style={{ minWidth: 0 }}>
               <div className="label" style={{ marginBottom: 4 }}>
-                Fulfilment details
+                <LabelWithHint info={HINTS.fulfilmentDetails} side="right">
+                  Fulfilment details
+                </LabelWithHint>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span
@@ -828,6 +1010,7 @@ function RequestDialog(props: {
                     }}
                   >
                     <WarnMini /> Approval required
+                    <InfoHint text={HINTS.needsApproval} side="bottom" size={11} />
                   </span>
                 ) : (
                   <span
@@ -880,9 +1063,13 @@ function RequestDialog(props: {
 
         <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
           <div>
-            <label className="label" style={{ marginBottom: 4 }}>Your email</label>
+            <label className="label" htmlFor="portal-email" style={{ marginBottom: 4 }}>
+              Your email
+            </label>
             <input
+              id="portal-email"
               className="input"
+              type="email"
               placeholder="you@company.com"
               value={email}
               disabled={emailLocked}
@@ -890,8 +1077,11 @@ function RequestDialog(props: {
             />
           </div>
           <div>
-            <label className="label" style={{ marginBottom: 4 }}>Subject</label>
+            <label className="label" htmlFor="portal-subject" style={{ marginBottom: 4 }}>
+              Subject
+            </label>
             <input
+              id="portal-subject"
               className="input"
               placeholder="Briefly summarise the issue"
               value={subject}
@@ -900,8 +1090,11 @@ function RequestDialog(props: {
             />
           </div>
           <div>
-            <label className="label" style={{ marginBottom: 4 }}>Describe your issue</label>
+            <label className="label" htmlFor="portal-body" style={{ marginBottom: 4 }}>
+              Describe your issue
+            </label>
             <textarea
+              id="portal-body"
               className="textarea"
               rows={6}
               placeholder="What are you trying to do? What did you expect vs. what happened?"

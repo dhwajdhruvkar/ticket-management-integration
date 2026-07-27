@@ -1,9 +1,8 @@
-import { currentActor } from "@/server/context";
-import { fail, ok, readJson } from "@/server/http";
+import { ok, readJson } from "@/server/http";
+import { actorContext, isResponse, loadTicket } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { publishEvent } from "@/server/events/bus";
-import { getTicket } from "@/server/services/ticketService";
-import type { MessageVisibility, Role } from "@/server/domain/models";
+import type { MessageVisibility } from "@/server/domain/models";
 
 // =============================================================================
 // POST /api/v1/tickets/:id/typing — ephemeral "someone is composing" signal.
@@ -19,17 +18,13 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  const role = actor.role as Role;
-  const agent = isAgentRole(role);
-
-  const ticket = await getTicket(id);
-  if (!ticket) return fail("Ticket not found.", 404);
+  const ctx = await actorContext(req);
+  const { actor } = ctx;
+  const agent = isAgentRole(ctx.role);
 
   // Same record security as messages: requesters only on their own tickets.
-  if (!agent && ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()) {
-    return fail("Forbidden.", 403);
-  }
+  const ticket = await loadTicket(ctx, id);
+  if (isResponse(ticket)) return ticket;
 
   const payload = await readJson<{ visibility?: MessageVisibility }>(req);
   const visibility: MessageVisibility =

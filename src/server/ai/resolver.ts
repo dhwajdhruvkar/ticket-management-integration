@@ -88,9 +88,17 @@ function decide(
   };
 }
 
+/**
+ * Statuses where the assistant has no business acting. Re-running triage on a
+ * ticket that a human already closed would reopen the conversation, reset the
+ * status, and post a public reply to a requester who has moved on.
+ */
+const SETTLED = new Set<TicketRow["status"]>(["resolved", "auto_resolved", "closed", "cancelled"]);
+
 export async function resolveTicket(ticketId: string): Promise<TicketRow | null> {
   const ticket = await getTicket(ticketId);
   if (!ticket) return null;
+  if (SETTLED.has(ticket.status)) return ticket;
   const store = await getStore();
   const started = Date.now();
   const query = `${ticket.subject}\n${ticket.body}`;
@@ -131,10 +139,10 @@ export async function resolveTicket(ticketId: string): Promise<TicketRow | null>
     latencyMs: Date.now() - started,
     createdAt: now(),
   };
-  // Replace any prior resolution for idempotent re-runs.
+  // A ticket holds at most one resolution, so a re-run replaces the previous
+  // one. Its citations go with it: both drivers cascade that delete.
   for (const old of await store.resolutions.list({ ticketId })) {
     await store.resolutions.remove(old.id);
-    for (const c of await store.citations.list({ resolutionId: old.id })) await store.citations.remove(c.id);
   }
   await store.resolutions.create(resolution);
   for (const h of hits) {
@@ -200,6 +208,8 @@ export async function resolveTicket(ticketId: string): Promise<TicketRow | null>
 export async function acceptSuggestion(ticketId: string, agentName: string): Promise<TicketRow | null> {
   const ticket = await getTicket(ticketId);
   if (!ticket) return null;
+  // Sending the draft would post a public reply and resolve the ticket again.
+  if (SETTLED.has(ticket.status)) return null;
   const store = await getStore();
   const resolution = (await store.resolutions.list({ ticketId }))[0];
   if (!resolution) return null;

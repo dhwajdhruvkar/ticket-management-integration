@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiSend } from "@/lib/api";
+import { HINTS } from "@/lib/hints";
+import { LabelWithHint } from "@/components/ui";
 import { useToast } from "@/components/Toast";
+import { useAgentOnly } from "@/components/Persona";
+import { EmptyState } from "@/components/primitives";
+import { AlertTriangle } from "lucide-react";
 
 // =============================================================================
 // AssetsPage — hardware inventory (ITAM) + CMDB dependency graph.
@@ -38,6 +43,7 @@ const ASSET_TYPES = ["laptop", "desktop", "monitor", "server", "phone", "printer
 
 export default function AssetsPage() {
   const toast = useToast();
+  const isAgent = useAgentOnly();
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [cis, setCIs] = useState<CI[] | null>(null);
   const [impact, setImpact] = useState<Impact | null>(null);
@@ -45,21 +51,24 @@ export default function AssetsPage() {
   const [ciForm, setCIForm] = useState({ name: "", type: "service" });
   const [link, setLink] = useState({ sourceId: "", targetId: "" });
   const [busy, setBusy] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const [a, c] = await Promise.all([apiGet<Asset[]>("/assets"), apiGet<CI[]>("/cis")]);
       setAssets(a);
       setCIs(c);
-    } catch {
+      setLoadError(null);
+    } catch (err) {
       setAssets([]);
       setCIs([]);
+      setLoadError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (isAgent) refresh();
+  }, [isAgent, refresh]);
 
   async function run(key: string, fn: () => Promise<unknown>, ok: string) {
     setBusy(key);
@@ -115,6 +124,27 @@ export default function AssetsPage() {
     }
   }
 
+  if (!isAgent) return <div className="page-pad" />;
+
+  if (loadError) {
+    return (
+      <div className="page-pad">
+        <div style={{ maxWidth: 560, margin: "8vh auto 0" }}>
+          <EmptyState
+            icon={AlertTriangle}
+            title="Could not load assets and the CMDB"
+            description={loadError}
+            action={
+              <button className="btn btn-primary" onClick={() => void refresh()}>
+                Try again
+              </button>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-pad anim-fade-up">
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
@@ -126,15 +156,15 @@ export default function AssetsPage() {
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <MiniStat label="Assets" value={assets?.length ?? 0} />
-            <MiniStat label="CIs" value={cis?.length ?? 0} />
+            <MiniStat label="Assets" value={assets?.length ?? 0} info={HINTS.itam} />
+            <MiniStat label="CIs" value={cis?.length ?? 0} info={HINTS.cmdb} />
           </div>
         </header>
 
         <div className="grid-halves stagger" style={{ gap: 16 }}>
           {/* Assets ------------------------------------------------------- */}
           <section className="panel" style={{ padding: "1.1rem 1.2rem" }}>
-            <PanelHead icon={<LaptopGlyph />} title="Assets (ITAM)" />
+            <PanelHead icon={<LaptopGlyph />} title="Assets (ITAM)" info={HINTS.itam} />
             <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
               <input className="input" placeholder="Tag" value={assetForm.tag} onChange={(e) => setAssetForm({ ...assetForm, tag: e.target.value })} style={{ flex: "1 1 80px" }} />
               <input className="input" placeholder="Name" value={assetForm.name} onChange={(e) => setAssetForm({ ...assetForm, name: e.target.value })} style={{ flex: "1 1 120px" }} />
@@ -182,7 +212,7 @@ export default function AssetsPage() {
 
           {/* CIs ----------------------------------------------------------- */}
           <section className="panel" style={{ padding: "1.1rem 1.2rem" }}>
-            <PanelHead icon={<GraphGlyph />} title="Configuration items (CMDB)" />
+            <PanelHead icon={<GraphGlyph />} title="Configuration items (CMDB)" info={HINTS.cmdb} />
             <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
               <input className="input" placeholder="CI name (e.g. Payroll App)" value={ciForm.name} onChange={(e) => setCIForm({ ...ciForm, name: e.target.value })} style={{ flex: "1 1 140px" }} />
               <select className="select" value={ciForm.type} onChange={(e) => setCIForm({ ...ciForm, type: e.target.value })} style={{ flex: "0 0 120px" }}>
@@ -234,7 +264,11 @@ export default function AssetsPage() {
             <div style={{ borderTop: "1px solid var(--border)", marginTop: 14, paddingTop: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
                 <span style={{ color: "var(--muted)", display: "inline-flex" }}><LinkGlyph /></span>
-                <span className="label" style={{ margin: 0 }}>Link a dependency (source depends on target)</span>
+                <span className="label" style={{ margin: 0 }}>
+                  <LabelWithHint info={HINTS.ciDependency}>
+                    Link a dependency (source depends on target)
+                  </LabelWithHint>
+                </span>
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <select className="select" value={link.sourceId} onChange={(e) => setLink({ ...link, sourceId: e.target.value })} style={{ flex: "1 1 140px" }}>
@@ -296,7 +330,9 @@ export default function AssetsPage() {
             <div className="grid-halves" style={{ gap: 14 }}>
               <div>
                 <div className="label" style={{ marginBottom: 8 }}>
-                  Dependent CIs ({impact.dependents.length})
+                  <LabelWithHint info={HINTS.ciImpact}>
+                    Dependent CIs ({impact.dependents.length})
+                  </LabelWithHint>
                 </div>
                 {impact.dependents.length === 0 ? (
                   <p className="muted" style={{ fontSize: "0.82rem", margin: 0 }}>Nothing depends on this CI.</p>
@@ -374,7 +410,7 @@ export default function AssetsPage() {
    Pieces
    ========================================================================= */
 
-function MiniStat({ label, value }: { label: string; value: number }) {
+function MiniStat({ label, value, info }: { label: string; value: number; info?: string }) {
   return (
     <div
       style={{
@@ -386,16 +422,22 @@ function MiniStat({ label, value }: { label: string; value: number }) {
       }}
     >
       <div style={{ fontSize: "1.1rem", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{value}</div>
-      <div className="muted" style={{ fontSize: "0.64rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+      <div className="muted" style={{ fontSize: "0.64rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <LabelWithHint info={info} side="bottom" size={11}>
+          {label}
+        </LabelWithHint>
+      </div>
     </div>
   );
 }
 
-function PanelHead({ icon, title }: { icon: React.ReactNode; title: string }) {
+function PanelHead({ icon, title, info }: { icon: React.ReactNode; title: string; info?: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 12 }}>
       <span style={{ color: "var(--muted)", display: "inline-flex" }}>{icon}</span>
-      <span className="label" style={{ margin: 0 }}>{title}</span>
+      <span className="label" style={{ margin: 0 }}>
+        <LabelWithHint info={info}>{title}</LabelWithHint>
+      </span>
     </div>
   );
 }

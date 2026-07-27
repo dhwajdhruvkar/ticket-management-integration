@@ -402,6 +402,8 @@ export interface CustomFieldDefRow extends Entity {
   /** Stable key used inside TicketRow.customFields. */
   key: string;
   label: string;
+  /** Admin-authored help text shown as the field's "i" tooltip. */
+  description: string | null;
   type: CustomFieldType;
   /** Options for `select` type. */
   options: string[];

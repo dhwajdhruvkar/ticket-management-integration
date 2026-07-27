@@ -1,6 +1,5 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 // =============================================================================
 // /api/v1/problems — problem management (agent+, gated by problem.write).
 //
@@ -16,13 +15,15 @@ import {
   suggestClusters,
   type NewProblemInput,
 } from "@/server/services/problemService";
-import type { ProblemStatus, Role } from "@/server/domain/models";
+import type { ProblemStatus } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
+  const ctx = await requirePermission(req, "problem.read");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId } = ctx;
   const url = new URL(req.url);
   if (url.searchParams.get("suggest") === "1") return ok(await suggestClusters(tenantId));
   if (url.searchParams.get("metrics") === "1") return ok(await problemMetrics(tenantId));
@@ -35,9 +36,9 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const tenantId = await currentTenantId(req);
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "problem.write")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "problem.write");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId, actor } = ctx;
 
   const body = await readJson<NewProblemInput & { cluster?: { theme: string; ticketIds: string[] } }>(req);
   if (body?.cluster) {

@@ -52,7 +52,10 @@ import type {
 // v7: first-class departments + user.departmentId.
 // v8: full-workflow demo data (changes/CAB, approvals, CI graph, notifications,
 //     integrations, business calendar, SLA due dates, all ticket statuses).
-const SCHEMA_VERSION = 8;
+// v9: admin-authored help text on custom field definitions.
+// v10: SLA deadlines recomputed with the fixed business-hours walker, so seeded
+//      due dates from v9 are wrong for business-hours policies.
+const SCHEMA_VERSION = 10;
 
 interface MemDb {
   version?: number;
@@ -110,7 +113,19 @@ function clone<T>(value: T): T {
 class MemoryCollection<T extends Entity> implements Collection<T> {
   constructor(
     private readonly rows: () => T[],
-    private readonly persist: () => void
+    private readonly persist: () => void,
+    /**
+     * Mirrors `onDelete: Cascade` in the Prisma schema. Without it the memory
+     * driver leaves orphaned children (a deleted ticket keeps its messages and
+     * attachments), so the two drivers disagree about what "deleted" means.
+     */
+    private readonly cascade?: (id: string) => void,
+    /**
+     * Mirrors an `@unique` column in the Prisma schema. Creating a row that
+     * collides throws, exactly as the database would, instead of quietly
+     * accumulating duplicates only this driver can hold.
+     */
+    private readonly uniqueBy?: keyof T
   ) {}
 
   async list(where?: Partial<T>): Promise<T[]> {
@@ -123,6 +138,12 @@ class MemoryCollection<T extends Entity> implements Collection<T> {
     return found ? clone(found) : null;
   }
   async create(value: T): Promise<T> {
+    if (this.uniqueBy) {
+      const key = this.uniqueBy;
+      if (this.rows().some((r) => r[key] === value[key])) {
+        throw new Error(`Unique constraint failed on ${String(key)}.`);
+      }
+    }
     this.rows().push(clone(value));
     this.persist();
     return clone(value);
@@ -145,6 +166,7 @@ class MemoryCollection<T extends Entity> implements Collection<T> {
     const idx = arr.findIndex((r) => r.id === id);
     if (idx < 0) return false;
     arr.splice(idx, 1);
+    this.cascade?.(id);
     this.persist();
     return true;
   }
@@ -160,21 +182,42 @@ export class MemoryStore implements DataStore {
   private initPromise: Promise<void> | null = null;
   private readonly filePath = path.join(process.cwd(), config.dataDir, "store.json");
 
-  tenants = new MemoryCollection<TenantRow>(() => this.db.tenants, () => this.persist());
+  tenants = new MemoryCollection<TenantRow>(() => this.db.tenants, () => this.persist(), (id) =>
+    this.cascadeTenant(id)
+  );
   departments = new MemoryCollection<DepartmentRow>(() => this.db.departments, () => this.persist());
   users = new MemoryCollection<UserRow>(() => this.db.users, () => this.persist());
   groups = new MemoryCollection<AssignmentGroupRow>(() => this.db.groups, () => this.persist());
-  tickets = new MemoryCollection<TicketRow>(() => this.db.tickets, () => this.persist());
+  tickets = new MemoryCollection<TicketRow>(() => this.db.tickets, () => this.persist(), (id) =>
+    this.cascadeTicket(id)
+  );
   messages = new MemoryCollection<TicketMessageRow>(() => this.db.messages, () => this.persist());
   events = new MemoryCollection<TicketEventRow>(() => this.db.events, () => this.persist());
-  resolutions = new MemoryCollection<ResolutionRow>(() => this.db.resolutions, () => this.persist());
+  // A ticket has at most one resolution (Resolution.ticketId is @unique).
+  resolutions = new MemoryCollection<ResolutionRow>(
+    () => this.db.resolutions,
+    () => this.persist(),
+    (id) => {
+      this.db.citations = this.db.citations.filter((c) => c.resolutionId !== id);
+    },
+    "ticketId"
+  );
   citations = new MemoryCollection<CitationRow>(() => this.db.citations, () => this.persist());
   articles = new MemoryCollection<ArticleRow>(() => this.db.articles, () => this.persist());
-  problems = new MemoryCollection<ProblemRow>(() => this.db.problems, () => this.persist());
-  changes = new MemoryCollection<ChangeRow>(() => this.db.changes, () => this.persist());
+  problems = new MemoryCollection<ProblemRow>(() => this.db.problems, () => this.persist(), (id) => {
+    // Prisma nulls the FK rather than deleting the incidents.
+    for (const t of this.db.tickets) if (t.problemId === id) t.problemId = null;
+  });
+  changes = new MemoryCollection<ChangeRow>(() => this.db.changes, () => this.persist(), (id) => {
+    this.db.approvals = this.db.approvals.filter((a) => a.changeId !== id);
+  });
   approvals = new MemoryCollection<ApprovalRow>(() => this.db.approvals, () => this.persist());
   assets = new MemoryCollection<AssetRow>(() => this.db.assets, () => this.persist());
-  cis = new MemoryCollection<CIRow>(() => this.db.cis, () => this.persist());
+  cis = new MemoryCollection<CIRow>(() => this.db.cis, () => this.persist(), (id) => {
+    this.db.ciRelationships = this.db.ciRelationships.filter(
+      (r) => r.sourceId !== id && r.targetId !== id
+    );
+  });
   ciRelationships = new MemoryCollection<CIRelationshipRow>(() => this.db.ciRelationships, () => this.persist());
   catalogItems = new MemoryCollection<CatalogItemRow>(() => this.db.catalogItems, () => this.persist());
   slaPolicies = new MemoryCollection<SlaPolicyRow>(() => this.db.slaPolicies, () => this.persist());
@@ -191,6 +234,63 @@ export class MemoryStore implements DataStore {
   ready(): Promise<void> {
     this.initPromise ??= this.init();
     return this.initPromise;
+  }
+
+  /** Children of a ticket, matching the ticket relations marked Cascade. */
+  private cascadeTicket(ticketId: string): void {
+    const resolutionIds = new Set(
+      this.db.resolutions.filter((r) => r.ticketId === ticketId).map((r) => r.id)
+    );
+    this.db.messages = this.db.messages.filter((m) => m.ticketId !== ticketId);
+    this.db.events = this.db.events.filter((e) => e.ticketId !== ticketId);
+    this.db.resolutions = this.db.resolutions.filter((r) => r.ticketId !== ticketId);
+    this.db.citations = this.db.citations.filter((c) => !resolutionIds.has(c.resolutionId));
+    this.db.approvals = this.db.approvals.filter((a) => a.ticketId !== ticketId);
+    this.db.attachments = this.db.attachments.filter((a) => a.ticketId !== ticketId);
+    for (const t of this.db.tickets) {
+      if (t.mergedIntoId === ticketId) t.mergedIntoId = null;
+      if (t.linkedTicketIds?.includes(ticketId)) {
+        t.linkedTicketIds = t.linkedTicketIds.filter((x) => x !== ticketId);
+      }
+    }
+  }
+
+  /** Everything a tenant owns, matching the Cascade relations on Tenant. */
+  private cascadeTenant(tenantId: string): void {
+    for (const ticket of this.db.tickets.filter((t) => t.tenantId === tenantId)) {
+      this.cascadeTicket(ticket.id);
+    }
+    const changeIds = new Set(
+      this.db.changes.filter((c) => c.tenantId === tenantId).map((c) => c.id)
+    );
+    const ciIds = new Set(this.db.cis.filter((c) => c.tenantId === tenantId).map((c) => c.id));
+    this.db.approvals = this.db.approvals.filter(
+      (a) => !(a.changeId && changeIds.has(a.changeId))
+    );
+    this.db.ciRelationships = this.db.ciRelationships.filter(
+      (r) => !ciIds.has(r.sourceId) && !ciIds.has(r.targetId)
+    );
+
+    const owned = <R extends { tenantId: string }>(rows: R[]) =>
+      rows.filter((r) => r.tenantId !== tenantId);
+    this.db.tickets = owned(this.db.tickets);
+    this.db.departments = owned(this.db.departments);
+    this.db.users = owned(this.db.users);
+    this.db.groups = owned(this.db.groups);
+    this.db.articles = owned(this.db.articles);
+    this.db.problems = owned(this.db.problems);
+    this.db.changes = owned(this.db.changes);
+    this.db.assets = owned(this.db.assets);
+    this.db.cis = owned(this.db.cis);
+    this.db.catalogItems = owned(this.db.catalogItems);
+    this.db.slaPolicies = owned(this.db.slaPolicies);
+    this.db.automations = owned(this.db.automations);
+    this.db.macros = owned(this.db.macros);
+    this.db.customFieldDefs = owned(this.db.customFieldDefs);
+    this.db.notifications = owned(this.db.notifications);
+    this.db.audit = owned(this.db.audit);
+    this.db.apiKeys = owned(this.db.apiKeys);
+    this.db.calendars = owned(this.db.calendars);
   }
 
   // Load persisted data if present and version-compatible; otherwise seed fresh.

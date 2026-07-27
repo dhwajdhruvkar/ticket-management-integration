@@ -5,9 +5,21 @@ import Link from "next/link";
 import { apiGet } from "@/lib/api";
 import type { Metrics } from "@/server/services/metricsService";
 import type { TicketRow, UserRow } from "@/server/domain/models";
-import { Avatar, Donut, PieChart, PriorityBadge, StatusBadge, timeAgo } from "@/components/ui";
+import {
+  Avatar,
+  Donut,
+  InfoHint,
+  LabelWithHint,
+  PieChart,
+  PriorityBadge,
+  StatusBadge,
+  timeAgo,
+} from "@/components/ui";
+import { HINTS } from "@/lib/hints";
 import { DashboardSkeleton } from "@/components/Skeleton";
+import { EmptyState } from "@/components/primitives";
 import { usePersona } from "@/components/Persona";
+import { AlertTriangle } from "lucide-react";
 
 // =============================================================================
 // DashboardPage — the workspace home for agents/managers/admins.
@@ -19,27 +31,84 @@ import { usePersona } from "@/components/Persona";
 // the ticket queue where relevant.
 // =============================================================================
 
+type ChainState = "checking" | "ok" | "tampered" | "unavailable";
+
+interface ChainCopy {
+  strip: string;
+  ops: string;
+  opsTone: "success" | "danger" | "info";
+  bg: string;
+  fg: string;
+  border: string;
+  hint: string;
+}
+
+const NEUTRAL_CHIP = { bg: "var(--surface-2)", fg: "var(--text-muted)", border: "var(--border)" };
+
+const CHAIN_COPY: Record<ChainState, ChainCopy> = {
+  checking: {
+    strip: "Verifying chain…",
+    ops: "…",
+    opsTone: "info",
+    ...NEUTRAL_CHIP,
+    hint: "Recomputing the hash chain over the audit records.",
+  },
+  ok: {
+    strip: "Chain verified",
+    ops: "Intact",
+    opsTone: "success",
+    bg: "var(--success-bg)",
+    fg: "var(--success-fg)",
+    border: "var(--success-border)",
+    hint: HINTS.auditChain,
+  },
+  tampered: {
+    strip: "Chain tampered",
+    ops: "Tampered",
+    opsTone: "danger",
+    bg: "var(--danger-bg)",
+    fg: "var(--danger-fg)",
+    border: "var(--danger-border)",
+    hint: "A recomputed hash did not match the stored one — the audit log has been altered.",
+  },
+  unavailable: {
+    strip: "Chain unverified",
+    ops: "Unknown",
+    opsTone: "info",
+    ...NEUTRAL_CHIP,
+    hint: "The verification request failed, so the chain could be neither confirmed nor faulted.",
+  },
+};
+
 export default function DashboardPage() {
   const { persona, ready } = usePersona();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [recent, setRecent] = useState<TicketRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [chainValid, setChainValid] = useState<boolean | null>(null);
+  // "unavailable" is not "tampered": a failed verify request must never be
+  // reported to an auditor as a broken chain, nor as a verified one.
+  const [chainValid, setChainValid] = useState<ChainState>("checking");
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
+    setError(null);
     try {
       const [m, rows, ppl, audit] = await Promise.all([
-        apiGet<Metrics>("/metrics").catch(() => null),
+        apiGet<Metrics>("/metrics"),
         apiGet<TicketRow[]>("/tickets").catch(() => [] as TicketRow[]),
         apiGet<UserRow[]>("/users").catch(() => [] as UserRow[]),
-        apiGet<{ valid: boolean }>("/audit?verify=1").catch(() => ({ valid: false })),
+        apiGet<{ valid: boolean }>("/audit?verify=1").catch(() => null),
       ]);
-      if (m) setMetrics(m);
+      setMetrics(m);
       setRecent(rows.slice(0, 6));
       setUsers(ppl);
-      setChainValid(audit.valid);
+      setChainValid(audit ? (audit.valid ? "ok" : "tampered") : "unavailable");
+    } catch (err) {
+      // Metrics are the dashboard: without them there is nothing to show, so
+      // say so and offer a retry instead of leaving the skeleton up forever.
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRefreshing(false);
     }
@@ -60,6 +129,31 @@ export default function DashboardPage() {
   // Requesters get a focused, card-based personal dashboard.
   if (persona.role === "requester") {
     return <RequesterDashboard name={persona.name} />;
+  }
+
+  if (error && !metrics) {
+    return (
+      <div className="page-pad">
+        <div style={{ maxWidth: 560, margin: "8vh auto 0" }}>
+          <EmptyState
+            icon={AlertTriangle}
+            title="Could not load the dashboard"
+            description={
+              <>
+                {error}
+                <br />
+                Your session may have expired, or the service is temporarily unavailable.
+              </>
+            }
+            action={
+              <button className="btn btn-primary" onClick={() => void refresh()} disabled={refreshing}>
+                {refreshing ? "Retrying…" : "Try again"}
+              </button>
+            }
+          />
+        </div>
+      </div>
+    );
   }
 
   if (!metrics) {
@@ -476,13 +570,14 @@ function Hero({ name, onRefresh, refreshing }: { name: string; onRefresh: () => 
    SLA health strip — segmented bar + legend + audit chain chip
    ========================================================================= */
 
-function SlaHealthStrip({ metrics, chainValid }: { metrics: Metrics; chainValid: boolean | null }) {
+function SlaHealthStrip({ metrics, chainValid }: { metrics: Metrics; chainValid: ChainState }) {
   const open = metrics.openCount;
   const atRisk = Math.min(metrics.slaAtRisk, open);
   const breached = Math.min(metrics.slaBreached, Math.max(0, open - atRisk));
   const healthy = Math.max(0, open - atRisk - breached);
   const total = Math.max(1, open);
   const pct = (n: number) => Math.round((n / total) * 100);
+  const chain = CHAIN_COPY[chainValid];
 
   return (
     <section
@@ -497,7 +592,12 @@ function SlaHealthStrip({ metrics, chainValid }: { metrics: Metrics; chainValid:
       }}
     >
       <span className="label" style={{ flexShrink: 0 }}>
-        SLA Health
+        <LabelWithHint
+          info="The split of open tickets that are comfortably inside their SLA, close to breaching, or already past their deadline."
+          side="right"
+        >
+          SLA Health
+        </LabelWithHint>
       </span>
       <div
         aria-hidden
@@ -522,14 +622,11 @@ function SlaHealthStrip({ metrics, chainValid }: { metrics: Metrics; chainValid:
         <Link href="/audit" style={{ textDecoration: "none" }}>
           <span
             className="badge"
-            style={{
-              background: chainValid === false ? "var(--danger-bg)" : "var(--success-bg)",
-              color: chainValid === false ? "var(--danger-fg)" : "var(--success-fg)",
-              borderColor: chainValid === false ? "var(--danger-border)" : "var(--success-border)",
-            }}
+            style={{ background: chain.bg, color: chain.fg, borderColor: chain.border }}
           >
             <ShieldIcon />
-            {chainValid === null ? "Verifying chain…" : chainValid ? "Chain verified" : "Chain tampered"}
+            {chain.strip}
+            <InfoHint text={chain.hint} side="left" size={11} nested />
           </span>
         </Link>
       </div>
@@ -583,6 +680,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       tone: "success",
       href: "/tickets",
       progress: metrics.deflectionRate,
+      info: HINTS.aiDeflection,
     },
     {
       label: "Assistant containment",
@@ -591,6 +689,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       icon: <BoltIcon />,
       tone: "brand",
       progress: metrics.containmentRate,
+      info: HINTS.aiContainment,
     },
     {
       label: "First response / MTTR",
@@ -598,6 +697,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       hint: "Average across resolved tickets",
       icon: <TimerIcon />,
       tone: "info",
+      info: `${HINTS.firstResponseTime} ${HINTS.mttr}`,
     },
     {
       label: "Estimated cost saved",
@@ -605,6 +705,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       hint: `~${metrics.agentHoursSaved.toFixed(1)} agent-hours saved`,
       icon: <BankIcon />,
       tone: "warning",
+      info: HINTS.costSaved,
     },
   ];
 
@@ -626,9 +727,10 @@ interface SpotlightProps {
   tone: Tone;
   href?: string;
   progress?: number;
+  info?: string;
 }
 
-function Spotlight({ label, value, hint, icon, tone, href, progress }: SpotlightProps) {
+function Spotlight({ label, value, hint, icon, tone, href, progress, info }: SpotlightProps) {
   const t = TONE[tone];
   const inner = (
     <div
@@ -659,7 +761,9 @@ function Spotlight({ label, value, hint, icon, tone, href, progress }: Spotlight
             paddingTop: 4,
           }}
         >
-          {label}
+          <LabelWithHint info={info} nested={!!href}>
+            {label}
+          </LabelWithHint>
         </div>
         <div
           aria-hidden
@@ -742,8 +846,9 @@ const TONE: Record<Tone, { bg: string; fg: string; solid: string }> = {
    Ops bar — SLA health, quick counters
    ========================================================================= */
 
-function OpsBar({ metrics, chainValid }: { metrics: Metrics; chainValid: boolean | null }) {
+function OpsBar({ metrics, chainValid }: { metrics: Metrics; chainValid: ChainState }) {
   const pct = (n: number) => `${Math.round(n * 100)}%`;
+  const chain = CHAIN_COPY[chainValid];
   return (
     <section
       className="anim-fade-up"
@@ -772,6 +877,7 @@ function OpsBar({ metrics, chainValid }: { metrics: Metrics; chainValid: boolean
         label="SLA at risk"
         value={metrics.slaAtRisk}
         hint="80%+ of window"
+        info={HINTS.slaAtRisk}
       />
       <OpsCell
         tone={metrics.slaBreached > 0 ? "danger" : "info"}
@@ -779,6 +885,7 @@ function OpsBar({ metrics, chainValid }: { metrics: Metrics; chainValid: boolean
         label="SLA breached"
         value={metrics.slaBreached}
         hint="Past deadline"
+        info={HINTS.slaBreached}
       />
       <OpsCell
         tone="info"
@@ -786,19 +893,15 @@ function OpsBar({ metrics, chainValid }: { metrics: Metrics; chainValid: boolean
         label="CSAT"
         value={metrics.csat ? pct(metrics.csat) : "—"}
         hint="Requester rated"
+        info={HINTS.csat}
       />
       <OpsCell
-        tone={chainValid === false ? "danger" : "success"}
+        tone={chain.opsTone}
         icon={<ShieldIcon />}
         label="Audit chain"
-        value={
-          chainValid === null
-            ? "…"
-            : chainValid
-            ? "Intact"
-            : "Tampered"
-        }
+        value={chain.ops}
         hint={`${metrics.auditBlocks} records`}
+        info={chain.hint}
       />
     </section>
   );
@@ -810,12 +913,14 @@ function OpsCell({
   label,
   value,
   hint,
+  info,
 }: {
   tone: Tone;
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode;
   hint?: string;
+  info?: string;
 }) {
   const t = TONE[tone];
   return (
@@ -841,8 +946,12 @@ function OpsCell({
           {value}
         </div>
         <div style={{ fontSize: "0.72rem", color: "var(--muted)", fontWeight: 600, marginTop: 3 }}>
-          {label}
-          {hint ? <span style={{ opacity: 0.7 }}> · {hint}</span> : null}
+          <LabelWithHint info={info}>
+            <span>
+              {label}
+              {hint ? <span style={{ opacity: 0.7 }}> · {hint}</span> : null}
+            </span>
+          </LabelWithHint>
         </div>
       </div>
     </div>
@@ -941,7 +1050,7 @@ function SlaCompliance({ metrics }: { metrics: Metrics }) {
 
   return (
     <section className="panel anim-fade-up" style={{ padding: "1.1rem 1.2rem" }}>
-      <PanelHeader title="SLA compliance" icon={<GaugeIcon />} />
+      <PanelHeader title="SLA compliance" icon={<GaugeIcon />} info={HINTS.slaCompliance} />
       {metrics.slaCompliance.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>
           No SLA data yet.
@@ -1101,7 +1210,7 @@ function CategoryBreakdown({ metrics }: { metrics: Metrics }) {
 function GroupBacklog({ metrics }: { metrics: Metrics }) {
   return (
     <section className="panel anim-fade-up" style={{ padding: "1.1rem 1.2rem" }}>
-      <PanelHeader title="Backlog by group" icon={<UsersIcon />} />
+      <PanelHeader title="Backlog by group" icon={<UsersIcon />} info={HINTS.backlogByGroup} />
       {metrics.backlogByGroup.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.83rem", margin: 0 }}>
           No assignment groups configured.
@@ -1197,7 +1306,9 @@ function AgentLeaderboard({ metrics, users }: { metrics: Metrics; users: UserRow
             <thead>
               <tr>
                 <th style={{ paddingLeft: "1.2rem" }}>Agent</th>
-                <th>Workload</th>
+                <th>
+                  <LabelWithHint info={HINTS.agentWorkload}>Workload</LabelWithHint>
+                </th>
                 <th style={{ textAlign: "right" }}>Resolved</th>
                 <th style={{ textAlign: "right", paddingRight: "1.2rem" }}>Open</th>
               </tr>
@@ -1303,10 +1414,12 @@ function PanelHeader({
   title,
   icon,
   right,
+  info,
 }: {
   title: string;
   icon?: React.ReactNode;
   right?: React.ReactNode;
+  info?: string;
 }) {
   return (
     <div
@@ -1322,7 +1435,9 @@ function PanelHeader({
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {icon ? <span style={{ color: "var(--muted)", display: "inline-flex" }}>{icon}</span> : null}
-        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>{title}</h2>
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>
+          <LabelWithHint info={info}>{title}</LabelWithHint>
+        </h2>
       </div>
       {right}
     </div>

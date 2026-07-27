@@ -1,8 +1,11 @@
-import { currentActor } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
-import { can } from "@/server/auth/rbac";
-import { getChangeView, updateChange } from "@/server/services/changeService";
-import type { ChangeRow, Role } from "@/server/domain/models";
+import { isResponse, requirePermission } from "@/server/guards";
+import {
+  ChangeStateError,
+  getChangeView,
+  updateChange,
+} from "@/server/services/changeService";
+import type { ChangeRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,18 +17,28 @@ export const dynamic = "force-dynamic";
 // state (scheduled/implementing/review/closed) or edits fields (agent+).
 // =============================================================================
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const view = await getChangeView(id);
+  const ctx = await requirePermission(req, "change.read");
+  if (isResponse(ctx)) return ctx;
+  const view = await getChangeView(id, ctx.tenantId);
   return view ? ok(view) : fail("Change not found.", 404);
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "change.write")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "change.write");
+  if (isResponse(ctx)) return ctx;
   const patch = await readJson<Partial<ChangeRow>>(req);
   if (!patch) return fail("Invalid body.");
-  const updated = await updateChange(id, patch);
-  return updated ? ok(updated) : fail("Change not found.", 404);
+  try {
+    const updated = await updateChange(id, patch, {
+      tenantId: ctx.tenantId,
+      actor: ctx.actor.name,
+    });
+    return updated ? ok(updated) : fail("Change not found.", 404);
+  } catch (err) {
+    if (err instanceof ChangeStateError) return fail(err.message, 409);
+    throw err;
+  }
 }

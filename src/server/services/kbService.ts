@@ -35,9 +35,12 @@ export async function listArticles(
   return rows.sort((a, b) => a.title.localeCompare(b.title));
 }
 
-export async function getArticle(id: string): Promise<ArticleRow | null> {
+export async function getArticle(id: string, tenantId?: string): Promise<ArticleRow | null> {
   const store = await getStore();
-  return store.articles.get(id);
+  const article = await store.articles.get(id);
+  if (!article) return null;
+  if (tenantId && article.tenantId !== tenantId) return null;
+  return article;
 }
 
 export async function createArticle(tenantId: string, input: NewArticleInput): Promise<ArticleRow> {
@@ -74,11 +77,13 @@ export async function createArticle(tenantId: string, input: NewArticleInput): P
 
 export async function updateArticle(
   id: string,
-  patch: Partial<NewArticleInput>
+  patch: Partial<NewArticleInput>,
+  tenantId?: string
 ): Promise<ArticleRow | null> {
   const store = await getStore();
   const existing = await store.articles.get(id);
   if (!existing) return null;
+  if (tenantId && existing.tenantId !== tenantId) return null;
 
   const title = patch.title ?? existing.title;
   const content = patch.content ?? existing.content;
@@ -106,10 +111,11 @@ export async function updateArticle(
   return updated;
 }
 
-export async function deleteArticle(id: string): Promise<boolean> {
+export async function deleteArticle(id: string, tenantId?: string): Promise<boolean> {
   const store = await getStore();
   const existing = await store.articles.get(id);
   if (!existing) return false;
+  if (tenantId && existing.tenantId !== tenantId) return false;
   await store.articles.remove(id);
   await appendAudit({
     tenantId: existing.tenantId,

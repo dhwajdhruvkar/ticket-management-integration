@@ -13,8 +13,10 @@ import type {
   TicketRow,
   UserRow,
 } from "@/server/domain/models";
-import { IMPACT_LEVELS, PRIORITIES } from "./ui";
+import { IMPACT_LEVELS, LabelWithHint, PRIORITIES } from "./ui";
+import { PromptDialog } from "./primitives";
 import { useToast } from "./Toast";
+import { customFieldHint, HINTS } from "@/lib/hints";
 
 // =============================================================================
 // TicketProperties — the agent-editable property panel on ticket detail.
@@ -62,7 +64,21 @@ export default function TicketProperties({
   const [tags, setTags] = useState(ticket.tags.join(", "));
   const [subcategory, setSubcategory] = useState(ticket.subcategory ?? "");
   const [busy, setBusy] = useState(false);
+  // Set while the agent is being asked to justify a manual priority override.
+  const [override, setOverride] = useState<TicketPriority | null>(null);
   const toast = useToast();
+
+  // The panel is reused across tickets (the detail route swaps `ticket` without
+  // remounting), so drafts are reset the moment the id changes — otherwise
+  // "Save tags" would write one ticket's edits onto another. Done during render
+  // rather than in an effect so the stale values are never painted.
+  const [draftsFor, setDraftsFor] = useState(ticket.id);
+  if (draftsFor !== ticket.id) {
+    setDraftsFor(ticket.id);
+    setTags(ticket.tags.join(", "));
+    setSubcategory(ticket.subcategory ?? "");
+    setOverride(null);
+  }
 
   const agents = users.filter((u) => u.role !== "requester");
 
@@ -89,7 +105,7 @@ export default function TicketProperties({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <Field label="Assignee">
+      <Field label="Assignee" info={HINTS.assignee}>
         <select
           className="select"
           value={ticket.assigneeId ?? ""}
@@ -115,7 +131,7 @@ export default function TicketProperties({
         </select>
       </Field>
 
-      <Field label="Assignment group">
+      <Field label="Assignment group" info={HINTS.assignmentGroup}>
         <select
           className="select"
           value={ticket.assignmentGroupId ?? ""}
@@ -133,7 +149,7 @@ export default function TicketProperties({
         </select>
       </Field>
 
-      <Field label="Impact (scope of effect)">
+      <Field label="Impact (scope of effect)" info={HINTS.impact}>
         <select
           className="select"
           value={ticket.impact ?? ""}
@@ -153,7 +169,7 @@ export default function TicketProperties({
         </select>
       </Field>
 
-      <Field label="Urgency (time sensitivity)">
+      <Field label="Urgency (time sensitivity)" info={HINTS.urgency}>
         <select
           className="select"
           value={ticket.urgency ?? ""}
@@ -173,7 +189,7 @@ export default function TicketProperties({
         </select>
       </Field>
 
-      <Field label="Priority">
+      <Field label="Priority" info={HINTS.derivedPriority}>
         <select
           className="select"
           value={ticket.priority}
@@ -182,15 +198,7 @@ export default function TicketProperties({
             const next = e.target.value as TicketPriority;
             // Overriding the matrix requires a justification (audited).
             if (derived && next !== derived) {
-              const justification = prompt(
-                `The impact × urgency matrix derives "${derived}". Please give a justification for overriding to "${next}":`
-              );
-              if (justification === null) return;
-              void patch(
-                { priority: next, priorityJustification: justification || "(none given)" },
-                "Priority overridden",
-                "Could not update priority"
-              );
+              setOverride(next);
               return;
             }
             void patch({ priority: next }, "Priority updated", "Could not update priority");
@@ -209,7 +217,7 @@ export default function TicketProperties({
         ) : null}
       </Field>
 
-      <Field label="Category">
+      <Field label="Category" info={HINTS.category}>
         <select
           className="select"
           value={ticket.category}
@@ -226,7 +234,7 @@ export default function TicketProperties({
         </select>
       </Field>
 
-      <Field label="Subcategory">
+      <Field label="Subcategory" info={HINTS.subcategory}>
         <input
           className="input"
           placeholder="e.g. VPN, Email, Laptop"
@@ -248,7 +256,7 @@ export default function TicketProperties({
         ) : null}
       </Field>
 
-      <Field label="Affected CIs (CMDB)">
+      <Field label="Affected CIs (CMDB)" info={HINTS.affectedCIs}>
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {cis.length === 0 ? (
             <span className="muted" style={{ fontSize: "0.78rem" }}>
@@ -283,7 +291,7 @@ export default function TicketProperties({
         </div>
       </Field>
 
-      <Field label="Tags">
+      <Field label="Tags" info={HINTS.tags}>
         <input
           className="input"
           placeholder="comma, separated"
@@ -313,6 +321,7 @@ export default function TicketProperties({
         <CustomFieldEditor
           key={def.id}
           def={def}
+          ticketId={ticket.id}
           value={ticket.customFields?.[def.key]}
           busy={busy}
           onSave={(value) =>
@@ -324,6 +333,33 @@ export default function TicketProperties({
           }
         />
       ))}
+
+      <PromptDialog
+        open={override !== null}
+        title="Justify the priority override"
+        description={
+          override
+            ? `Impact × urgency derives ${derived}. Overriding to ${override} is recorded in the audit trail against your name.`
+            : undefined
+        }
+        label="Justification"
+        placeholder="e.g. Affects the CEO ahead of the board meeting"
+        confirmLabel="Override priority"
+        required
+        multiline
+        busy={busy}
+        onCancel={() => setOverride(null)}
+        onConfirm={(justification) => {
+          const next = override;
+          setOverride(null);
+          if (!next) return;
+          void patch(
+            { priority: next, priorityJustification: justification },
+            "Priority overridden",
+            "Could not update priority"
+          );
+        }}
+      />
     </div>
   );
 }
@@ -331,22 +367,32 @@ export default function TicketProperties({
 /** One editable custom field; free-text/number/date use a dirty+Save pattern. */
 function CustomFieldEditor({
   def,
+  ticketId,
   value,
   busy,
   onSave,
 }: {
   def: CustomFieldDefRow;
+  ticketId: string;
   value: unknown;
   busy: boolean;
   onSave: (value: unknown) => void;
 }) {
   const current = value == null ? "" : String(value);
   const [draft, setDraft] = useState(current);
+  // Same reason as the panel above: keyed by def id, this editor survives a
+  // ticket switch, so the draft has to follow the ticket.
+  const [draftFor, setDraftFor] = useState(ticketId);
+  if (draftFor !== ticketId) {
+    setDraftFor(ticketId);
+    setDraft(current);
+  }
   const label = def.required ? `${def.label} *` : def.label;
+  const info = customFieldHint(def);
 
   if (def.type === "checkbox") {
     return (
-      <Field label={label}>
+      <Field label={label} info={info}>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8rem", cursor: "pointer" }}>
           <input
             type="checkbox"
@@ -362,7 +408,7 @@ function CustomFieldEditor({
 
   if (def.type === "select") {
     return (
-      <Field label={label}>
+      <Field label={label} info={info}>
         <select className="select" value={current} disabled={busy} onChange={(e) => onSave(e.target.value || null)}>
           <option value="">not set</option>
           {def.options.map((o) => (
@@ -378,7 +424,7 @@ function CustomFieldEditor({
   const inputType = def.type === "number" ? "number" : def.type === "date" ? "date" : "text";
   const dirty = draft.trim() !== current.trim();
   return (
-    <Field label={label}>
+    <Field label={label} info={info}>
       <input
         className="input"
         type={inputType}
@@ -400,11 +446,21 @@ function CustomFieldEditor({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  info,
+  children,
+}: {
+  label: string;
+  info?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div>
       <div className="label" style={{ marginBottom: 6 }}>
-        {label}
+        <LabelWithHint info={info} side="right">
+          {label}
+        </LabelWithHint>
       </div>
       {children}
     </div>

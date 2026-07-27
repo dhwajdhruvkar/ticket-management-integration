@@ -46,6 +46,19 @@ function ApiFails($s, [string]$method, [string]$path, $body = $null) {
   }
 }
 
+# Same as ApiFails but asserts the specific status, so a 404 written to hide a
+# cross-tenant row is not satisfied by an unrelated 500.
+function ApiStatus($s, [string]$method, [string]$path, $body = $null) {
+  try {
+    Api $s $method $path $body | Out-Null
+    return 200
+  } catch {
+    $resp = $_.Exception.Response
+    if ($resp) { return $resp.StatusCode.value__ }
+    return 0
+  }
+}
+
 Write-Host "== Session gating =="
 $redirected = $false
 try {
@@ -93,6 +106,17 @@ Check "manual priority override" ($t3.priority -eq "high")
 $t4 = Api $priya PATCH "/tickets/$($t.id)" @{ subcategory = "Switching"; tags = @("e2e"); ciIds = @() }
 Check "subcategory/tags/CI patch" ($t4.subcategory -eq "Switching")
 
+# A priority change has to move the deadlines with it; the old behaviour left a
+# P1-turned-P4 ticket sitting on its original 15-minute clock.
+$p1 = Api $priya PATCH "/tickets/$($t.id)" @{ priority = "critical"; priorityJustification = "e2e sla probe" }
+$p1Due = [datetime]$p1.dueResolveAt
+$p4 = Api $priya PATCH "/tickets/$($t.id)" @{ priority = "low"; priorityJustification = "e2e sla probe" }
+$p4Due = [datetime]$p4.dueResolveAt
+Check "priority change recomputes the SLA deadline" ($p4Due -gt $p1Due)
+$backTo1 = Api $priya PATCH "/tickets/$($t.id)" @{ priority = "critical"; priorityJustification = "e2e sla probe" }
+Check "escalating back tightens the deadline again" (([datetime]$backTo1.dueResolveAt) -lt $p4Due)
+Api $priya PATCH "/tickets/$($t.id)" @{ priority = "high"; priorityJustification = "e2e override" } | Out-Null
+
 $t5 = Api $priya POST "/tickets/$($t.id)/actions" @{ action = "assign"; assigneeId = "user_arjun" }
 Check "assign to agent" ($t5.assigneeId -eq "user_arjun")
 Api $priya POST "/tickets/$($t.id)/messages" @{ body = "Looking into it now."; visibility = "public" } | Out-Null
@@ -126,8 +150,50 @@ Check "requester blocked from audit" (ApiFails $dana GET "/audit")
 Check "requester blocked from metrics" (ApiFails $dana GET "/metrics")
 Check "requester blocked from KB write" (ApiFails $dana POST "/kb" @{ title = "x"; content = "y" })
 
+$danaView = Api $dana GET "/tickets/$($t.id)"
+$internalLeak = @($danaView.messages | Where-Object { $_.visibility -eq "internal" })
+Check "requester never receives internal notes" ($internalLeak.Count -eq 0)
+$agentView = Api $priya GET "/tickets/$($t.id)"
+Check "agent still sees internal notes" (@($agentView.messages | Where-Object { $_.visibility -eq "internal" }).Count -ge 1)
+
+$danaSum = Api $dana GET "/tickets/$($t.id)/summary"
+Check "requester thread summary omits internal notes" ($danaSum.summary -notlike "*bad SFP*")
+
+Check "requester blocked from problems" (ApiFails $dana GET "/problems")
+Check "requester blocked from changes" (ApiFails $dana GET "/changes")
+Check "requester blocked from assets" (ApiFails $dana GET "/assets")
+Check "requester blocked from CMDB" (ApiFails $dana GET "/cis")
+Check "requester blocked from automations" (ApiFails $dana GET "/automations")
+
+# Requester-facing KB must not expose drafts or internal-only articles.
+$draft = Api $priya POST "/kb" @{ title = "E2E: internal runbook"; content = "Internal only."; category = "IT"; status = "draft"; isPublic = $false }
+$danaKb = @(Api $dana GET "/kb")
+Check "requester KB list hides drafts and internal articles" (@($danaKb | Where-Object { $_.id -eq $draft.id }).Count -eq 0)
+Check "requester GET of a draft article is 404" ((ApiStatus $dana GET "/kb/$($draft.id)") -eq 404)
+$danaHits = Api $dana GET "/kb/search?q=internal%20runbook"
+Check "requester KB search hides internal articles" (@($danaHits.hits | Where-Object { $_.id -eq $draft.id }).Count -eq 0)
+Api $priya DELETE "/kb/$($draft.id)" | Out-Null
+
+# Rows the caller may not see answer 404, never 403: the demo seed has a single
+# tenant, so the observable half of that guard is the unknown id and another
+# requester's ticket — both take the same code path as a cross-tenant id.
+Check "unknown ticket id answers 404" ((ApiStatus $priya GET "/tickets/tkt_no_such_row") -eq 404)
+$notDanas = @(Api $priya GET "/tickets") | Where-Object { $_.requesterEmail -ne "dana.lee@netlink.com" } | Select-Object -First 1
+Check "requester GET of another user's ticket answers 404" ((ApiStatus $dana GET "/tickets/$($notDanas.id)") -eq 404)
+Check "unknown problem id answers 404" ((ApiStatus $priya GET "/problems/prb_no_such_row") -eq 404)
+Check "unknown change id answers 404" ((ApiStatus $priya GET "/changes/chg_no_such_row") -eq 404)
+
+# Intake cannot be used to raise a ticket in someone else's name.
+$spoof = Api $dana POST "/intake" @{ channel = "portal"; subject = "E2E: spoof probe"; body = "Raised as somebody else."; requesterEmail = "priya.sharma@netlink.com" }
+Check "requester cannot spoof requesterEmail on intake" ($spoof.requesterEmail -eq "dana.lee@netlink.com")
+
 $reply = Api $dana POST "/tickets/$($t.id)/messages" @{ body = "Thanks, seems stable now."; asRequester = $true }
 Check "requester reply on own ticket" ([bool]$reply)
+
+# CSAT rates an outcome, so it cannot be submitted while the ticket is still
+# open — the ticket is in "reopened" here from the lifecycle section above.
+Check "CSAT rejected while the ticket is still open" ((ApiStatus $dana POST "/tickets/$($t.id)/actions" @{ action = "feedback"; satisfaction = "satisfied" }) -eq 409)
+Api $priya POST "/tickets/$($t.id)/actions" @{ action = "resolve"; reply = "Confirmed stable."; resolutionNotes = "Faulty SFP swapped." } | Out-Null
 $fb = Api $dana POST "/tickets/$($t.id)/actions" @{ action = "feedback"; satisfaction = "satisfied" }
 Check "CSAT feedback closes ticket" ($fb.status -eq "closed")
 
@@ -143,6 +209,7 @@ Check "manager approves service request" ($dec.status -ne "pending" -and $dec.st
 Write-Host "== Changes (CAB + lifecycle) =="
 $chg = Api $priya POST "/changes" @{ title = "E2E: rotate wifi PSK"; description = "Scheduled security rotation."; type = "normal" }
 Check "create change with AI risk" ($chg.riskScore -ge 0)
+Check "draft cannot jump straight to closed" ((ApiStatus $priya PATCH "/changes/$($chg.id)" @{ status = "closed" }) -eq 409)
 $sub = Api $priya POST "/changes/$($chg.id)/approvals" @{ op = "submit"; approvers = @(@{ id = "user_meera"; name = "Meera Nair" }) }
 Check "submit for CAB" ($sub.status -eq "awaiting_approval")
 Check "agent cannot CAB-approve" (ApiFails $arjun POST "/changes/$($chg.id)/approvals" @{ op = "decide"; approvalId = $sub.approvals[0].id; state = "approved" })
@@ -156,6 +223,8 @@ Check "lifecycle to closed" ($chg.status -eq "closed")
 Write-Host "== Problems (RCA workflow) =="
 $prb = Api $priya POST "/problems" @{ title = "E2E: recurring switch failures"; description = "Multiple port incidents."; impact = "medium"; urgency = "high"; category = "Network" }
 Check "problem priority from matrix (M x H = high)" ($prb.priority -eq "high")
+Check "cannot resolve a problem with no root cause" ((ApiStatus $priya PATCH "/problems/$($prb.id)" @{ status = "resolved" }) -eq 409)
+Check "cannot flag a known error with no workaround" ((ApiStatus $priya PATCH "/problems/$($prb.id)" @{ knownError = $true }) -eq 409)
 Api $priya POST "/problems/$($prb.id)/actions" @{ action = "link_incident"; ticketId = $t.id } | Out-Null
 $pv = Api $priya GET "/problems/$($prb.id)"
 Check "incident linked to problem" (($pv.linkedIncidents | Measure-Object).Count -ge 1)
@@ -203,6 +272,7 @@ $autos = @(Api $priya GET "/automations")
 Api $priya PATCH "/automations/$($autos[0].id)" @{ enabled = $false } | Out-Null
 Api $priya PATCH "/automations/$($autos[0].id)" @{ enabled = $true } | Out-Null
 Check "automation toggle round-trip" $true
+Check "plain agent cannot toggle automations" (ApiFails $arjun PATCH "/automations/$($autos[0].id)" @{ enabled = $false })
 $met = Api $priya GET "/metrics"
 Check "metrics incl. SLA compliance/backlog" ([bool]$met.slaCompliance -and [bool]$met.backlogByGroup)
 $csv = Invoke-WebRequest -Uri "$BaseUrl/api/v1/reports?format=csv" -WebSession $priya -UseBasicParsing

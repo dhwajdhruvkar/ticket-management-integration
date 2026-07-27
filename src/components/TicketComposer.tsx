@@ -6,6 +6,8 @@ import { useTypingPing } from "@/lib/liveTicket";
 import type { TicketView } from "@/server/services/ticketService";
 import type { MacroRow, MessageVisibility, TicketRow } from "@/server/domain/models";
 import { useToast } from "./Toast";
+import { LabelWithHint } from "./ui";
+import { HINTS } from "@/lib/hints";
 
 /** Substitute macro placeholders using the ticket in context. */
 function fillMacro(body: string, ticket: TicketView): string {
@@ -131,8 +133,13 @@ export default function TicketComposer({
   return (
     <div style={{ borderTop: "1px solid var(--border)", background: "var(--surface)" }}>
       <div className="flex items-center" style={{ gap: 4, padding: "0.5rem 0.9rem 0" }}>
-        <Tab label="Public reply" active={tab === "public"} onClick={() => setTab("public")} />
-        <Tab label="Internal note" active={tab === "internal"} onClick={() => setTab("internal")} />
+        <Tab label="Public reply" active={tab === "public"} onClick={() => setTab("public")} info={HINTS.publicReply} />
+        <Tab
+          label="Internal note"
+          active={tab === "internal"}
+          onClick={() => setTab("internal")}
+          info={HINTS.internalNote}
+        />
       </div>
 
       <div style={{ padding: "0.6rem 0.9rem 0.9rem" }}>
@@ -253,8 +260,11 @@ export default function TicketComposer({
                     "Could not run auto-resolution"
                   )
                 }
+                aria-label={`Run AI. ${HINTS.runAi}`}
               >
-                {busy === "rerun" ? "Running…" : "Run AI"}
+                <LabelWithHint info={HINTS.runAi} size={12} nested>
+                  {busy === "rerun" ? "Running…" : "Run AI"}
+                </LabelWithHint>
               </button>
             ) : null}
             {isSuggest ? (
@@ -270,8 +280,11 @@ export default function TicketComposer({
                       "Could not send draft"
                     )
                   }
+                  aria-label={`Approve draft. ${HINTS.approveDraft}`}
                 >
-                  Approve draft
+                  <LabelWithHint info={HINTS.approveDraft} size={12} nested>
+                    Approve draft
+                  </LabelWithHint>
                 </button>
                 <button
                   className="btn btn-ghost"
@@ -284,8 +297,11 @@ export default function TicketComposer({
                       "Could not escalate"
                     )
                   }
+                  aria-label={`Escalate. ${HINTS.escalate}`}
                 >
-                  Escalate
+                  <LabelWithHint info={HINTS.escalate} size={12} nested>
+                    Escalate
+                  </LabelWithHint>
                 </button>
               </>
             ) : null}
@@ -301,8 +317,11 @@ export default function TicketComposer({
                     "Could not put on hold"
                   )
                 }
+                aria-label={`On hold. ${HINTS.onHold}`}
               >
-                On hold
+                <LabelWithHint info={HINTS.onHold} size={12} nested>
+                  On hold
+                </LabelWithHint>
               </button>
             ) : null}
             {active ? (
@@ -356,7 +375,17 @@ export default function TicketComposer({
   );
 }
 
-function Tab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+function Tab({
+  label,
+  active,
+  onClick,
+  info,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  info?: string;
+}) {
   return (
     <button
       type="button"
@@ -375,8 +404,11 @@ function Tab({ label, active, onClick }: { label: string; active: boolean; onCli
         transition: "color 0.15s ease, border-color 0.15s ease",
       }}
       aria-pressed={active}
+      aria-label={info ? `${label}. ${info}` : undefined}
     >
-      {label}
+      <LabelWithHint info={info} side="right" size={12} nested>
+        {label}
+      </LabelWithHint>
     </button>
   );
 }

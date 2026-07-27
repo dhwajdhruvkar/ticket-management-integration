@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiGet } from "@/lib/api";
-import { Avatar } from "@/components/ui";
+import { apiGet, ApiError } from "@/lib/api";
+import { Avatar, LabelWithHint } from "@/components/ui";
+import { HINTS } from "@/lib/hints";
 
 // =============================================================================
 // AnalyticsPage — grouped KPI hierarchy, visualized distributions, and a
@@ -17,6 +18,7 @@ interface Metrics {
   byStatus: Record<string, number>;
   openCount: number;
   resolvedCount: number;
+  processed: number;
   deflectionRate: number;
   containmentRate: number;
   avgConfidence: number;
@@ -47,16 +49,29 @@ const dur = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 6
 export default function AnalyticsPage() {
   const [m, setM] = useState<Metrics | null>(null);
   const [trends, setTrends] = useState<TrendPoint[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; forbidden: boolean } | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setError(null);
     apiGet<Metrics>("/metrics")
-      .then(setM)
-      .catch((e) => setError(String(e.message ?? e)));
+      .then((data) => {
+        setM(data);
+        setError(null);
+      })
+      .catch((err: unknown) =>
+        setError({
+          message: err instanceof Error ? err.message : String(err),
+          forbidden: err instanceof ApiError && err.forbidden,
+        })
+      );
     apiGet<TrendPoint[]>("/reports/trends?days=30")
       .then(setTrends)
       .catch(() => setTrends([]));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const bands = useMemo(() => (m ? buildBands(m) : null), [m]);
 
@@ -78,8 +93,8 @@ export default function AnalyticsPage() {
               width: 40,
               height: 40,
               borderRadius: 10,
-              background: "var(--warning-bg)",
-              color: "var(--warning-fg)",
+              background: error.forbidden ? "var(--warning-bg)" : "var(--danger-bg)",
+              color: error.forbidden ? "var(--warning-fg)" : "var(--danger-fg)",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -88,10 +103,17 @@ export default function AnalyticsPage() {
           >
             <ShieldIcon />
           </span>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>Insights require an agent role</div>
-            <p className="muted" style={{ fontSize: "0.82rem", margin: "4px 0 0" }}>{error}</p>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>
+              {error.forbidden ? "Insights require an agent role" : "Could not load insights"}
+            </div>
+            <p className="muted" style={{ fontSize: "0.82rem", margin: "4px 0 0" }}>{error.message}</p>
           </div>
+          {error.forbidden ? null : (
+            <button className="btn btn-primary" style={{ flexShrink: 0 }} onClick={load}>
+              Try again
+            </button>
+          )}
         </div>
       </div>
     );
@@ -183,6 +205,7 @@ export default function AnalyticsPage() {
               <PanelHeader
                 title="SLA outcomes — last 30 days"
                 icon={<GaugeIcon />}
+                info="Per day, how many tickets met their SLA target versus how many breached it. A rising red band means deadlines are slipping."
                 right={
                   <span style={{ display: "inline-flex", gap: 12, fontSize: "0.72rem", color: "var(--muted)" }}>
                     <LegendDot color="var(--success-solid)" label="met" />
@@ -236,6 +259,8 @@ interface KpiEntry {
   tone: Tone;
   icon: React.ReactNode;
   progress?: number;
+  /** Hover explanation of how the metric is calculated. */
+  info?: string;
 }
 
 interface Band {
@@ -255,10 +280,11 @@ function buildBands(m: Metrics): Band[] {
         { label: "Resolved", value: String(m.resolvedCount), tone: "success", icon: <CheckIcon /> },
         {
           label: "AI processed",
-          value: String(Math.max(m.totalTickets, 0)),
+          value: String(m.processed),
           sub: "input to the assistant",
           tone: "warning",
           icon: <SparkIcon />,
+          info: HINTS.aiProcessed,
         },
       ],
     },
@@ -273,6 +299,7 @@ function buildBands(m: Metrics): Band[] {
           tone: "success",
           icon: <BoltIcon />,
           progress: m.deflectionRate,
+          info: HINTS.aiDeflection,
         },
         {
           label: "Containment",
@@ -281,6 +308,7 @@ function buildBands(m: Metrics): Band[] {
           tone: "brand",
           icon: <ShieldIcon />,
           progress: m.containmentRate,
+          info: HINTS.aiContainment,
         },
         {
           label: "Avg confidence",
@@ -289,6 +317,7 @@ function buildBands(m: Metrics): Band[] {
           tone: "info",
           icon: <GaugeIcon />,
           progress: m.avgConfidence,
+          info: HINTS.aiConfidence,
         },
       ],
     },
@@ -296,8 +325,14 @@ function buildBands(m: Metrics): Band[] {
       title: "Speed",
       hint: "Time to first touch and full resolution",
       items: [
-        { label: "First response", value: dur(m.avgFirstResponseMins), tone: "info", icon: <TimerIcon /> },
-        { label: "MTTR", value: dur(m.mttrMins), tone: "brand", icon: <ClockIcon /> },
+        {
+          label: "First response",
+          value: dur(m.avgFirstResponseMins),
+          tone: "info",
+          icon: <TimerIcon />,
+          info: HINTS.firstResponseTime,
+        },
+        { label: "MTTR", value: dur(m.mttrMins), tone: "brand", icon: <ClockIcon />, info: HINTS.mttr },
       ],
     },
     {
@@ -310,6 +345,7 @@ function buildBands(m: Metrics): Band[] {
           sub: "80%+ elapsed",
           tone: m.slaAtRisk > 0 ? "warning" : "success",
           icon: <HourglassIcon />,
+          info: HINTS.slaAtRisk,
         },
         {
           label: "SLA breached",
@@ -317,6 +353,7 @@ function buildBands(m: Metrics): Band[] {
           sub: "past deadline",
           tone: m.slaBreached > 0 ? "danger" : "success",
           icon: <AlertIcon />,
+          info: HINTS.slaBreached,
         },
         {
           label: "CSAT",
@@ -325,6 +362,7 @@ function buildBands(m: Metrics): Band[] {
           tone: "success",
           icon: <HeartIcon />,
           progress: m.csat,
+          info: HINTS.csat,
         },
       ],
     },
@@ -338,6 +376,7 @@ function buildBands(m: Metrics): Band[] {
           sub: `${m.agentHoursSaved.toFixed(1)} agent hours`,
           tone: "warning",
           icon: <BankIcon />,
+          info: HINTS.costSaved,
         },
       ],
     },
@@ -401,7 +440,7 @@ function KpiTile({ entry }: { entry: KpiEntry }) {
             paddingTop: 4,
           }}
         >
-          {entry.label}
+          <LabelWithHint info={entry.info}>{entry.label}</LabelWithHint>
         </div>
         <div
           aria-hidden
@@ -739,10 +778,12 @@ function PanelHeader({
   title,
   icon,
   right,
+  info,
 }: {
   title: string;
   icon?: React.ReactNode;
   right?: React.ReactNode;
+  info?: string;
 }) {
   return (
     <div
@@ -758,7 +799,9 @@ function PanelHeader({
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {icon ? <span style={{ color: "var(--muted)", display: "inline-flex" }}>{icon}</span> : null}
-        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>{title}</h2>
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>
+          <LabelWithHint info={info}>{title}</LabelWithHint>
+        </h2>
       </div>
       {right}
     </div>

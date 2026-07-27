@@ -22,7 +22,9 @@ import { useToast } from "@/components/Toast";
 import { useTheme } from "@/components/Theme";
 import { PRIORITY_ORDER, priorityCode } from "@/server/domain/priority";
 import type { TicketPriority } from "@/server/domain/models";
-import { timeAgo } from "@/components/ui";
+import { InfoHint, LabelWithHint, timeAgo } from "@/components/ui";
+import { PromptDialog } from "@/components/primitives";
+import { customFieldHint, HINTS } from "@/lib/hints";
 
 // =============================================================================
 // SettingsView — the admin/agent configuration surface (route: /settings).
@@ -53,6 +55,7 @@ export default function SettingsView() {
   const [automations, setAutomations] = useState<AutomationRow[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKeyView[] | null>(null);
   const [showRuleBuilder, setShowRuleBuilder] = useState(false);
+  const [togglingRule, setTogglingRule] = useState<string | null>(null);
   const toast = useToast();
   const { theme, toggle } = useTheme();
 
@@ -80,12 +83,15 @@ export default function SettingsView() {
   }, [refresh]);
 
   async function toggleAutomation(rule: AutomationRow) {
+    setTogglingRule(rule.id);
     try {
       await apiSend(`/automations/${rule.id}`, "PATCH", { enabled: !rule.enabled });
       refresh();
       toast.success({ title: rule.enabled ? "Automation disabled" : "Automation enabled" });
     } catch (err) {
       toast.error({ title: "Could not update automation", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTogglingRule(null);
     }
   }
 
@@ -114,12 +120,13 @@ export default function SettingsView() {
                   value={`${health.service} v${health.version}`}
                   ok
                 />
-                <HealthCell label="Data driver" value={health.dataDriver} ok />
+                <HealthCell label="Data driver" value={health.dataDriver} ok info={HINTS.dataDriver} />
                 <HealthCell
                   label="Features"
                   value={enabledFeatures.length ? enabledFeatures.join(", ") : "zero-infra demo"}
                   ok={enabledFeatures.length > 0}
                   neutral={enabledFeatures.length === 0}
+                  info={HINTS.featureFlags}
                 />
               </div>
             ) : (
@@ -129,7 +136,12 @@ export default function SettingsView() {
 
           {/* SLA policies --------------------------------------------------- */}
           <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
-            <SectionHead icon={<GaugeIcon />} title="SLA policies" hint="Response / resolution per priority" />
+            <SectionHead
+              icon={<GaugeIcon />}
+              title="SLA policies"
+              hint="Response / resolution per priority"
+              info={HINTS.slaPolicy}
+            />
             {slaPolicies.length === 0 ? (
               <p className="muted" style={{ fontSize: "0.84rem", margin: 0 }}>
                 Default matrix: P1 15m/2h · P2 1h/4h · P3 2h/24h · P4 4h/3d · P5 8h/5d.
@@ -182,7 +194,12 @@ export default function SettingsView() {
 
           {/* Assignment groups ---------------------------------------------- */}
           <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
-            <SectionHead icon={<UsersIcon />} title="Assignment groups" hint="Category routing + auto-assignment strategy" />
+            <SectionHead
+              icon={<UsersIcon />}
+              title="Assignment groups"
+              hint="Category routing + auto-assignment strategy"
+              info={HINTS.assignmentGroup}
+            />
             {groups.length === 0 ? (
               <p className="muted" style={{ fontSize: "0.84rem", margin: 0 }}>No groups configured.</p>
             ) : (
@@ -229,7 +246,9 @@ export default function SettingsView() {
                     {isAdmin ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
                         <span className="muted" style={{ fontSize: "0.7rem", fontWeight: 600, flexShrink: 0 }}>
-                          Auto-assign
+                          <LabelWithHint info={HINTS.assignStrategy} side="right" size={12}>
+                            Auto-assign
+                          </LabelWithHint>
                         </span>
                         <select
                           className="select"
@@ -292,7 +311,12 @@ export default function SettingsView() {
           {/* Automations ----------------------------------------------------- */}
           <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <SectionHead icon={<BoltIcon />} title="Automation rules" hint="Run on lifecycle + SLA events" />
+              <SectionHead
+                icon={<BoltIcon />}
+                title="Automation rules"
+                hint="Run on lifecycle + SLA events"
+                info={HINTS.automation}
+              />
               {isAdmin ? (
                 <button className="btn btn-ghost" style={{ fontSize: "0.76rem" }} onClick={() => setShowRuleBuilder((s) => !s)}>
                   {showRuleBuilder ? "Close" : "+ New rule"}
@@ -342,7 +366,13 @@ export default function SettingsView() {
                         </div>
                       </div>
                     </div>
-                    <Switch checked={rule.enabled} label={`Toggle ${rule.name}`} onChange={() => void toggleAutomation(rule)} />
+                    <Switch
+                      checked={rule.enabled}
+                      label={`Toggle ${rule.name}`}
+                      onChange={() => void toggleAutomation(rule)}
+                      disabled={!isAdmin || togglingRule === rule.id}
+                      title={isAdmin ? undefined : "Only administrators can enable or disable automation rules."}
+                    />
                   </div>
                 ))}
               </div>
@@ -500,17 +530,32 @@ function RuleBuilder({ onCreated }: { onCreated: () => void }) {
     <div className="panel-2 anim-fade-up" style={{ padding: "0.9rem 1rem", marginBottom: 12, display: "grid", gap: 12 }}>
       <div style={rowStyle}>
         <input className="input" placeholder="Rule name (e.g. Route network incidents)" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: "1 1 220px" }} />
-        <select className="select" value={trigger} onChange={(e) => setTrigger(e.target.value)} style={{ ...smallSelect, height: 38 }}>
+        <select
+          className="select"
+          value={trigger}
+          onChange={(e) => setTrigger(e.target.value)}
+          style={{ ...smallSelect, height: 38 }}
+          aria-label="Trigger"
+          title={HINTS.automationTrigger}
+        >
           <option value="ticket.created">When a ticket is created</option>
           <option value="ticket.updated">When a ticket&apos;s status changes</option>
           <option value="sla.at_risk">When an SLA is at risk</option>
           <option value="sla.breached">When an SLA breaches</option>
         </select>
+        <InfoHint text={HINTS.automationTrigger} side="left" />
       </div>
 
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span className="label" style={{ margin: 0 }}>Conditions</span>
+          <span className="label" style={{ margin: 0 }}>
+            <LabelWithHint
+              info={`${HINTS.automationMatchAll} ${HINTS.automationMatchAny}`}
+              side="right"
+            >
+              Conditions
+            </LabelWithHint>
+          </span>
           <select className="select" value={matchMode} onChange={(e) => setMatchMode(e.target.value as "all" | "any")} style={smallSelect}>
             <option value="all">match ALL</option>
             <option value="any">match ANY</option>
@@ -542,7 +587,11 @@ function RuleBuilder({ onCreated }: { onCreated: () => void }) {
 
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span className="label" style={{ margin: 0 }}>Actions</span>
+          <span className="label" style={{ margin: 0 }}>
+            <LabelWithHint info={HINTS.automationActions} side="right">
+              Actions
+            </LabelWithHint>
+          </span>
           <button className="btn btn-ghost" style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem" }} onClick={() => setActions((a) => [...a, { type: "add_tag", value: "" }])}>
             + action
           </button>
@@ -660,7 +709,12 @@ function CalendarsSection({ onChanged }: { onChanged: () => void }) {
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <SectionHead icon={<CalendarIcon />} title="Business calendars" hint="SLA working hours, timezones, holidays" />
+        <SectionHead
+          icon={<CalendarIcon />}
+          title="Business calendars"
+          hint="SLA working hours, timezones, holidays"
+          info={HINTS.businessCalendar}
+        />
         <button className="btn btn-ghost" style={{ fontSize: "0.76rem" }} onClick={() => setShowForm((s) => !s)}>
           {showForm ? "Close" : "+ New calendar"}
         </button>
@@ -776,7 +830,12 @@ function MacrosSection({ isAdmin }: { isAdmin: boolean }) {
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <SectionHead icon={<MacroIcon />} title="Macros" hint="Canned responses agents insert into replies" />
+        <SectionHead
+          icon={<MacroIcon />}
+          title="Macros"
+          hint="Canned responses agents insert into replies"
+          info={HINTS.macros}
+        />
         {isAdmin ? (
           <button className="btn btn-ghost" style={{ fontSize: "0.76rem" }} onClick={() => setShowForm((s) => !s)}>
             {showForm ? "Close" : "+ New macro"}
@@ -845,6 +904,7 @@ function CustomFieldsSection() {
   const [fields, setFields] = useState<CustomFieldDefRow[] | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [label, setLabel] = useState("");
+  const [description, setDescription] = useState("");
   const [type, setType] = useState<CustomFieldType>("text");
   const [options, setOptions] = useState("");
   const [required, setRequired] = useState(false);
@@ -864,11 +924,13 @@ function CustomFieldsSection() {
     try {
       await apiSend("/custom-fields", "POST", {
         label: label.trim(),
+        description: description.trim() || null,
         type,
         required,
         options: type === "select" ? options.split(/[\n,]+/).map((o) => o.trim()).filter(Boolean) : [],
       });
       setLabel("");
+      setDescription("");
       setOptions("");
       setType("text");
       setRequired(false);
@@ -893,10 +955,25 @@ function CustomFieldsSection() {
     }
   }
 
+  async function saveDescription(field: CustomFieldDefRow, description: string) {
+    try {
+      await apiSend(`/custom-fields/${field.id}`, "PATCH", { description: description || null });
+      load();
+      toast.success({ title: "Help text saved", description: field.label });
+    } catch (err) {
+      toast.error({ title: "Could not save help text", description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <SectionHead icon={<FieldIcon />} title="Custom fields" hint="Extra ticket fields for this tenant" />
+        <SectionHead
+          icon={<FieldIcon />}
+          title="Custom fields"
+          hint="Extra ticket fields for this tenant"
+          info={HINTS.customFields}
+        />
         <button className="btn btn-ghost" style={{ fontSize: "0.76rem" }} onClick={() => setShowForm((s) => !s)}>
           {showForm ? "Close" : "+ New field"}
         </button>
@@ -923,6 +1000,20 @@ function CustomFieldsSection() {
               onChange={(e) => setOptions(e.target.value)}
             />
           ) : null}
+          <div>
+            <label className="label" htmlFor="cf-help-text" style={{ marginBottom: 4, display: "block" }}>
+              <LabelWithHint info={HINTS.customFieldHelp} side="right" size={12}>
+                Help text
+              </LabelWithHint>
+            </label>
+            <input
+              id="cf-help-text"
+              className="input"
+              placeholder="Explain what this field is for (shown on the field's info icon)"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.82rem" }}>
             <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} />
             Required
@@ -942,20 +1033,36 @@ function CustomFieldsSection() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {fields.map((f) => (
-            <div key={f.id} className="panel-2 flex items-center justify-between" style={{ padding: "0.6rem 0.8rem", gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>
-                  {f.label}
-                  {f.required ? <span style={{ color: "var(--danger-fg)", marginLeft: 4 }}>*</span> : null}
+            <div key={f.id} className="panel-2" style={{ padding: "0.6rem 0.8rem" }}>
+              <div className="flex items-center justify-between" style={{ gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>
+                    <LabelWithHint info={customFieldHint(f)} size={12}>
+                      {f.label}
+                      {f.required ? <span style={{ color: "var(--danger-fg)", marginLeft: 4 }}>*</span> : null}
+                    </LabelWithHint>
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>
+                    {f.type}
+                    {f.type === "select" && f.options.length ? ` · ${f.options.join(", ")}` : ""} · key: {f.key}
+                  </div>
                 </div>
-                <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>
-                  {f.type}
-                  {f.type === "select" && f.options.length ? ` · ${f.options.join(", ")}` : ""} · key: {f.key}
-                </div>
+                <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void remove(f)}>
+                  Delete
+                </button>
               </div>
-              <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void remove(f)}>
-                Delete
-              </button>
+              <input
+                className="input"
+                aria-label={`Help text for ${f.label}`}
+                placeholder="Help text shown on the field's info icon (optional)"
+                defaultValue={f.description ?? ""}
+                style={{ marginTop: 8, fontSize: "0.78rem", height: 32 }}
+                onBlur={(e) => {
+                  const next = e.target.value.trim();
+                  if (next === (f.description ?? "")) return;
+                  void saveDescription(f, next);
+                }}
+              />
             </div>
           ))}
         </div>
@@ -1064,7 +1171,12 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
-        <SectionHead icon={<KeyIcon />} title="API integrations" hint="Register an application, choose the agents it acts as, then mint a key." />
+        <SectionHead
+          icon={<KeyIcon />}
+          title="API integrations"
+          hint="Register an application, choose the agents it acts as, then mint a key."
+          info={HINTS.apiKeys}
+        />
         <button
           className="btn btn-ghost"
           style={{ flexShrink: 0 }}
@@ -1148,10 +1260,12 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                 rows={2}
                 style={{ resize: "vertical" }}
               />
-              <label className="muted" style={{ fontSize: "0.74rem", fontWeight: 600 }}>
-                Acting role
+              <label className="muted" htmlFor="api-key-role" style={{ fontSize: "0.74rem", fontWeight: 600 }}>
+                <LabelWithHint info={HINTS.apiActingRole} side="right" size={12}>
+                  Acting role
+                </LabelWithHint>
               </label>
-              <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+              <select id="api-key-role" className="select" value={role} onChange={(e) => setRole(e.target.value)}>
                 <option value="requester">requester</option>
                 <option value="agent">agent</option>
                 <option value="manager">manager</option>
@@ -1468,6 +1582,7 @@ function DepartmentsSection() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const [renaming, setRenaming] = useState<DepartmentRow | null>(null);
 
   const load = useCallback(() => {
     apiGet<DepartmentRow[]>("/departments").then(setDepartments).catch(() => setDepartments([]));
@@ -1493,15 +1608,17 @@ function DepartmentsSection() {
     }
   }
 
-  async function rename(d: DepartmentRow) {
-    const next = window.prompt("Rename department", d.name);
-    if (next === null || !next.trim()) return;
+  async function rename(d: DepartmentRow, next: string) {
+    setBusy(true);
     try {
-      await apiSend(`/departments/${d.id}`, "PATCH", { name: next.trim() });
+      await apiSend(`/departments/${d.id}`, "PATCH", { name: next });
       toast.success({ title: "Department updated" });
+      setRenaming(null);
       load();
     } catch (err) {
       toast.error({ title: "Could not update", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1519,7 +1636,12 @@ function DepartmentsSection() {
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
-        <SectionHead icon={<DeptIcon />} title="Departments" hint="Organize people into departments within your organization." />
+        <SectionHead
+          icon={<DeptIcon />}
+          title="Departments"
+          hint="Organize people into departments within your organization."
+          info={HINTS.departments}
+        />
         <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setOpen((o) => !o)}>
           {open ? "Close" : "+ New department"}
         </button>
@@ -1544,7 +1666,7 @@ function DepartmentsSection() {
                 {d.description ? <div className="muted" style={{ fontSize: "0.72rem" }}>{d.description}</div> : null}
               </div>
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }} onClick={() => void rename(d)}>
+                <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }} onClick={() => setRenaming(d)}>
                   Rename
                 </button>
                 <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }} onClick={() => void remove(d)}>
@@ -1555,6 +1677,20 @@ function DepartmentsSection() {
           ))}
         </div>
       )}
+      <PromptDialog
+        open={renaming !== null}
+        title="Rename department"
+        description="Members keep their membership; only the display name changes."
+        label="Department name"
+        initialValue={renaming?.name ?? ""}
+        confirmLabel="Rename"
+        required
+        busy={busy}
+        onCancel={() => setRenaming(null)}
+        onConfirm={(next) => {
+          if (renaming) void rename(renaming, next);
+        }}
+      />
     </section>
   );
 }
@@ -1592,7 +1728,12 @@ function OrganizationsSection() {
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
-        <SectionHead icon={<OrgIcon />} title="Organizations" hint="Provision additional organizations (tenants)." />
+        <SectionHead
+          icon={<OrgIcon />}
+          title="Organizations"
+          hint="Provision additional organizations (tenants)."
+          info={HINTS.organizations}
+        />
         <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setOpen((o) => !o)}>
           {open ? "Close" : "+ New organization"}
         </button>
@@ -1668,7 +1809,17 @@ function segStyle(active: boolean): React.CSSProperties {
   };
 }
 
-function SectionHead({ icon, title, hint }: { icon: React.ReactNode; title: string; hint?: string }) {
+function SectionHead({
+  icon,
+  title,
+  hint,
+  info,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  hint?: string;
+  info?: string;
+}) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
       <span
@@ -1688,7 +1839,9 @@ function SectionHead({ icon, title, hint }: { icon: React.ReactNode; title: stri
         {icon}
       </span>
       <div>
-        <div style={{ fontSize: "0.92rem", fontWeight: 700, letterSpacing: "-0.01em" }}>{title}</div>
+        <div style={{ fontSize: "0.92rem", fontWeight: 700, letterSpacing: "-0.01em" }}>
+          <LabelWithHint info={info}>{title}</LabelWithHint>
+        </div>
         {hint ? <div className="muted" style={{ fontSize: "0.7rem" }}>{hint}</div> : null}
       </div>
     </div>
@@ -1700,11 +1853,13 @@ function HealthCell({
   value,
   ok,
   neutral,
+  info,
 }: {
   label: string;
   value: string;
   ok?: boolean;
   neutral?: boolean;
+  info?: string;
 }) {
   return (
     <div className="panel-2" style={{ padding: "0.75rem 0.9rem" }}>
@@ -1719,14 +1874,28 @@ function HealthCell({
             flexShrink: 0,
           }}
         />
-        <span className="label" style={{ margin: 0 }}>{label}</span>
+        <span className="label" style={{ margin: 0 }}>
+          <LabelWithHint info={info}>{label}</LabelWithHint>
+        </span>
       </div>
       <span style={{ fontSize: "0.9rem", fontWeight: 700, wordBreak: "break-word" }}>{value}</span>
     </div>
   );
 }
 
-function Switch({ checked, label, onChange }: { checked: boolean; label: string; onChange: () => void }) {
+function Switch({
+  checked,
+  label,
+  onChange,
+  disabled = false,
+  title,
+}: {
+  checked: boolean;
+  label: string;
+  onChange: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
   return (
     <button
       type="button"
@@ -1734,16 +1903,19 @@ function Switch({ checked, label, onChange }: { checked: boolean; label: string;
       aria-checked={checked}
       aria-label={label}
       onClick={onChange}
+      disabled={disabled}
+      title={title}
       style={{
         position: "relative",
         width: 40,
         height: 23,
         borderRadius: 999,
         border: "none",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
         flexShrink: 0,
+        opacity: disabled ? 0.5 : 1,
         background: checked ? "var(--brand-gradient)" : "var(--surface-3)",
-        transition: "background 0.2s var(--ease)",
+        transition: "background 0.2s var(--ease), opacity 0.2s var(--ease)",
       }}
     >
       <span

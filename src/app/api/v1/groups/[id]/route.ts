@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { currentActor } from "@/server/context";
 import { fail, ok, parseBody } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, loadOwned, requirePermission } from "@/server/guards";
 import { updateGroup } from "@/server/services/groupService";
-import type { Role, TicketCategory } from "@/server/domain/models";
 
 // PATCH /api/v1/groups/[id] — update membership, routing categories, and the
 // auto-assignment strategy. Admin only.
@@ -25,12 +23,14 @@ const PatchSchema = z.object({
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const actor = await currentActor(req);
-  if (!can(actor.role as Role, "admin")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "admin");
+  if (isResponse(ctx)) return ctx;
+  const owned = await loadOwned(ctx, "groups", id, "Group");
+  if (isResponse(owned)) return owned;
 
   const body = await parseBody(req, PatchSchema);
   if (body instanceof NextResponse) return body;
 
-  const updated = await updateGroup(id, body as Parameters<typeof updateGroup>[1], actor.name);
+  const updated = await updateGroup(id, body as Parameters<typeof updateGroup>[1], ctx.actor.name);
   return updated ? ok(updated) : fail("Group not found.", 404);
 }

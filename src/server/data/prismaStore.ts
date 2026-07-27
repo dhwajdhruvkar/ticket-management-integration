@@ -23,6 +23,23 @@ function serialize<T>(row: any): T {
   return out as T;
 }
 
+/**
+ * Drop keys whose value is `undefined` before handing a patch to Prisma.
+ *
+ * Callers routinely build patches with optional fields, so `{ strategy, categories: undefined }`
+ * is a normal shape. The memory driver skips those keys; Prisma does too for
+ * scalars, but not for every field type, and the two drivers must behave
+ * identically — a partial patch once wiped a group's categories in memory,
+ * which is exactly the class of divergence this prevents.
+ */
+function stripUndefined<T extends object>(patch: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out as Partial<T>;
+}
+
 class PrismaCollection<T extends Entity> implements Collection<T> {
   constructor(private readonly delegate: any) {}
 
@@ -40,7 +57,7 @@ class PrismaCollection<T extends Entity> implements Collection<T> {
   }
   async update(id: string, patch: Partial<T>): Promise<T | null> {
     try {
-      const row = await this.delegate.update({ where: { id }, data: patch });
+      const row = await this.delegate.update({ where: { id }, data: stripUndefined(patch) });
       return serialize<T>(row);
     } catch {
       return null;

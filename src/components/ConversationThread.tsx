@@ -263,19 +263,22 @@ function MessageBubble({ bubble, ticketId, own }: { bubble: Bubble; ticketId: st
 function TranslateControl({ ticketId, text, align }: { ticketId: string; text: string; align: "left" | "right" }) {
   const [lang, setLang] = useState("English");
   const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
 
   async function translate() {
     setBusy(true);
+    setError(null);
     try {
       const res = await apiSend<{ translated: string }>(`/tickets/${ticketId}/translate`, "POST", {
         text,
         targetLang: lang,
       });
       setResult(res.translated);
-    } catch {
+    } catch (err) {
       setResult(null);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -325,6 +328,11 @@ function TranslateControl({ ticketId, text, align }: { ticketId: string; text: s
           </button>
         ) : null}
       </div>
+      {error ? (
+        <div style={{ fontSize: "0.72rem", color: "var(--danger-fg)", maxWidth: "min(78%, 560px)" }}>
+          Translation failed: {error}
+        </div>
+      ) : null}
       {result != null ? (
         <div
           style={{

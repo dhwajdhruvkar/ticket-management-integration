@@ -14,10 +14,17 @@ const FIELD_TYPES: CustomFieldType[] = ["text", "number", "select", "date", "che
 
 export interface NewCustomFieldInput {
   label: string;
+  description?: string | null;
   type?: CustomFieldType;
   options?: string[];
   required?: boolean;
   order?: number;
+}
+
+/** Empty strings from the admin form mean "no help text", not an empty hint. */
+function cleanDescription(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 /** Slugify a label into a stable key, deduped against existing keys. */
@@ -53,6 +60,7 @@ export async function createCustomField(
     tenantId,
     key: deriveKey(input.label, new Set(existing.map((f) => f.key))),
     label: input.label.trim(),
+    description: cleanDescription(input.description),
     type,
     options: type === "select" ? (input.options ?? []).map((o) => o.trim()).filter(Boolean) : [],
     required: !!input.required,
@@ -70,6 +78,7 @@ export async function updateCustomField(
   const store = await getStore();
   const next: Partial<CustomFieldDefRow> = { updatedAt: now() };
   if (patch.label !== undefined) next.label = patch.label.trim();
+  if (patch.description !== undefined) next.description = cleanDescription(patch.description);
   if (patch.type !== undefined && FIELD_TYPES.includes(patch.type)) next.type = patch.type;
   if (patch.options !== undefined) next.options = patch.options.map((o) => o.trim()).filter(Boolean);
   if (patch.required !== undefined) next.required = !!patch.required;

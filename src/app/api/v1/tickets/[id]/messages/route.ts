@@ -1,9 +1,8 @@
-import { currentActor } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
+import { actorContext, isResponse, loadTicket } from "@/server/guards";
 import { can, isAgentRole } from "@/server/auth/rbac";
 import { agentReply, requesterReply } from "@/server/services/agentActions";
-import { getTicket } from "@/server/services/ticketService";
-import type { MessageVisibility, Role } from "@/server/domain/models";
+import type { MessageVisibility } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,24 +25,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const payload = await readJson<MessageBody>(req);
   if (!payload?.body?.trim()) return fail("Message body is required.");
-  const actor = await currentActor(req);
-  const role = actor.role as Role;
+  const ctx = await actorContext(req);
+
+  // Tenant scope for everyone; requesters additionally only see their own.
+  const ticket = await loadTicket(ctx, id);
+  if (isResponse(ticket)) return ticket;
 
   // Requesters can only reply publicly on their own tickets.
-  if (payload.asRequester || !isAgentRole(role)) {
-    const ticket = await getTicket(id);
-    if (!ticket) return fail("Ticket not found.", 404);
-    if (
-      !isAgentRole(role) &&
-      ticket.requesterEmail.toLowerCase() !== (actor.email ?? "").toLowerCase()
-    ) {
-      return fail("Forbidden.", 403);
-    }
-    const updated = await requesterReply(id, { name: actor.name, role: "requester" }, payload.body);
+  if (payload.asRequester || !isAgentRole(ctx.role)) {
+    const updated = await requesterReply(id, { name: ctx.actor.name, role: "requester" }, payload.body);
     return updated ? ok(updated) : fail("Ticket not found.", 404);
   }
 
-  if (!can(role, "ticket.write")) return fail("Forbidden.", 403);
-  const updated = await agentReply(id, actor, payload.body, payload.visibility ?? "public");
+  if (!can(ctx.role, "ticket.write")) return fail("Forbidden.", 403);
+  const updated = await agentReply(id, ctx.actor, payload.body, payload.visibility ?? "public");
   return updated ? ok(updated) : fail("Ticket not found.", 404);
 }

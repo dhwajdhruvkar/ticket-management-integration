@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { currentTenantId } from "@/server/context";
 import { fail, ok, parseBody } from "@/server/http";
+import { actorContext } from "@/server/guards";
+import { isAgentRole } from "@/server/auth/rbac";
 import { intakeTicket } from "@/server/services/intake";
 import { handleTeamsActivity } from "@/server/channels/teams";
 import { clientKey, rateLimit } from "@/server/rateLimit";
@@ -58,9 +59,20 @@ export async function POST(req: Request) {
   if (!rateLimit(clientKey(req, "intake"), 30, 60_000)) {
     return fail("Rate limit exceeded. Try again shortly.", 429);
   }
-  const tenantId = await currentTenantId(req);
+  const ctx = await actorContext(req);
+  const { tenantId } = ctx;
   const payload = await parseBody(req, IntakeSchema);
   if (payload instanceof NextResponse) return payload;
+
+  // A requester (or an integration acting as one) may only file as themselves;
+  // otherwise anyone with portal access could raise tickets in a colleague's
+  // name and then read the thread from their own queue.
+  const agent = isAgentRole(ctx.role);
+  if (!agent) {
+    if (!ctx.actor.email) return fail("Forbidden.", 403);
+    payload.requesterEmail = ctx.actor.email;
+    if (payload.alert) payload.alert.requesterEmail = ctx.actor.email;
+  }
 
   if (payload.channel === "teams" && payload.teams) {
     const reply = await handleTeamsActivity(payload.teams);
@@ -70,6 +82,9 @@ export async function POST(req: Request) {
   // Monitoring/event-management alerts: severity -> impact x urgency, and the
   // named CI is resolved against the CMDB and linked to the incident.
   if (payload.channel === "alert" && payload.alert) {
+    // Alerts set impact and urgency directly, so they bypass classification and
+    // can mint a P1. Only agent-level integrations may do that.
+    if (!agent) return fail("Forbidden.", 403);
     const alert = payload.alert;
     if (!alert.title) return fail("alert.title is required.");
     const levels = SEVERITY_MAP[alert.severity ?? "warning"] ?? SEVERITY_MAP.warning;

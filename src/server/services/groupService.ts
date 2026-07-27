@@ -77,11 +77,26 @@ export async function updateGroup(
 ): Promise<AssignmentGroupRow | null> {
   const store = await getStore();
   const before = await store.groups.get(id);
-  const updated = await store.groups.update(id, { ...patch, updatedAt: now() });
-  if (before && updated) {
+  if (!before) return null;
+
+  // Membership is by user id, so filter out anyone outside this tenant before
+  // they end up in a routing rotation they cannot act on.
+  const next = { ...patch };
+  if (next.memberIds) {
+    const tenantUsers = await store.users.list({ tenantId: before.tenantId });
+    const known = new Set(tenantUsers.map((u) => u.id));
+    next.memberIds = next.memberIds.filter((memberId) => known.has(memberId));
+  }
+  if (next.leadId && !next.memberIds) {
+    const lead = await store.users.get(next.leadId);
+    if (!lead || lead.tenantId !== before.tenantId) next.leadId = null;
+  }
+
+  const updated = await store.groups.update(id, { ...next, updatedAt: now() });
+  if (updated) {
     const membersChanged =
-      patch.memberIds && JSON.stringify(patch.memberIds) !== JSON.stringify(before.memberIds);
-    const strategyChanged = patch.strategy && patch.strategy !== (before.strategy ?? "manual");
+      next.memberIds && JSON.stringify(next.memberIds) !== JSON.stringify(before.memberIds);
+    const strategyChanged = next.strategy && next.strategy !== (before.strategy ?? "manual");
     if (membersChanged || strategyChanged) {
       await appendAudit({
         tenantId: updated.tenantId,
@@ -89,8 +104,8 @@ export async function updateGroup(
         action: "group.updated",
         payload: {
           name: updated.name,
-          ...(strategyChanged ? { strategy: patch.strategy } : {}),
-          ...(membersChanged ? { members: patch.memberIds!.length } : {}),
+          ...(strategyChanged ? { strategy: next.strategy } : {}),
+          ...(membersChanged ? { members: next.memberIds!.length } : {}),
         },
       });
     }

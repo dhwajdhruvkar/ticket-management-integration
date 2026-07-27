@@ -67,6 +67,12 @@ export async function withJobLock(name: string, fn: () => Promise<void>): Promis
 export interface RetryOptions {
   attempts?: number;
   baseDelayMs?: number;
+  /**
+   * Tenant whose audit chain receives the dead-letter. Omit for the sweeps,
+   * which run across every tenant — the failure is then recorded on all of
+   * their chains, because each one lost the sweep.
+   */
+  tenantId?: string;
 }
 
 /** Run a job with retries; the exhausted failure becomes a job.failed audit record. */
@@ -93,10 +99,12 @@ export async function runWithRetry(
       logger.error("job failed after retries (dead-lettered)", { job: name, attempts, error: message });
       try {
         const store = await getStore();
-        const tenants = await store.tenants.list();
-        if (tenants[0]) {
+        const tenantIds = opts.tenantId
+          ? [opts.tenantId]
+          : (await store.tenants.list()).map((t) => t.id);
+        for (const tenantId of tenantIds) {
           await appendAudit({
-            tenantId: tenants[0].id,
+            tenantId,
             actor: "scheduler",
             action: "job.failed",
             payload: { job: name, attempts, error: message },

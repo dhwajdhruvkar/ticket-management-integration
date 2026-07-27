@@ -39,12 +39,37 @@ export async function listChanges(tenantId: string): Promise<ChangeRow[]> {
   );
 }
 
-export async function getChangeView(id: string): Promise<ChangeView | null> {
+export async function getChangeView(id: string, tenantId?: string): Promise<ChangeView | null> {
   const store = await getStore();
   const change = await store.changes.get(id);
   if (!change) return null;
+  if (tenantId && change.tenantId !== tenantId) return null;
   const approvals = await store.approvals.list({ changeId: id });
   return { ...change, approvals };
+}
+
+/**
+ * Legal next states for a change, per the CAB workflow. Anything not listed is
+ * rejected: without this the API happily moved a rejected change straight to
+ * `closed`, skipping the whole approval story the audit trail is meant to tell.
+ */
+const CHANGE_TRANSITIONS: Record<ChangeStatus, ChangeStatus[]> = {
+  draft: ["assessing", "awaiting_approval", "cancelled"],
+  assessing: ["awaiting_approval", "draft", "cancelled"],
+  awaiting_approval: ["approved", "rejected", "cancelled"],
+  approved: ["scheduled", "cancelled"],
+  rejected: ["draft", "cancelled"],
+  scheduled: ["implementing", "cancelled"],
+  implementing: ["review", "cancelled"],
+  review: ["closed"],
+  closed: [],
+  cancelled: [],
+};
+
+export class ChangeStateError extends Error {}
+
+export function canTransitionChange(from: ChangeStatus, to: ChangeStatus): boolean {
+  return from === to || CHANGE_TRANSITIONS[from].includes(to);
 }
 
 export async function createChange(tenantId: string, input: NewChangeInput): Promise<ChangeRow> {
@@ -79,22 +104,51 @@ export async function createChange(tenantId: string, input: NewChangeInput): Pro
 
 export async function updateChange(
   id: string,
-  patch: Partial<ChangeRow>
+  patch: Partial<ChangeRow>,
+  options: { tenantId?: string; actor?: string } = {}
 ): Promise<ChangeRow | null> {
   const store = await getStore();
   const existing = await store.changes.get(id);
   if (!existing) return null;
-  return store.changes.update(id, { ...patch, updatedAt: now() });
+  if (options.tenantId && existing.tenantId !== options.tenantId) return null;
+
+  // Identity and tenancy are never patchable from the API surface.
+  const { id: _id, tenantId: _tenantId, reference: _ref, createdAt: _created, ...safe } = patch;
+
+  if (safe.status && safe.status !== existing.status) {
+    if (!canTransitionChange(existing.status, safe.status)) {
+      throw new ChangeStateError(
+        `A change cannot move from ${existing.status.replace(/_/g, " ")} to ${safe.status.replace(/_/g, " ")}.`
+      );
+    }
+    await appendAudit({
+      tenantId: existing.tenantId,
+      actor: options.actor ?? "system",
+      action: `change.${safe.status}`,
+      payload: { id, from: existing.status, to: safe.status },
+    });
+  }
+
+  return store.changes.update(id, { ...safe, updatedAt: now() });
 }
 
 /** Move to awaiting_approval and create approval requests for the approvers. */
 export async function submitForApproval(
   id: string,
-  approvers: { id?: string; name: string }[]
+  approvers: { id?: string; name: string }[],
+  options: { tenantId?: string } = {}
 ): Promise<ChangeView | null> {
   const store = await getStore();
   const change = await store.changes.get(id);
   if (!change) return null;
+  if (options.tenantId && change.tenantId !== options.tenantId) return null;
+  if (!canTransitionChange(change.status, "awaiting_approval")) {
+    throw new ChangeStateError(
+      change.status === "awaiting_approval"
+        ? "This change is already with the CAB."
+        : `A ${change.status.replace(/_/g, " ")} change cannot be submitted for approval.`
+    );
+  }
 
   for (const a of approvers) {
     const approval: ApprovalRow = {
@@ -125,15 +179,25 @@ export async function decideApproval(
   approvalId: string,
   state: Extract<ApprovalState, "approved" | "rejected">,
   approver: { name: string },
-  comment?: string
+  comment?: string,
+  options: { tenantId?: string } = {}
 ): Promise<ChangeView | null> {
   const store = await getStore();
   const approval = await store.approvals.get(approvalId);
   if (!approval || !approval.changeId) return null;
 
-  await store.approvals.update(approvalId, { state, comment: comment ?? null, decidedAt: now() });
   const change = await store.changes.get(approval.changeId);
   if (!change) return null;
+  if (options.tenantId && change.tenantId !== options.tenantId) return null;
+  // A decision is final. Re-deciding would silently rewrite a CAB outcome and,
+  // worse, could flip an already-scheduled change back to rejected.
+  if (approval.state !== "pending") {
+    throw new ChangeStateError(
+      `This approval was already ${approval.state} and cannot be changed.`
+    );
+  }
+
+  await store.approvals.update(approvalId, { state, comment: comment ?? null, decidedAt: now() });
 
   const all = await store.approvals.list({ changeId: approval.changeId });
   let nextStatus: ChangeStatus = change.status;
