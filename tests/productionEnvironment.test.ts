@@ -2,6 +2,12 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  config,
+  resolveAttachmentStorage,
+  resolveAuthMode,
+} from "@/server/config";
+import { GET as healthRoute } from "@/app/api/v1/health/route";
 
 interface ProductionEnvironmentResult {
   ok: boolean;
@@ -51,8 +57,42 @@ function parseAssignments(source: string) {
 }
 
 describe("Phase 10 production environment", () => {
+  it("selects fail-closed runtime profiles without optional providers", () => {
+    expect(resolveAuthMode(false, false)).toBe("api-key-only");
+    expect(resolveAuthMode(false, true)).toBe("entra");
+    expect(resolveAuthMode(true, false)).toBe("demo");
+    expect(resolveAttachmentStorage(false, false)).toBe("disabled");
+    expect(resolveAttachmentStorage(false, true)).toBe("azure");
+    expect(resolveAttachmentStorage(true, false)).toBe("local");
+  });
+
+  it("reports the active non-sensitive production profile in health", async () => {
+    const response = await healthRoute();
+    const body = (await response.json()) as {
+      productionProfile: {
+        authentication: string;
+        attachmentStorage: string;
+      };
+    };
+    expect(body.productionProfile).toEqual({
+      authentication: config.authMode,
+      attachmentStorage: config.attachmentStorage,
+    });
+  });
+
   it("accepts the complete production contract", () => {
     expect(validate()).toEqual({ ok: true, errors: [] });
+  });
+
+  it("accepts an intentional API-only profile with attachments disabled", () => {
+    expect(
+      validate({
+        AUTH_MICROSOFT_ENTRA_ID_ID: undefined,
+        AUTH_MICROSOFT_ENTRA_ID_SECRET: undefined,
+        AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
+        AZURE_STORAGE_CONNECTION_STRING: undefined,
+      })
+    ).toEqual({ ok: true, errors: [] });
   });
 
   it("allows the migration-only direct URL to be absent at app startup", () => {
@@ -64,14 +104,33 @@ describe("Phase 10 production environment", () => {
     "DATABASE_URL",
     "AUTH_SECRET",
     "DEMO_MODE",
-    "AUTH_MICROSOFT_ENTRA_ID_ID",
-    "AUTH_MICROSOFT_ENTRA_ID_SECRET",
-    "AUTH_MICROSOFT_ENTRA_ID_ISSUER",
-    "AZURE_STORAGE_CONNECTION_STRING",
   ])("rejects a missing runtime setting: %s", (name) => {
     const result = validate({ [name]: undefined });
     expect(result.ok).toBe(false);
     expect(result.errors.join(" ")).toContain(name);
+  });
+
+  it("rejects partial Entra and malformed optional Azure configuration", () => {
+    const partialEntra = validate({
+      AUTH_MICROSOFT_ENTRA_ID_SECRET: undefined,
+      AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
+      AZURE_STORAGE_CONNECTION_STRING: undefined,
+    });
+    expect(partialEntra.ok).toBe(false);
+    expect(partialEntra.errors.join(" ")).toContain(
+      "AUTH_MICROSOFT_ENTRA_ID_SECRET"
+    );
+    expect(partialEntra.errors.join(" ")).toContain(
+      "AUTH_MICROSOFT_ENTRA_ID_ISSUER"
+    );
+
+    const malformedAzure = validate({
+      AZURE_STORAGE_CONNECTION_STRING: "UseDevelopmentStorage=true",
+    });
+    expect(malformedAzure.ok).toBe(false);
+    expect(malformedAzure.errors.join(" ")).toContain(
+      "AZURE_STORAGE_CONNECTION_STRING"
+    );
   });
 
   it("rejects demo, memory, and local database settings", () => {
@@ -130,11 +189,7 @@ describe("Phase 10 production environment", () => {
 
     expect([...assignments.keys()].sort()).toEqual(
       [
-        "AUTH_MICROSOFT_ENTRA_ID_ID",
-        "AUTH_MICROSOFT_ENTRA_ID_ISSUER",
-        "AUTH_MICROSOFT_ENTRA_ID_SECRET",
         "AUTH_SECRET",
-        "AZURE_STORAGE_CONNECTION_STRING",
         "DATABASE_URL",
         "DATA_DRIVER",
         "DEMO_MODE",
@@ -147,6 +202,12 @@ describe("Phase 10 production environment", () => {
       if (name === "DATA_DRIVER" || name === "DEMO_MODE") continue;
       expect(value, `${name} must remain a placeholder`).toMatch(/[<>]/);
     }
+    expect(source).toContain("# AUTH_MICROSOFT_ENTRA_ID_ID=<application-client-id>");
+    expect(source).toContain("# AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>");
+    expect(source).toContain(
+      "# AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0"
+    );
+    expect(source).toContain("# AZURE_STORAGE_CONNECTION_STRING=");
     expect(source).not.toMatch(/(?:GROQ|GEMINI|SENTRY|WEBHOOK|REDIS|ALLOWED_ORIGINS)=/);
   });
 

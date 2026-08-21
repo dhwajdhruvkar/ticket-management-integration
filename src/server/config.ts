@@ -7,12 +7,29 @@
 //   - no DATABASE_URL  -> in-memory/JSON store
 //   - no Azure OpenAI  -> hashed-embedding + offline template
 //   - no Redis         -> in-process job scheduler
-//   - no Entra ID      -> dev credential sign-in
+//   - no Entra ID      -> API-key-only access when demo mode is disabled
+//   - no Azure Blob    -> local attachments in demo mode, disabled otherwise
 // This is what lets the production architecture run as a zero-infra demo.
 // =============================================================================
 
 export type DataDriver = "memory" | "prisma";
 export type EmailProvider = "graph" | "brevo" | "none";
+export type AuthMode = "demo" | "entra" | "api-key-only";
+export type AttachmentStorageMode = "local" | "azure" | "disabled";
+
+export function resolveAuthMode(
+  demoMode: boolean,
+  entraConfigured: boolean
+): AuthMode {
+  return demoMode ? "demo" : entraConfigured ? "entra" : "api-key-only";
+}
+
+export function resolveAttachmentStorage(
+  demoMode: boolean,
+  blobConfigured: boolean
+): AttachmentStorageMode {
+  return blobConfigured ? "azure" : demoMode ? "local" : "disabled";
+}
 
 function val(name: string): string | undefined {
   const v = process.env[name];
@@ -77,6 +94,8 @@ const entraConfigured = allSet(
 // always wins. Production deployments should set DEMO_MODE=false explicitly.
 const demoModeEnv = val("DEMO_MODE");
 const demoMode = demoModeEnv !== undefined ? demoModeEnv === "true" : !entraConfigured;
+const authMode = resolveAuthMode(demoMode, entraConfigured);
+const attachmentStorage = resolveAttachmentStorage(demoMode, !!blobConnString);
 
 // Shared secret(s) for inbound webhook HMAC (x-webhook-signature). A per-source
 // secret overrides the generic one. Absent secrets: webhooks are open in demo
@@ -127,6 +146,7 @@ export const config = {
   azureOpenAI,
   graph,
   auth,
+  authMode,
   redisUrl,
   blobConnString,
   llmProvider: val("LLM_PROVIDER"),
@@ -141,6 +161,8 @@ export const config = {
   attachmentMaxBytes,
   /** Azure Blob container for attachments (when the blob feature is on). */
   attachmentsContainer: val("ATTACHMENTS_CONTAINER") ?? "attachments",
+  /** Active attachment backend. Production never falls back to ephemeral disk. */
+  attachmentStorage,
 
   features: {
     postgres: dataDriver === "prisma",
@@ -149,6 +171,7 @@ export const config = {
     entraId: entraConfigured,
     graph: graphConfigured,
     blob: !!blobConnString,
+    attachments: attachmentStorage !== "disabled",
     slackInbound: !!slack.signingSecret,
     slackOutbound: !!slack.webhookUrl,
     brevoInbound: brevoConfigured,

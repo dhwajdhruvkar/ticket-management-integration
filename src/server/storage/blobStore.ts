@@ -1,10 +1,11 @@
 // =============================================================================
 // Blob storage port (attachment binaries).
 //
-// LocalDiskStore is the default: files live under <DATA_DIR>/attachments with
-// opaque ids as names, safe for single-node and volume-mounted containers.
-// When AZURE_STORAGE_CONNECTION_STRING is configured, the Azure Blob adapter
-// (SharedKey REST, see azureBlob.ts) is selected behind the same interface.
+// LocalDiskStore is available only in demo mode: files live under
+// <DATA_DIR>/attachments with opaque ids as names. Production never silently
+// uses an ephemeral serverless filesystem. When AZURE_STORAGE_CONNECTION_STRING
+// is configured, the Azure Blob adapter is selected behind the same interface;
+// otherwise production attachment operations fail as unavailable.
 // =============================================================================
 
 import fs from "node:fs";
@@ -24,6 +25,13 @@ export interface BlobStore {
 
 export interface BlobPutOptions {
   contentType?: string;
+}
+
+export class BlobStorageUnavailableError extends Error {
+  constructor() {
+    super("Attachment storage is disabled for this deployment.");
+    this.name = "BlobStorageUnavailableError";
+  }
 }
 
 /** Blob keys are opaque server-generated ids, never caller-controlled paths. */
@@ -75,11 +83,15 @@ let instance: BlobStore | null = null;
 
 export function getBlobStore(): BlobStore {
   if (!instance) {
-    if (config.features.blob) {
+    if (config.attachmentStorage === "azure") {
       instance = azureBlobFromConfig();
       if (instance) logger.info("attachments storage: azure-blob", { container: config.attachmentsContainer });
     }
-    if (!instance) instance = new LocalDiskStore();
+    if (!instance && config.attachmentStorage === "local") {
+      instance = new LocalDiskStore();
+      logger.info("attachments storage: local-disk");
+    }
+    if (!instance) throw new BlobStorageUnavailableError();
   }
   return instance;
 }

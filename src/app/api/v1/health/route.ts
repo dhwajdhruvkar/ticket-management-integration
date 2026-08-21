@@ -13,6 +13,10 @@ export async function GET() {
     service: "netlink-support",
     version: "2.0.0",
     dataDriver: config.dataDriver,
+    productionProfile: {
+      authentication: config.authMode,
+      attachmentStorage: config.attachmentStorage,
+    },
     features: config.features,
     time: new Date().toISOString(),
   });

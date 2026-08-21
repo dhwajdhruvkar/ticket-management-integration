@@ -245,6 +245,43 @@ describe("Phase 9 attachment API", () => {
       error: "Request body too large.",
     });
   });
+
+  it("returns 503 instead of using local disk when attachments are disabled", async () => {
+    const marker = Date.now().toString(36);
+    const ticket = await createTicket(TENANT, {
+      subject: `Disabled attachment ${marker}`,
+      body: "Production must fail closed without a durable blob backend.",
+      requesterEmail: `disabled-${marker}@example.test`,
+    });
+    const { key } = await createApiKey(TENANT, {
+      name: `Disabled attachment ${marker}`,
+      role: "agent",
+    });
+    const mutableFeatures = config.features as { attachments: boolean };
+    const previous = mutableFeatures.attachments;
+    mutableFeatures.attachments = false;
+    try {
+      const form = new FormData();
+      form.append(
+        "file",
+        new File(["not-written"], "deferred.txt", { type: "text/plain" })
+      );
+      const response = await uploadRoute(
+        apiRequest(`http://localhost/api/v1/tickets/${ticket.id}/attachments`, key, {
+          method: "POST",
+          body: form,
+        }),
+        routeParams(ticket.id)
+      );
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: "Attachment storage is not enabled for this deployment.",
+      });
+    } finally {
+      mutableFeatures.attachments = previous;
+    }
+  });
 });
 
 describe("Phase 9 attachment consistency", () => {

@@ -108,7 +108,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     );
     return ok(saved, { status: 201 });
   } catch (err) {
-    if (err instanceof AttachmentError) return fail(err.message);
+    if (err instanceof AttachmentError) return fail(err.message, err.status);
     throw err;
   }
 }

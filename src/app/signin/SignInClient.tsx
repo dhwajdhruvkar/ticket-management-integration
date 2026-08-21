@@ -165,14 +165,14 @@ export default function SignInClient({
 
           {!ssoEnabled && !demoMode ? (
             <div className="signin-note" role="alert">
-              <strong>Sign-in is not configured.</strong>
+              <strong>API-only deployment.</strong>
               <p>
-                This deployment runs in production mode (demo sign-in is disabled), but
-                Microsoft Entra ID SSO is not set up yet. Set{" "}
+                Browser sign-in is intentionally disabled while Microsoft Entra ID is
+                deferred. Integrations can continue with API keys. To enable UI access
+                later, configure{" "}
                 <code>AUTH_MICROSOFT_ENTRA_ID_ID</code>,{" "}
                 <code>AUTH_MICROSOFT_ENTRA_ID_SECRET</code> and{" "}
                 <code>AUTH_MICROSOFT_ENTRA_ID_ISSUER</code>, then restart the server.
-                API access remains available with an API key.
               </p>
             </div>
           ) : null}

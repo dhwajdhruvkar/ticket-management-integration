@@ -3,6 +3,7 @@ import { fail } from "@/server/http";
 import { actorContext, isResponse, loadTicket, requirePermission } from "@/server/guards";
 import { can } from "@/server/auth/rbac";
 import {
+  AttachmentError,
   deleteAttachment,
   getAttachmentMetadata,
   readAttachment,
@@ -33,7 +34,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (isResponse(ticket)) return fail("Attachment not found.", 404);
 
   // Fetch the binary only after tenant and requester ownership checks pass.
-  const found = await readAttachment(ctx.tenantId, id);
+  let found: Awaited<ReturnType<typeof readAttachment>>;
+  try {
+    found = await readAttachment(ctx.tenantId, id);
+  } catch (error) {
+    if (error instanceof AttachmentError) return fail(error.message, error.status);
+    throw error;
+  }
   if (!found) return fail("Attachment not found.", 404);
 
   const encodedName = encodeURIComponent(found.record.fileName);
@@ -61,7 +68,13 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const ticket = await loadTicket(ctx, record.ticketId);
   if (isResponse(ticket)) return fail("Attachment not found.", 404);
 
-  const removed = await deleteAttachment(ctx.tenantId, id, ctx.actor.name);
+  let removed: boolean;
+  try {
+    removed = await deleteAttachment(ctx.tenantId, id, ctx.actor.name);
+  } catch (error) {
+    if (error instanceof AttachmentError) return fail(error.message, error.status);
+    throw error;
+  }
   if (!removed) return fail("Attachment not found.", 404);
   return NextResponse.json({ ok: true, data: { deleted: true } });
 }

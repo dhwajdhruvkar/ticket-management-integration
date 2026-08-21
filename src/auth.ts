@@ -12,9 +12,10 @@ import { logger } from "@/server/observability/logger";
 //
 // - Credentials provider: demo sign-in by email against seeded users (no
 //   password) so the workspace is usable with zero identity infrastructure.
-// - Microsoft Entra ID: real SSO, enabled automatically when AUTH_MICROSOFT_*
-//   env vars are present. New SSO users are auto-provisioned as requesters in
-//   the internal tenant.
+// - Microsoft Entra ID: optional production UI SSO, enabled automatically when
+//   the complete AUTH_MICROSOFT_* trio is present. Without it, production has
+//   no browser provider and remains API-key-only. New SSO users are
+//   auto-provisioned as requesters in the internal tenant.
 // =============================================================================
 
 const providers: NextAuthConfig["providers"] = [];
@@ -37,8 +38,8 @@ const demoAuthSecret =
   authRuntime.__netlinkDemoAuthSecret ?? randomBytes(32).toString("base64url");
 authRuntime.__netlinkDemoAuthSecret = demoAuthSecret;
 
-// The passwordless demo provider only exists in demo mode; production
-// deployments (DEMO_MODE=false or Entra configured) sign in via SSO only.
+// The passwordless demo provider only exists in demo mode. Production either
+// signs in through Entra or registers no UI provider (API-key-only profile).
 if (config.demoMode) {
   providers.push(
     Credentials({

@@ -70,6 +70,11 @@ function validateEntra(env, errors) {
   const clientSecret = value(env, "AUTH_MICROSOFT_ENTRA_ID_SECRET");
   const issuer = value(env, "AUTH_MICROSOFT_ENTRA_ID_ISSUER");
 
+  // Entra is an optional UI capability. With the complete trio absent, the
+  // production deployment is deliberately API-key-only. Partial configuration
+  // still fails because it would render an unusable or unsafe SSO provider.
+  if (!clientId && !clientSecret && !issuer) return;
+
   if (!UUID_PATTERN.test(clientId) || isPlaceholder(clientId)) {
     errors.push("AUTH_MICROSOFT_ENTRA_ID_ID must be a production application UUID.");
   }
@@ -106,7 +111,8 @@ function validateEntra(env, errors) {
 function validateAzureStorage(env, errors) {
   const raw = value(env, "AZURE_STORAGE_CONNECTION_STRING");
   if (!raw) {
-    errors.push("AZURE_STORAGE_CONNECTION_STRING is required for production attachments.");
+    // Attachments are explicitly disabled in non-demo runtime code when Azure
+    // is absent; production must never fall back to ephemeral serverless disk.
     return;
   }
   if (isPlaceholder(raw)) {
@@ -189,7 +195,15 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  console.log("[environment] Production configuration passed.");
+  const authMode = value(process.env, "AUTH_MICROSOFT_ENTRA_ID_ID")
+    ? "entra"
+    : "api-key-only";
+  const attachmentStorage = value(process.env, "AZURE_STORAGE_CONNECTION_STRING")
+    ? "azure"
+    : "disabled";
+  console.log(
+    `[environment] Production configuration passed (authentication=${authMode}, attachments=${attachmentStorage}).`
+  );
 }
 
 if (require.main === module) main();

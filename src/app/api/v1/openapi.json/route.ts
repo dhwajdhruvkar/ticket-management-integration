@@ -155,12 +155,16 @@ const SPEC = {
       post: {
         summary: "Upload attachments (multipart/form-data, field `file`, max 5 files / 10 MB each)",
         parameters: [ID],
-        responses: { "201": { description: "Stored" }, "400": { description: "Type/size rejected" } },
+        responses: {
+          "201": { description: "Stored" },
+          "400": { description: "Type/size rejected" },
+          "503": { description: "Attachment storage is disabled" },
+        },
       },
     },
     "/attachments/{id}": {
-      get: { summary: "Download an attachment (Content-Disposition: attachment)", parameters: [ID], responses: { "200": { description: "Binary" } } },
-      delete: { summary: "Delete an attachment (agent)", parameters: [ID], responses: { "200": { description: "Deleted" } } },
+      get: { summary: "Download an attachment (Content-Disposition: attachment)", parameters: [ID], responses: { "200": { description: "Binary" }, "503": { description: "Attachment storage is disabled" } } },
+      delete: { summary: "Delete an attachment (agent)", parameters: [ID], responses: { "200": { description: "Deleted" }, "503": { description: "Attachment storage is disabled" } } },
     },
     "/tickets/{id}/approvals": {
       get: { summary: "List approvals for a ticket", parameters: [ID, ...PAGINATION], responses: { "200": { description: "Paginated approvals" } } },
