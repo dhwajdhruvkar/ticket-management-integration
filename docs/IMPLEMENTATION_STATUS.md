@@ -383,7 +383,8 @@ Previously reported phases requiring remediation have now been re-verified.
 
 - No production deployment was executed, so no live health/frontend/login/
   dashboard/tickets/API/database/authentication verification can be claimed.
-- Vercel currently has no environment variables. Local/system/GitHub/Vercel
+- Vercel Production now contains only the non-secret safeguards
+  `DATA_DRIVER=prisma` and `DEMO_MODE=false`. Local/system/GitHub/Vercel
   inventories contain no production Entra ID or Azure Blob credentials.
 - The local `.env` has a valid pooled Neon runtime URL, but its Auth.js secret
   is a development placeholder and `DEMO_MODE=true`; those unsafe values were
@@ -391,9 +392,9 @@ Previously reported phases requiring remediation have now been re-verified.
 - Uploading the validated Neon credential and a newly generated Auth.js secret
   to Vercel requires explicit sensitive-egress approval. The attempted upload
   was rejected before any value left the machine; no secret was printed.
-- The owner must provide/authorize these Vercel Production values before a
-  release: `DATABASE_URL`, `DATA_DRIVER=prisma`, a strong `AUTH_SECRET`,
-  `DEMO_MODE=false`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
+- The owner must provide/authorize these remaining Vercel Production values
+  before a release: `DATABASE_URL`, a strong `AUTH_SECRET`,
+  `AUTH_MICROSOFT_ENTRA_ID_ID`,
   `AUTH_MICROSOFT_ENTRA_ID_SECRET`, `AUTH_MICROSOFT_ENTRA_ID_ISSUER`, and
   `AZURE_STORAGE_CONNECTION_STRING`. `DIRECT_URL` remains migration-job-only.
 - GitHub Actions reports that jobs cannot start because the GitHub account is
