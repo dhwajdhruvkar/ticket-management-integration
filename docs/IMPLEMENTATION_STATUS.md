@@ -361,6 +361,8 @@ Previously reported phases requiring remediation have now been re-verified.
   `https://github.com/dhwajdhruvkar/helpdesk-ai` was verified, then temporarily
   disconnected so publishing the release branch cannot create an
   environment-less preview deployment.
+- Aligned the Vercel project itself to the tested Node.js 22.x runtime and the
+  explicit Next.js framework preset.
 - Created the code-only release branch `phase12-production-deployment`. No
   populated environment file or credential is tracked. The verified local
   release commit is `3e7510a`.
@@ -376,8 +378,9 @@ Previously reported phases requiring remediation have now been re-verified.
   every expected page/API route, including `/api/v1/health`, without warnings.
 - `npm audit --omit=dev` reports 0 vulnerabilities.
 - Vercel project inspection confirms the project exists and has zero
-  deployments. The committed `vercel.json` overrides its initially empty
-  framework setting to the supported `nextjs` preset for the first deployment.
+  deployments. Its Node.js 22.x runtime and Next.js framework preset match the
+  verified release candidate; committed `vercel.json` also fixes the framework
+  preset in source control.
 
 ### Deployment gate - not yet released
 
