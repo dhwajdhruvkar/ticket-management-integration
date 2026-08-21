@@ -8,7 +8,7 @@
 
 import { getStore } from "../data";
 import { slaStatus } from "./slaService";
-import type { TicketRow } from "../domain/models";
+import { listActiveTickets, listTicketsForReporting } from "./ticketService";
 
 const ROI_MINUTES_PER_TICKET = 12;
 const ROI_AGENT_HOURLY_COST = 45;
@@ -74,7 +74,7 @@ const PRIORITY_ORDER = ["critical", "high", "medium", "low", "very_low"];
 export async function computeMetrics(tenantId: string): Promise<Metrics> {
   const store = await getStore();
   const [tickets, allResolutions, articles, audit, users, groups, allEvents] = await Promise.all([
-    store.tickets.list({ tenantId }),
+    listActiveTickets(tenantId),
     store.resolutions.list(),
     store.articles.list({ tenantId }),
     store.audit.list({ tenantId }),
@@ -196,7 +196,7 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
 export async function reportRows(tenantId: string): Promise<Record<string, string | number>[]> {
   const store = await getStore();
   const [tickets, groups] = await Promise.all([
-    store.tickets.list({ tenantId }),
+    listTicketsForReporting(tenantId),
     store.groups.list({ tenantId }),
   ]);
   const groupName = new Map(groups.map((g) => [g.id, g.name]));
@@ -217,6 +217,7 @@ export async function reportRows(tenantId: string): Promise<Record<string, strin
     resolutionMins: t.resolvedAt ? Math.round(minutes(t.createdAt, t.resolvedAt)) : "",
     slaPausedMins: t.slaPausedMins ?? 0,
     slaLevel: slaStatus(t).level,
+    deletedAt: t.deletedAt ?? "",
   }));
 }
 
@@ -241,8 +242,7 @@ export interface TrendPoint {
 }
 
 export async function computeTrends(tenantId: string, days = 30): Promise<TrendPoint[]> {
-  const store = await getStore();
-  const tickets = await store.tickets.list({ tenantId });
+  const tickets = await listTicketsForReporting(tenantId);
 
   const span = Math.max(1, Math.min(days, 365));
   const points = new Map<string, TrendPoint>();

@@ -7,11 +7,14 @@
 // =============================================================================
 
 import type { Role } from "../domain/models";
+export { DISPATCH_ROLES } from "../../shared/rbac";
 
 export type Permission =
   | "ticket.read"
   | "ticket.write"
+  | "ticket.delete"
   | "ticket.assign"
+  | "ticket.dispatch"
   | "ticket.resolve"
   | "kb.read"
   | "kb.write"
@@ -45,7 +48,7 @@ const AGENT: Permission[] = [
   "audit.read",
   "report.read",
 ];
-const MANAGER: Permission[] = [...AGENT, "change.approve"];
+const MANAGER: Permission[] = [...AGENT, "change.approve", "ticket.dispatch", "ticket.delete"];
 const TENANT_ADMIN: Permission[] = [...MANAGER, "automation.write", "admin"];
 
 const MATRIX: Record<Role, Permission[] | "*"> = {

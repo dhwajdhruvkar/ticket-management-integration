@@ -1,5 +1,5 @@
 import { fail, ok, readJson } from "@/server/http";
-import { actorContext, isResponse } from "@/server/guards";
+import { actorContext } from "@/server/guards";
 import { can } from "@/server/auth/rbac";
 // =============================================================================
 // POST /api/v1/problems/[id]/actions — problem workflow actions (agent+).

@@ -5,6 +5,7 @@ import {
   agentClose,
   agentResolve,
   assignTicket,
+  escalateTicket,
   reopenTicket,
   submitFeedback,
 } from "@/server/services/agentActions";
@@ -15,20 +16,29 @@ import type { TicketStatus } from "@/server/domain/models";
 // POST /api/v1/tickets/[id]/actions — ticket lifecycle actions.
 //
 // One endpoint dispatching by `action`: assign, resolve, close, reopen,
-// accept_suggestion, run_ai (agents, gated by the relevant permission) and
-// reopen/feedback (requesters, on their own tickets). Each action delegates to
-// the matching service and returns the updated ticket.
+// escalate, accept_suggestion, run_ai (agents, gated by the relevant
+// permission) and reopen/feedback (requesters, on their own tickets). Each
+// action delegates to the matching service and returns the updated ticket.
 // =============================================================================
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface ActionBody {
-  action: "assign" | "resolve" | "close" | "reopen" | "feedback" | "run_ai" | "accept_suggestion";
+  action:
+    | "assign"
+    | "resolve"
+    | "close"
+    | "reopen"
+    | "escalate"
+    | "feedback"
+    | "run_ai"
+    | "accept_suggestion";
   assigneeId?: string | null;
   assignmentGroupId?: string | null;
   reply?: string;
   resolutionNotes?: string;
+  reason?: string;
   satisfaction?: "satisfied" | "unsatisfied";
   comment?: string;
 }
@@ -66,6 +76,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return respond(await agentClose(id, actor));
     case "reopen":
       return respond(await reopenTicket(id, actor));
+    case "escalate": {
+      if (!can(role, "ticket.write")) return fail("Forbidden.", 403);
+      // The reason is the whole point of the handoff: without it the dispatcher
+      // is re-triaging from zero.
+      if (!body.reason?.trim()) return fail("A reason is required to escalate.");
+      if (!ACTIVE.has(ticket.status)) {
+        return fail("Only an active ticket can be escalated.", 409);
+      }
+      return respond(await escalateTicket(id, body.reason, actor));
+    }
     case "feedback": {
       if (!body.satisfaction) return fail("satisfaction is required for feedback.");
       // CSAT is feedback on an outcome; there is no outcome to rate until the
@@ -87,6 +107,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 }
 
 const RATEABLE = new Set<TicketStatus>(["resolved", "auto_resolved", "closed"]);
+
+const ACTIVE = new Set<TicketStatus>([
+  "new",
+  "open",
+  "in_progress",
+  "pending",
+  "pending_agent",
+  "reopened",
+]);
 
 function respond<T>(result: T | null) {
   return result ? ok(result) : fail("Ticket not found.", 404);

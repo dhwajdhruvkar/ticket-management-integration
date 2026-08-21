@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { usePersona } from "./Persona";
 import { ThemeToggle } from "./Theme";
+import { DISPATCH_ROLES } from "@/shared/rbac";
 
 // =============================================================================
 // IconRail — the left navigation sidebar.
@@ -62,7 +63,7 @@ export default function IconRail({
   const router = useRouter();
   const { persona, ready } = usePersona();
   const isAgent = persona.role === "agent";
-  const canTriage = ["manager", "tenant_admin", "super_admin"].includes(persona.serverRole);
+  const canTriage = DISPATCH_ROLES.includes(persona.serverRole);
 
   const groups: RailGroup[] = isAgent
     ? [

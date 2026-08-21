@@ -287,6 +287,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   "ticket.closed.manual": "Agent closed",
   "ticket.reopened.manual": "Ticket reopened",
   "ticket.assigned": "Ticket assigned",
+  "ticket.reassigned": "Reassigned to a lighter-loaded agent",
   "ticket.routed": "Routed to a group",
   "ticket.updated": "Ticket details updated",
   "ticket.priority.overridden": "Priority manually overridden",

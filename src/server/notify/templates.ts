@@ -8,6 +8,7 @@
 
 import { notify } from "./notifier";
 import type { NotificationChannel, NotificationRow } from "../domain/models";
+import { logger } from "../observability/logger";
 
 export type TemplateKey =
   | "ticket_created"
@@ -16,6 +17,7 @@ export type TemplateKey =
   | "ticket_resolved"
   | "ticket_closed"
   | "ticket_reopened"
+  | "ticket_escalated"
   | "approval_requested"
   | "approval_approved"
   | "approval_rejected"
@@ -68,6 +70,13 @@ const TEMPLATES: Record<TemplateKey, TemplateDef> = {
     subject: "[{{reference}}] Reopened: {{subject}}",
     body:
       "Ticket {{reference}} \"{{subject}}\" was reopened by {{actor_name}} and needs attention.\n\n— {{brand}}",
+  },
+  ticket_escalated: {
+    subject: "[{{reference}}] Escalated for reassignment: {{subject}}",
+    body:
+      "{{escalated_by}} could not resolve {{reference}} \"{{subject}}\" (priority {{priority}})" +
+      " and escalated it for reassignment.\n\nReason given:\n{{reason}}\n\n" +
+      "Pick it up from the triage board.\n\n— {{brand}}",
   },
   approval_requested: {
     subject: "[{{reference}}] Approval required: {{subject}}",
@@ -142,7 +151,10 @@ export async function notifyTemplate(input: {
       link: input.link,
     });
   } catch (err) {
-    console.error(`[notify] template ${input.key} failed:`, err);
+    logger.error("notification template failed", {
+      template: input.key,
+      error: err,
+    });
     return null;
   }
 }

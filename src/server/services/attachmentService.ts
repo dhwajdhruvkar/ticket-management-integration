@@ -11,9 +11,11 @@
 import { appendAudit } from "../audit/auditChain";
 import { config } from "../config";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
-import { getBlobStore } from "../storage/blobStore";
-import { recordEvent } from "./ticketService";
+import { logger } from "../observability/logger";
+import { getBlobStore, type BlobStore } from "../storage/blobStore";
+import { getTicket, recordEvent } from "./ticketService";
 import type { AttachmentRow } from "../domain/models";
 
 /** Allowed upload types: documents, images, archives, text/logs, email. */
@@ -46,6 +48,17 @@ const BLOCKED_EXTENSIONS = new Set([
 
 export class AttachmentError extends Error {}
 
+export interface AttachmentInput {
+  fileName: string;
+  mimeType: string;
+  bytes: Buffer;
+}
+
+export interface AttachmentDependencies {
+  /** Test seam; production always resolves the configured BlobStore. */
+  blobStore?: BlobStore;
+}
+
 export function sanitizeFileName(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? "file";
   const cleaned = base.replace(/[^\w.\- ()\[\]]+/g, "_").slice(0, 140);
@@ -70,81 +83,240 @@ function validate(fileName: string, mimeType: string, sizeBytes: number): void {
  * Virus-scanning seam. Wire ClamAV/Defender/ICAP here; throwing rejects the
  * upload. Intentionally a no-op in the default deployment.
  */
-async function scanAttachment(_fileName: string, _bytes: Buffer): Promise<void> {
+async function scanAttachment(fileName: string, bytes: Buffer): Promise<void> {
+  void fileName;
+  void bytes;
   return;
 }
 
-export async function saveAttachment(
-  ticketId: string,
-  input: { fileName: string; mimeType: string; bytes: Buffer },
-  actor = "system"
-): Promise<AttachmentRow> {
+function prepareAttachment(input: AttachmentInput): AttachmentInput {
+  const fileName = sanitizeFileName(input.fileName);
+  const mimeType = input.mimeType.trim().toLowerCase() || "application/octet-stream";
+  validate(fileName, mimeType, input.bytes.length);
+  return { fileName, mimeType, bytes: input.bytes };
+}
+
+async function rollbackCreated(
+  rows: AttachmentRow[],
+  blobs: BlobStore
+): Promise<void> {
   const store = await getStore();
-  const ticket = await store.tickets.get(ticketId);
+  for (const row of [...rows].reverse()) {
+    try {
+      const metadataRemoved = await store.attachments.remove(row.id);
+      if (!metadataRemoved) {
+        logger.error("attachment upload rollback could not remove metadata", {
+          attachmentId: row.id,
+          ticketId: row.ticketId,
+        });
+        continue;
+      }
+      await blobs.delete(row.id);
+    } catch (error) {
+      logger.error("attachment upload rollback failed", {
+        attachmentId: row.id,
+        ticketId: row.ticketId,
+        error,
+      });
+    }
+  }
+}
+
+/**
+ * Save one or more files as a single request-level operation. Every file is
+ * validated before storage starts; a later storage/metadata failure rolls back
+ * earlier files so callers never receive an unexplained partial upload.
+ */
+export async function saveAttachments(
+  tenantId: string,
+  ticketId: string,
+  inputs: AttachmentInput[],
+  actor = "system",
+  dependencies: AttachmentDependencies = {}
+): Promise<AttachmentRow[]> {
+  if (inputs.length === 0) return [];
+  const store = await getStore();
+  const ticket = await getTicket(ticketId, tenantId);
   if (!ticket) throw new AttachmentError("Ticket not found.");
 
-  const fileName = sanitizeFileName(input.fileName);
-  const mimeType = input.mimeType.toLowerCase() || "application/octet-stream";
-  validate(fileName, mimeType, input.bytes.length);
-  await scanAttachment(fileName, input.bytes);
+  const prepared = inputs.map(prepareAttachment);
+  for (const input of prepared) await scanAttachment(input.fileName, input.bytes);
 
-  const id = newId("att");
-  const blobUrl = await getBlobStore().put(id, input.bytes);
+  const blobs = dependencies.blobStore ?? getBlobStore();
+  const saved: AttachmentRow[] = [];
+  try {
+    for (const input of prepared) {
+      const id = newId("att");
+      const blobUrl = await blobs.put(id, input.bytes, { contentType: input.mimeType });
 
-  const record: AttachmentRow = {
-    id,
-    ticketId,
-    fileName,
-    mimeType,
-    sizeBytes: input.bytes.length,
-    blobUrl,
-    createdAt: now(),
-  };
-  await store.attachments.create(record);
-  await recordEvent(ticketId, "agent_action", `Attachment "${fileName}" added by ${actor}.`);
-  await appendAudit({
-    tenantId: ticket.tenantId,
-    actor,
-    action: "ticket.attachment.added",
-    ticketId,
-    payload: { fileName, mimeType, sizeBytes: record.sizeBytes },
-  });
-  return record;
-}
+      const record: AttachmentRow = {
+        id,
+        ticketId,
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+        sizeBytes: input.bytes.length,
+        blobUrl,
+        createdAt: now(),
+      };
+      try {
+        await store.attachments.create(record);
+      } catch (error) {
+        try {
+          await blobs.delete(id);
+        } catch (cleanupError) {
+          logger.error("attachment blob cleanup failed after metadata error", {
+            attachmentId: id,
+            ticketId,
+            error: cleanupError,
+          });
+        }
+        throw error;
+      }
+      saved.push(record);
+    }
+  } catch (error) {
+    await rollbackCreated(saved, blobs);
+    throw error;
+  }
 
-export async function listAttachments(ticketId: string): Promise<AttachmentRow[]> {
-  const store = await getStore();
-  return (await store.attachments.list({ ticketId })).sort((a, b) =>
-    a.createdAt.localeCompare(b.createdAt)
-  );
-}
-
-export async function readAttachment(
-  id: string
-): Promise<{ record: AttachmentRow; bytes: Buffer } | null> {
-  const store = await getStore();
-  const record = await store.attachments.get(id);
-  if (!record) return null;
-  const bytes = await getBlobStore().get(id);
-  if (!bytes) return null;
-  return { record, bytes };
-}
-
-export async function deleteAttachment(id: string, actor = "system"): Promise<boolean> {
-  const store = await getStore();
-  const record = await store.attachments.get(id);
-  if (!record) return false;
-  const ticket = await store.tickets.get(record.ticketId);
-  await getBlobStore().delete(id);
-  await store.attachments.remove(id);
-  if (ticket) {
+  for (const record of saved) {
+    await recordEvent(
+      ticketId,
+      "agent_action",
+      `Attachment "${record.fileName}" added by ${actor}.`
+    );
     await appendAudit({
       tenantId: ticket.tenantId,
       actor,
-      action: "ticket.attachment.removed",
-      ticketId: ticket.id,
-      payload: { fileName: record.fileName },
+      action: "ticket.attachment.added",
+      ticketId,
+      payload: {
+        fileName: record.fileName,
+        mimeType: record.mimeType,
+        sizeBytes: record.sizeBytes,
+      },
     });
   }
+  return saved;
+}
+
+export async function saveAttachment(
+  tenantId: string,
+  ticketId: string,
+  input: AttachmentInput,
+  actor = "system",
+  dependencies: AttachmentDependencies = {}
+): Promise<AttachmentRow> {
+  const [record] = await saveAttachments(
+    tenantId,
+    ticketId,
+    [input],
+    actor,
+    dependencies
+  );
+  return record;
+}
+
+export async function listAttachments(
+  tenantId: string,
+  ticketId: string,
+  options: ListOptions<AttachmentRow> = { orderBy: { field: "createdAt", dir: "asc" } }
+): Promise<PageResult<AttachmentRow>> {
+  if (!(await getTicket(ticketId, tenantId))) return { data: [], total: 0 };
+  const store = await getStore();
+  return pageCollection(store.attachments, { ticketId }, options);
+}
+
+async function findAttachment(
+  tenantId: string,
+  id: string
+): Promise<{ record: AttachmentRow; ticketId: string } | null> {
+  const store = await getStore();
+  const record = await store.attachments.get(id);
+  if (!record) return null;
+  const ticket = await getTicket(record.ticketId, tenantId);
+  return ticket ? { record, ticketId: ticket.id } : null;
+}
+
+export async function getAttachmentMetadata(
+  tenantId: string,
+  id: string
+): Promise<AttachmentRow | null> {
+  return (await findAttachment(tenantId, id))?.record ?? null;
+}
+
+export async function readAttachment(
+  tenantId: string,
+  id: string,
+  dependencies: AttachmentDependencies = {}
+): Promise<{ record: AttachmentRow; bytes: Buffer } | null> {
+  const found = await findAttachment(tenantId, id);
+  if (!found) return null;
+  const bytes = await (dependencies.blobStore ?? getBlobStore()).get(id);
+  if (!bytes) {
+    logger.warn("attachment metadata points to a missing blob", {
+      attachmentId: id,
+      ticketId: found.ticketId,
+    });
+    return null;
+  }
+  if (bytes.length !== found.record.sizeBytes) {
+    logger.warn("attachment size differs from stored metadata", {
+      attachmentId: id,
+      ticketId: found.ticketId,
+      expectedBytes: found.record.sizeBytes,
+      actualBytes: bytes.length,
+    });
+  }
+  return { record: found.record, bytes };
+}
+
+export async function deleteAttachment(
+  tenantId: string,
+  id: string,
+  actor = "system",
+  dependencies: AttachmentDependencies = {}
+): Promise<boolean> {
+  const store = await getStore();
+  const found = await findAttachment(tenantId, id);
+  if (!found) return false;
+  const { record } = found;
+
+  const removed = await store.attachments.remove(id);
+  if (!removed) return false;
+
+  const blobs = dependencies.blobStore ?? getBlobStore();
+  try {
+    const blobRemoved = await blobs.delete(id);
+    if (!blobRemoved) {
+      logger.warn("attachment blob was already missing during delete", {
+        attachmentId: id,
+        ticketId: record.ticketId,
+      });
+    }
+  } catch (error) {
+    try {
+      await store.attachments.create(record);
+    } catch (restoreError) {
+      logger.error("attachment metadata restore failed after blob delete error", {
+        attachmentId: id,
+        ticketId: record.ticketId,
+        error: restoreError,
+      });
+      throw new AggregateError(
+        [error, restoreError],
+        "Attachment delete failed and metadata could not be restored."
+      );
+    }
+    throw error;
+  }
+
+  await appendAudit({
+    tenantId,
+    actor,
+    action: "ticket.attachment.removed",
+    ticketId: record.ticketId,
+    payload: { fileName: record.fileName },
+  });
   return true;
 }

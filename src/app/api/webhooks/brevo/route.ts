@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { config } from "@/server/config";
 import { ingestBrevoPayload } from "@/server/channels/brevoEmail";
 import { clientKey, rateLimit } from "@/server/rateLimit";
+import { readTextBody } from "@/server/http";
 
 // =============================================================================
 // POST /api/webhooks/brevo
@@ -44,9 +45,12 @@ export async function POST(req: Request) {
     );
   }
 
+  const rawBody = await readTextBody(req);
+  if (rawBody instanceof NextResponse) return rawBody;
+
   let payload: unknown;
   try {
-    payload = await req.json();
+    payload = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
   }

@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, parseBody } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parseBody,
+  parsePagination,
+} from "@/server/http";
 import { can } from "@/server/auth/rbac";
 import { CalendarError, createCalendar, listCalendars } from "@/server/services/calendarService";
-import type { Role } from "@/server/domain/models";
+import type { BusinessCalendarRow, Role } from "@/server/domain/models";
 
 // /api/v1/calendars — business-hours calendars for SLA policies.
 
@@ -23,7 +30,18 @@ const CreateSchema = z.object({
 export async function GET(req: Request) {
   const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
   if (!can(actor.role as Role, "report.read")) return fail("Forbidden.", 403);
-  return ok(await listCalendars(tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "name",
+    defaultSortDir: "asc",
+    allowedSortBy: ["name", "timezone", "createdAt", "updatedAt"] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listCalendars(
+    tenantId,
+    listOptionsFromPagination<BusinessCalendarRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

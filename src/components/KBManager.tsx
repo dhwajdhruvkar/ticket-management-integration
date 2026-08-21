@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGetAll, apiSend } from "@/lib/api";
 import type { ArticleRow, TicketCategory } from "@/server/domain/models";
 import { usePersona } from "./Persona";
 import { useToast } from "./Toast";
@@ -38,7 +38,7 @@ export default function KBManager() {
   const toast = useToast();
 
   const refresh = useCallback(() => {
-    apiGet<ArticleRow[]>("/kb").then(setArticles).catch(() => setArticles([]));
+    apiGetAll<ArticleRow>("/kb").then(setArticles).catch(() => setArticles([]));
   }, []);
 
   useEffect(() => {

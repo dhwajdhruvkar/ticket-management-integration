@@ -21,6 +21,7 @@ export interface SearchHit {
 export interface SearchResult {
   hits: SearchHit[];
   model: string;
+  total: number;
 }
 
 export interface SearchOptions {
@@ -39,7 +40,7 @@ export async function search(
   const articles = (await store.articles.list({ tenantId })).filter(
     (a) => a.status === "published" && (!options.publicOnly || a.isPublic)
   );
-  if (articles.length === 0) return { hits: [], model };
+  if (articles.length === 0) return { hits: [], model, total: 0 };
 
   for (const a of articles) {
     if (a.embeddingModel !== model || a.embedding.length !== vector.length) {
@@ -55,7 +56,7 @@ export async function search(
     score: cosineSimilarity(vector, article.embedding),
   }));
   scored.sort((a, b) => b.score - a.score);
-  return { hits: scored.slice(0, k), model };
+  return { hits: scored.slice(0, k), model, total: scored.length };
 }
 
 export function snippetFor(article: ArticleRow, maxLen = 240): string {

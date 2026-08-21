@@ -15,22 +15,34 @@ import { azureBlobFromConfig } from "./azureBlob";
 
 export interface BlobStore {
   /** Persist bytes under the given key; returns the storage URL/locator. */
-  put(key: string, bytes: Buffer): Promise<string>;
+  put(key: string, bytes: Buffer, options?: BlobPutOptions): Promise<string>;
   /** Read bytes for a key. Null when missing. */
   get(key: string): Promise<Buffer | null>;
+  /** Delete a key. False means it was already absent; storage failures throw. */
   delete(key: string): Promise<boolean>;
+}
+
+export interface BlobPutOptions {
+  contentType?: string;
+}
+
+/** Blob keys are opaque server-generated ids, never caller-controlled paths. */
+export function validateBlobKey(key: string): string {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(key)) {
+    throw new Error("Invalid blob key.");
+  }
+  return key;
 }
 
 class LocalDiskStore implements BlobStore {
   private readonly dir = path.join(process.cwd(), config.dataDir, "attachments");
 
   private pathFor(key: string): string {
-    // Keys are server-generated ids — reject anything path-like defensively.
-    const safe = key.replace(/[^a-zA-Z0-9_-]/g, "");
-    return path.join(this.dir, safe);
+    return path.join(this.dir, validateBlobKey(key));
   }
 
-  async put(key: string, bytes: Buffer): Promise<string> {
+  async put(key: string, bytes: Buffer, options?: BlobPutOptions): Promise<string> {
+    void options;
     fs.mkdirSync(this.dir, { recursive: true });
     const file = this.pathFor(key);
     fs.writeFileSync(file, bytes);
@@ -38,19 +50,23 @@ class LocalDiskStore implements BlobStore {
   }
 
   async get(key: string): Promise<Buffer | null> {
+    const file = this.pathFor(key);
     try {
-      return fs.readFileSync(this.pathFor(key));
-    } catch {
-      return null;
+      return fs.readFileSync(file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
     }
   }
 
   async delete(key: string): Promise<boolean> {
+    const file = this.pathFor(key);
     try {
-      fs.unlinkSync(this.pathFor(key));
+      fs.unlinkSync(file);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
     }
   }
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGetAll, apiSend } from "@/lib/api";
 import type {
   ApiKeyRow,
   AssignmentGroupRow,
@@ -20,7 +20,7 @@ import type {
 import { usePersona } from "@/components/Persona";
 import { useToast } from "@/components/Toast";
 import { useTheme } from "@/components/Theme";
-import { PRIORITY_ORDER, priorityCode } from "@/server/domain/priority";
+import { PRIORITY_ORDER, priorityCode } from "@/shared/priority";
 import type { TicketPriority } from "@/server/domain/models";
 import { InfoHint, LabelWithHint, timeAgo } from "@/components/ui";
 import { PromptDialog } from "@/components/primitives";
@@ -72,10 +72,10 @@ export default function SettingsView() {
       .then((r) => r.json())
       .then(setHealth)
       .catch(() => {});
-    apiGet<AssignmentGroupRow[]>("/groups").then(setGroups).catch(() => {});
-    apiGet<AutomationRow[]>("/automations").then(setAutomations).catch(() => {});
-    apiGet<SlaPolicyRow[]>("/sla-policies").then(setSlaPolicies).catch(() => {});
-    apiGet<ApiKeyView[]>("/api-keys").then(setApiKeys).catch(() => setApiKeys(null));
+    apiGetAll<AssignmentGroupRow>("/groups").then(setGroups).catch(() => {});
+    apiGetAll<AutomationRow>("/automations").then(setAutomations).catch(() => {});
+    apiGetAll<SlaPolicyRow>("/sla-policies").then(setSlaPolicies).catch(() => {});
+    apiGetAll<ApiKeyView>("/api-keys").then(setApiKeys).catch(() => setApiKeys(null));
   }, []);
 
   useEffect(() => {
@@ -445,6 +445,7 @@ interface BuilderAction {
 const CONDITION_FIELDS = ["status", "priority", "category", "type", "channel", "subject", "requesterEmail"];
 const ACTION_TYPES: { id: string; label: string; input: "user" | "priority" | "status" | "category" | "text" | "target" | "none" }[] = [
   { id: "assign", label: "Assign to agent", input: "user" },
+  { id: "reassign", label: "Reassign to least-loaded agent", input: "none" },
   { id: "set_priority", label: "Set priority", input: "priority" },
   { id: "set_status", label: "Set status", input: "status" },
   { id: "set_category", label: "Set category", input: "category" },
@@ -466,7 +467,7 @@ function RuleBuilder({ onCreated }: { onCreated: () => void }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    apiGet<{ id: string; name: string; role: string }[]>("/users")
+    apiGetAll<{ id: string; name: string; role: string }>("/users")
       .then((all) => setUsers(all.filter((u) => u.role !== "requester")))
       .catch(() => {});
   }, []);
@@ -480,6 +481,8 @@ function RuleBuilder({ onCreated }: { onCreated: () => void }) {
         switch (a.type) {
           case "assign":
             return a.value ? { type: "assign", assigneeId: a.value } : null;
+          case "reassign":
+            return { type: "reassign" };
           case "set_priority":
             return a.value ? { type: "set_priority", priority: a.value } : null;
           case "set_status":
@@ -661,7 +664,7 @@ function CalendarsSection({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGet<BusinessCalendarRow[]>("/calendars").then(setCalendars).catch(() => setCalendars([]));
+    apiGetAll<BusinessCalendarRow>("/calendars").then(setCalendars).catch(() => setCalendars([]));
   }, []);
 
   useEffect(() => {
@@ -791,7 +794,7 @@ function MacrosSection({ isAdmin }: { isAdmin: boolean }) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGet<MacroRow[]>("/macros").then(setMacros).catch(() => setMacros([]));
+    apiGetAll<MacroRow>("/macros").then(setMacros).catch(() => setMacros([]));
   }, []);
 
   useEffect(() => {
@@ -911,7 +914,7 @@ function CustomFieldsSection() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGet<CustomFieldDefRow[]>("/custom-fields").then(setFields).catch(() => setFields([]));
+    apiGetAll<CustomFieldDefRow>("/custom-fields").then(setFields).catch(() => setFields([]));
   }, []);
 
   useEffect(() => {
@@ -1102,7 +1105,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
   const [freshKey, setFreshKey] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<UserRow[]>("/users")
+    apiGetAll<UserRow>("/users")
       .then((us) =>
         setAgents(
           us.filter((u) => u.role !== "requester").map((u) => ({ id: u.id, name: u.name, role: u.role }))
@@ -1403,9 +1406,9 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     : ROLE_OPTIONS_BY_ADMIN.tenant_admin;
 
   const load = useCallback(() => {
-    apiGet<UserRow[]>("/users").then(setUsers).catch(() => setUsers([]));
-    apiGet<DepartmentRow[]>("/departments").then(setDepartments).catch(() => setDepartments([]));
-    if (isSuperAdmin) apiGet<TenantRow[]>("/organizations").then(setOrgs).catch(() => setOrgs([]));
+    apiGetAll<UserRow>("/users").then(setUsers).catch(() => setUsers([]));
+    apiGetAll<DepartmentRow>("/departments").then(setDepartments).catch(() => setDepartments([]));
+    if (isSuperAdmin) apiGetAll<TenantRow>("/organizations").then(setOrgs).catch(() => setOrgs([]));
   }, [isSuperAdmin]);
   useEffect(() => {
     load();
@@ -1585,7 +1588,7 @@ function DepartmentsSection() {
   const [renaming, setRenaming] = useState<DepartmentRow | null>(null);
 
   const load = useCallback(() => {
-    apiGet<DepartmentRow[]>("/departments").then(setDepartments).catch(() => setDepartments([]));
+    apiGetAll<DepartmentRow>("/departments").then(setDepartments).catch(() => setDepartments([]));
   }, []);
   useEffect(() => {
     load();
@@ -1703,7 +1706,7 @@ function OrganizationsSection() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGet<TenantRow[]>("/organizations").then(setOrgs).catch(() => setOrgs([]));
+    apiGetAll<TenantRow>("/organizations").then(setOrgs).catch(() => setOrgs([]));
   }, []);
   useEffect(() => {
     load();

@@ -2,13 +2,14 @@
 // Human ticket actions (server-side).
 //
 // Replies, internal notes, assignment (user + group), manual resolve/close/
-// reopen, inline field edits (including impact x urgency -> priority recalc
-// with audited manual overrides), requester replies, and CSAT. Each composes
+// reopen/escalate, inline field edits (including impact x urgency -> priority
+// recalc with audited manual overrides), requester replies, and CSAT. Each composes
 // addMessage + mutateTicket (lifecycle event) + appendAudit (hash-chained
 // record) + templated notifications.
 // =============================================================================
 
 import { appendAudit } from "../audit/auditChain";
+import { DISPATCH_ROLES } from "../auth/rbac";
 import { getStore } from "../data";
 import { now } from "../domain/ids";
 import { derivePriority, priorityCode } from "../domain/priority";
@@ -24,6 +25,8 @@ import type {
 } from "../domain/models";
 
 export interface Actor {
+  /** Absent for system/AI actors and for demo personas resolved by name only. */
+  id?: string;
   name: string;
   role?: string;
 }
@@ -173,6 +176,67 @@ export async function reopenTicket(ticketId: string, actor: Actor): Promise<Tick
   return updated;
 }
 
+/**
+ * Manual escalation: the assigned agent says "I can't solve this" and hands the
+ * ticket to the dispatchers, with a mandatory reason so whoever picks it up
+ * inherits the context instead of starting from scratch.
+ *
+ * The assignee is deliberately kept — the board shows who could not resolve it,
+ * and the dispatcher's reassignment is what clears the ownership.
+ */
+export async function escalateTicket(
+  ticketId: string,
+  reason: string,
+  by: Actor
+): Promise<TicketRow | null> {
+  const ctx = await tenantOf(ticketId);
+  if (!ctx) return null;
+  const text = reason.trim();
+  if (!text) return null;
+
+  const store = await getStore();
+  const users = await store.users.list({ tenantId: ctx.tenantId });
+  const escalator = users.find((u) => (by.id ? u.id === by.id : u.name === by.name));
+
+  const updated = await mutateTicket(
+    ticketId,
+    {
+      status: "escalated",
+      escalationReason: text,
+      escalatedById: escalator?.id ?? null,
+      escalatedAt: now(),
+    },
+    { type: "escalated", message: `${by.name} escalated the ticket: ${text}` }
+  );
+  await appendAudit({
+    tenantId: ctx.tenantId,
+    actor: `agent:${by.name}`,
+    action: "ticket.escalated.manual",
+    ticketId,
+    payload: { reason: text, from: ctx.ticket.status },
+  });
+
+  // Fan out to every dispatcher: an escalation nobody is told about is just a
+  // status change that sits in the queue until it breaches.
+  const dispatchers = users.filter((u) => u.active && DISPATCH_ROLES.includes(u.role));
+  for (const dispatcher of dispatchers) {
+    await notifyTemplate({
+      tenantId: ctx.tenantId,
+      to: dispatcher.email,
+      key: "ticket_escalated",
+      link: `/triage`,
+      vars: {
+        reference: ctx.ticket.reference,
+        subject: ctx.ticket.subject,
+        priority: priorityCode(ctx.ticket.priority),
+        escalated_by: by.name,
+        reason: text,
+      },
+    });
+  }
+  return updated;
+}
+
 export async function assignTicket(
   ticketId: string,
   assigneeId: string | null,
@@ -195,6 +259,10 @@ export async function assignTicket(
   }
 
   const patch: Partial<TicketRow> = { assigneeId };
+  // Handing an escalation to someone new is what resolves it, so the ticket
+  // returns to the active queue and drops off the dispatcher's board. The
+  // reason stays on the record as context for whoever just inherited it.
+  if (assigneeId && ctx.ticket.status === "escalated") patch.status = "in_progress";
   let groupClause = "";
   if (assignmentGroupId !== undefined) {
     if (assignmentGroupId) {

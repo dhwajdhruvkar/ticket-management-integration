@@ -78,7 +78,7 @@ function render(
     const cols = 3;
     const cellW = width / cols;
     const cellH = 46;
-    let gy = doc.y;
+    const gy = doc.y;
     kpis.forEach(([label, value], i) => {
       const col = i % cols;
       const rowIdx = Math.floor(i / cols);

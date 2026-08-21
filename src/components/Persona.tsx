@@ -22,7 +22,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { signIn, signOut, useSession } from "next-auth/react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiGetAll } from "@/lib/api";
 import type { Role, UserRow } from "@/server/domain/models";
 
 // =============================================================================
@@ -157,7 +157,7 @@ export function PersonaSwitcher({
     // The switch-user list is a demo-mode convenience; production users only
     // ever act as themselves (the demo credentials provider doesn't exist).
     if (!open || !demoMode || users.length > 0) return;
-    apiGet<UserRow[]>("/users").then(setUsers).catch(() => {});
+    apiGetAll<UserRow>("/users").then(setUsers).catch(() => {});
   }, [open, demoMode, users.length]);
 
   async function switchTo(email: string) {

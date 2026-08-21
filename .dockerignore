@@ -4,8 +4,7 @@ node_modules
 .github
 .data
 .data-test
-.env
-.env.local
+.env*
 npm-debug.log*
 *.md
 comparison.html

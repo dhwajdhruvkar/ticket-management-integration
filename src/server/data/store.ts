@@ -42,13 +42,42 @@ import type {
   UserRow,
 } from "../domain/models";
 
+export interface ListOptions<T> {
+  skip?: number;
+  take?: number;
+  orderBy?: { field: keyof T; dir: "asc" | "desc" };
+  includeDeleted?: boolean;
+}
+
+export interface PageResult<T> {
+  data: T[];
+  total: number;
+}
+
 export interface Collection<T extends Entity> {
-  list(where?: Partial<T>): Promise<T[]>;
+  list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]>;
   get(id: string): Promise<T | null>;
   create(value: T): Promise<T>;
   update(id: string, patch: Partial<T>): Promise<T | null>;
   remove(id: string): Promise<boolean>;
   count(where?: Partial<T>): Promise<number>;
+}
+
+/**
+ * Fetch one page and its unpaginated count from the same collection/filter.
+ * Keeping this operation in the datastore port prevents services from
+ * accidentally counting only the current page.
+ */
+export async function pageCollection<T extends Entity>(
+  collection: Collection<T>,
+  where?: Partial<T>,
+  options?: ListOptions<T>
+): Promise<PageResult<T>> {
+  const [data, total] = await Promise.all([
+    collection.list(where, options),
+    collection.count(where),
+  ]);
+  return { data, total };
 }
 
 export interface DataStore {

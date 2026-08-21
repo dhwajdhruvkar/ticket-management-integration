@@ -58,7 +58,10 @@ export function useTicketLive(
       const nowMs = Date.now();
       const list = [...active.values()].filter((t) => t.expiresAt > nowMs);
       setTyping((prev) => {
-        const next = list.map(({ expiresAt: _x, ...u }) => u);
+        const next = list.map(({ expiresAt, ...user }) => {
+          void expiresAt;
+          return user;
+        });
         // Avoid re-render churn while the same people keep typing.
         if (
           prev.length === next.length &&

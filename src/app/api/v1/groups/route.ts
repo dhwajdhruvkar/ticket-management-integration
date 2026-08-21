@@ -1,7 +1,14 @@
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { isResponse, requirePermission } from "@/server/guards";
 import { createGroup, listGroups } from "@/server/services/groupService";
-import type { TicketCategory } from "@/server/domain/models";
+import type { AssignmentGroupRow, TicketCategory } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +24,18 @@ export async function GET(req: Request) {
   // Group membership is agent-facing routing metadata, not requester data.
   const ctx = await requirePermission(req, "ticket.assign");
   if (isResponse(ctx)) return ctx;
-  return ok(await listGroups(ctx.tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "name",
+    defaultSortDir: "asc",
+    allowedSortBy: ["name", "strategy", "createdAt", "updatedAt"] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listGroups(
+    ctx.tenantId,
+    listOptionsFromPagination<AssignmentGroupRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 interface NewGroupBody {

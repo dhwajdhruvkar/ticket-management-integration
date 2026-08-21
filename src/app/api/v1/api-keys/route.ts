@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, parseBody } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parseBody,
+  parsePagination,
+} from "@/server/http";
 import { can } from "@/server/auth/rbac";
 import { createApiKey, listApiKeys } from "@/server/auth/apiKeys";
 import { clientKey, rateLimit } from "@/server/rateLimit";
-import type { Role } from "@/server/domain/models";
+import type { ApiKeyRow, Role } from "@/server/domain/models";
 
 // =============================================================================
 // /api/v1/api-keys — machine-to-machine credentials (admin only).
@@ -16,6 +23,12 @@ import type { Role } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function withoutKeyHash(row: ApiKeyRow): Omit<ApiKeyRow, "keyHash"> {
+  const { keyHash, ...safe } = row;
+  void keyHash;
+  return safe;
+}
 
 const CreateKeySchema = z.object({
   name: z.string().trim().min(1, "name is required").max(80),
@@ -31,10 +44,28 @@ const CreateKeySchema = z.object({
 export async function GET(req: Request) {
   const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
   if (!can(actor.role as Role, "admin")) return fail("Forbidden.", 403);
-  const keys = await listApiKeys(tenantId);
+  const parsed = parsePagination(req, {
+    defaultSortBy: "createdAt",
+    defaultSortDir: "desc",
+    allowedSortBy: [
+      "createdAt",
+      "updatedAt",
+      "name",
+      "active",
+      "role",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const keys = await listApiKeys(
+    tenantId,
+    listOptionsFromPagination<ApiKeyRow>(pagination)
+  );
   // Never expose the hash.
-  return ok(
-    keys.map(({ keyHash: _hash, ...rest }) => rest)
+  return paginated(
+    keys.data.map(withoutKeyHash),
+    keys.total,
+    pagination
   );
 }
 
@@ -60,6 +91,6 @@ export async function POST(req: Request) {
     },
     actor.name
   );
-  const { keyHash: _hash, ...safe } = record;
+  const safe = withoutKeyHash(record);
   return ok({ ...safe, key }, { status: 201 });
 }

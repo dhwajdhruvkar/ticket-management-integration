@@ -1,7 +1,14 @@
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { isResponse, requirePermission } from "@/server/guards";
 import { createCI, linkCIs, listCIs } from "@/server/services/assetService";
-import type { CIType } from "@/server/domain/models";
+import type { CIRow, CIType } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +23,18 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const ctx = await requirePermission(req, "asset.read");
   if (isResponse(ctx)) return ctx;
-  return ok(await listCIs(ctx.tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "name",
+    defaultSortDir: "asc",
+    allowedSortBy: ["name", "type", "status", "createdAt", "updatedAt"] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listCIs(
+    ctx.tenantId,
+    listOptionsFromPagination<CIRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

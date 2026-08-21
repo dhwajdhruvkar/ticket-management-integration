@@ -13,7 +13,7 @@
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
 import { newId, now } from "../domain/ids";
-import { addMessage, getTicket, mutateTicket, recordEvent } from "../services/ticketService";
+import { addMessage, getTicket, mutateTicket } from "../services/ticketService";
 import { generateAnswer } from "./llm";
 import { search, snippetFor, type SearchHit } from "./vectorSearch";
 import { BOW_MODEL } from "./embeddings";
@@ -27,7 +27,7 @@ interface Thresholds {
 }
 
 /** Tenant-configurable thresholds (env override now; per-tenant settings hook). */
-function thresholds(_tenantId: string): Thresholds {
+function thresholds(): Thresholds {
   const auto = Number(process.env.RESOLVE_AUTO_THRESHOLD ?? 0.78);
   const suggest = Number(process.env.RESOLVE_SUGGEST_THRESHOLD ?? 0.55);
   return { autoResolve: auto, suggest };
@@ -123,7 +123,7 @@ export async function resolveTicket(ticketId: string): Promise<TicketRow | null>
 
   // 3. Score + 4. Decide
   const { confidence, relevance, dominance } = scoreConfidence(hits, embeddingModel);
-  const th = thresholds(ticket.tenantId);
+  const th = thresholds();
   const { decision, reasoning } = decide(confidence, ticket, modelEscalated, hits.length > 0, th);
 
   // Persist resolution + citations

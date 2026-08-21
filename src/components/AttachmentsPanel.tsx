@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiGet } from "@/lib/api";
+import { apiGetAll } from "@/lib/api";
 import { useToast } from "./Toast";
 import type { AttachmentRow } from "@/server/domain/models";
 
@@ -32,7 +32,7 @@ export default function AttachmentsPanel({
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(() => {
-    apiGet<AttachmentRow[]>(`/tickets/${ticketId}/attachments`)
+    apiGetAll<AttachmentRow>(`/tickets/${ticketId}/attachments`)
       .then(setItems)
       .catch(() => setItems([]));
   }, [ticketId]);

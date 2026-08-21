@@ -52,7 +52,8 @@ async function escalationTargets(tenantId: string, ticket: TicketRow): Promise<U
 export async function slaSweep(): Promise<void> {
   const store = await getStore();
   for (const tenant of await store.tenants.list()) {
-    for (const ticket of await listTickets(tenant.id)) {
+    const { data: tickets } = await listTickets(tenant.id);
+    for (const ticket of tickets) {
       if (!OPEN.includes(ticket.status)) continue;
       const status = slaStatus(ticket);
       if (status.paused) continue; // clock stopped while pending
@@ -128,7 +129,8 @@ export async function autoCloseStale(): Promise<void> {
   const store = await getStore();
   const cutoff = Date.now() - AUTO_CLOSE_DAYS * 24 * 60 * 60 * 1000;
   for (const tenant of await store.tenants.list()) {
-    for (const ticket of await listTickets(tenant.id)) {
+    const { data: tickets } = await listTickets(tenant.id);
+    for (const ticket of tickets) {
       if (!RESOLVED.includes(ticket.status)) continue;
       const resolvedMs = ticket.resolvedAt ? new Date(ticket.resolvedAt).getTime() : null;
       if (resolvedMs && resolvedMs < cutoff) {
@@ -159,7 +161,7 @@ export async function weeklyDigestSweep(nowDate = new Date()): Promise<number> {
   let sent = 0;
   for (const tenant of await store.tenants.list()) {
     const users = await store.users.list({ tenantId: tenant.id });
-    const tickets = await listTickets(tenant.id);
+    const { data: tickets } = await listTickets(tenant.id);
     const notifications = await store.notifications.list({ tenantId: tenant.id });
 
     for (const user of users) {

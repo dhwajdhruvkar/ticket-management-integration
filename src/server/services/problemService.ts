@@ -17,10 +17,12 @@ import { appendAudit } from "../audit/auditChain";
 import { complete } from "../ai/llm";
 import { suggestProblemClusters, type ProblemCluster } from "../ai/aiService";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now, reference } from "../domain/ids";
 import { derivePriority } from "../domain/priority";
 import { createArticle } from "./kbService";
 import { createChange } from "./changeService";
+import { getTicket, listActiveTickets, mutateTicket } from "./ticketService";
 import type {
   ImpactLevel,
   ProblemNote,
@@ -29,6 +31,7 @@ import type {
   RcaMethod,
   TicketCategory,
   TicketPriority,
+  TicketRow,
 } from "../domain/models";
 
 export { derivePriority };
@@ -75,13 +78,12 @@ const OPEN_INCIDENT = ["new", "open", "in_progress", "pending", "pending_agent",
 
 export async function listProblems(
   tenantId: string,
-  filter: { status?: ProblemStatus; knownError?: boolean } = {}
-): Promise<ProblemRow[]> {
+  filter: { status?: ProblemStatus; knownError?: boolean } = {},
+  options: ListOptions<ProblemRow> = { orderBy: { field: "updatedAt", dir: "desc" } }
+): Promise<PageResult<ProblemRow>> {
   const store = await getStore();
-  let rows = await store.problems.list({ tenantId });
-  if (filter.status) rows = rows.filter((p) => p.status === filter.status);
-  if (filter.knownError !== undefined) rows = rows.filter((p) => p.knownError === filter.knownError);
-  return rows.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const where: Partial<ProblemRow> = { tenantId, ...filter };
+  return pageCollection(store.problems, where, options);
 }
 
 export async function getProblem(id: string, tenantId?: string): Promise<ProblemRow | null> {
@@ -98,9 +100,7 @@ export async function getProblemView(id: string, tenantId?: string): Promise<Pro
   if (!problem) return null;
   if (tenantId && problem.tenantId !== tenantId) return null;
 
-  const linked = (await store.tickets.list({ tenantId: problem.tenantId })).filter(
-    (t) => t.problemId === id
-  );
+  const linked = await listActiveTickets(problem.tenantId, { problemId: id });
   const assignee = problem.assigneeId ? await store.users.get(problem.assigneeId) : null;
 
   return {
@@ -228,13 +228,13 @@ export async function linkIncident(
 ): Promise<boolean> {
   const store = await getStore();
   const problem = await store.problems.get(problemId);
-  const ticket = await store.tickets.get(ticketId);
+  const ticket = await getTicket(ticketId);
   if (!problem || !ticket) return false;
   if (tenantId && problem.tenantId !== tenantId) return false;
   // A problem and its incidents must live in the same tenant, or the linked
   // incident list becomes a window into another organisation's tickets.
   if (problem.tenantId !== ticket.tenantId) return false;
-  await store.tickets.update(ticketId, { problemId, updatedAt: now() });
+  if (!(await mutateTicket(ticketId, { problemId }))) return false;
   await appendAudit({
     tenantId: problem.tenantId,
     actor,
@@ -251,11 +251,10 @@ export async function unlinkIncident(
   actor = "system",
   tenantId?: string
 ): Promise<boolean> {
-  const store = await getStore();
-  const ticket = await store.tickets.get(ticketId);
+  const ticket = await getTicket(ticketId);
   if (!ticket || ticket.problemId !== problemId) return false;
   if (tenantId && ticket.tenantId !== tenantId) return false;
-  await store.tickets.update(ticketId, { problemId: null, updatedAt: now() });
+  if (!(await mutateTicket(ticketId, { problemId: null }))) return false;
   await appendAudit({
     tenantId: ticket.tenantId,
     actor,
@@ -290,9 +289,8 @@ export async function addNote(
 
 /** AI: suggest problem candidates by clustering similar open incidents. */
 export async function suggestClusters(tenantId: string): Promise<ProblemCluster[]> {
-  const store = await getStore();
-  const open = (await store.tickets.list({ tenantId })).filter(
-    (t) => t.type === "incident" && OPEN_INCIDENT.includes(t.status) && !t.problemId
+  const open = (await listActiveTickets(tenantId, { type: "incident" })).filter(
+    (t) => OPEN_INCIDENT.includes(t.status) && !t.problemId
   );
   return suggestProblemClusters(open.map((t) => ({ id: t.id, subject: t.subject, body: t.body })));
 }
@@ -305,10 +303,11 @@ export async function createFromCluster(
 ): Promise<ProblemRow> {
   const store = await getStore();
   // Client-supplied ids: keep only tickets this tenant actually owns.
-  const candidates = await Promise.all(cluster.ticketIds.map((tid) => store.tickets.get(tid)));
-  const owned = candidates.filter((t) => t && t.tenantId === tenantId).map((t) => t!.id);
+  const candidates = await Promise.all(cluster.ticketIds.map((tid) => getTicket(tid, tenantId)));
+  const ownedTickets = candidates.filter((ticket): ticket is TicketRow => !!ticket);
+  const owned = ownedTickets.map((ticket) => ticket.id);
 
-  const first = owned[0] ? await store.tickets.get(owned[0]) : null;
+  const first = ownedTickets[0] ?? null;
   const problem = await createProblem(
     tenantId,
     {
@@ -415,7 +414,7 @@ export async function raiseChange(
 export async function problemMetrics(tenantId: string): Promise<ProblemMetrics> {
   const store = await getStore();
   const problems = await store.problems.list({ tenantId });
-  const tickets = await store.tickets.list({ tenantId });
+  const tickets = await listActiveTickets(tenantId);
   return {
     total: problems.length,
     open: problems.filter((p) => p.status === "open").length,

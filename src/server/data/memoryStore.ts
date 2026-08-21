@@ -10,8 +10,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config";
+import { logger } from "../observability/logger";
 import { buildSeed } from "./seed";
-import { matchesWhere, type Collection, type DataStore } from "./store";
+import { matchesWhere, type Collection, type DataStore, type ListOptions } from "./store";
 import type {
   ApiKeyRow,
   ApprovalRow,
@@ -110,7 +111,7 @@ function clone<T>(value: T): T {
  * internal state by reference (mirroring how the Prisma store returns fresh
  * objects).
  */
-class MemoryCollection<T extends Entity> implements Collection<T> {
+export class MemoryCollection<T extends Entity> implements Collection<T> {
   constructor(
     private readonly rows: () => T[],
     private readonly persist: () => void,
@@ -128,10 +129,19 @@ class MemoryCollection<T extends Entity> implements Collection<T> {
     private readonly uniqueBy?: keyof T
   ) {}
 
-  async list(where?: Partial<T>): Promise<T[]> {
-    return this.rows()
-      .filter((r) => matchesWhere(r, where))
-      .map(clone);
+  async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
+    let result = this.rows().filter((r) => matchesWhere(r, where));
+    if (options?.orderBy) {
+      const { field, dir } = options.orderBy;
+      result.sort((a, b) => {
+        if (a[field] < b[field]) return dir === "asc" ? -1 : 1;
+        if (a[field] > b[field]) return dir === "asc" ? 1 : -1;
+        return a.id.localeCompare(b.id);
+      });
+    }
+    if (options?.skip !== undefined) result = result.slice(options.skip);
+    if (options?.take !== undefined) result = result.slice(0, options.take);
+    return result.map(clone);
   }
   async get(id: string): Promise<T | null> {
     const found = this.rows().find((r) => r.id === id);
@@ -309,13 +319,20 @@ export class MemoryStore implements DataStore {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<MemDb>;
       if (parsed.version !== SCHEMA_VERSION) {
-        console.log("[memoryStore] store.json schema changed — reseeding.");
+        logger.info("memory store schema changed; reseeding");
         return false;
       }
       this.db = { ...emptyDb(), ...parsed };
+      // Older JSON snapshots predate Ticket.deletedAt. PostgreSQL represents
+      // an unset nullable column as null, so normalize memory rows to the same
+      // shape before active-ticket filters are applied.
+      this.db.tickets = this.db.tickets.map((ticket) => ({
+        ...ticket,
+        deletedAt: ticket.deletedAt ?? null,
+      }));
       return this.db.tenants.length > 0;
     } catch (err) {
-      console.error("[memoryStore] failed to load store.json, reseeding:", err);
+      logger.error("memory store load failed; reseeding", { error: err });
       return false;
     }
   }

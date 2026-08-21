@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "prestart": "npm run environment:check",
     "start": "next start",
-    "lint": "next lint",
+    "environment:check": "node scripts/check-production-environment.cjs",
+    "security:check": "node scripts/check-production-security.cjs",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
@@ -21,13 +24,15 @@
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
+  "overrides": {
+    "deepmerge-ts": "8.0.0"
+  },
   "dependencies": {
     "@auth/core": "^0.41.2",
-    "@huggingface/transformers": "^4.2.0",
     "@prisma/client": "^6.19.3",
     "framer-motion": "^12.42.2",
     "lucide-react": "^1.24.0",
-    "next": "^15.5.19",
+    "next": "16.3.2",
     "next-auth": "^5.0.0-beta.31",
     "pdfkit": "^0.19.1",
     "react": "19.0.0",
@@ -41,6 +46,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.3",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.2",
     "prisma": "^6.19.3",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.22.4",

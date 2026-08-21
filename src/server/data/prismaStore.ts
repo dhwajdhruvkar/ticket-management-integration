@@ -9,7 +9,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { config } from "../config";
-import type { Collection, DataStore } from "./store";
+import type { Collection, DataStore, ListOptions } from "./store";
 import type { Entity } from "../domain/models";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -40,11 +40,19 @@ function stripUndefined<T extends object>(patch: T): Partial<T> {
   return out as Partial<T>;
 }
 
-class PrismaCollection<T extends Entity> implements Collection<T> {
+export class PrismaCollection<T extends Entity> implements Collection<T> {
   constructor(private readonly delegate: any) {}
 
-  async list(where?: Partial<T>): Promise<T[]> {
-    const rows = await this.delegate.findMany({ where: where ?? undefined });
+  async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
+    const args: any = { where: where ?? undefined };
+    if (options?.skip !== undefined) args.skip = options.skip;
+    if (options?.take !== undefined) args.take = options.take;
+    if (options?.orderBy) {
+      const primary = { [options.orderBy.field]: options.orderBy.dir };
+      args.orderBy =
+        options.orderBy.field === "id" ? primary : [primary, { id: "asc" }];
+    }
+    const rows = await this.delegate.findMany(args);
     return rows.map((r: unknown) => serialize<T>(r));
   }
   async get(id: string): Promise<T | null> {

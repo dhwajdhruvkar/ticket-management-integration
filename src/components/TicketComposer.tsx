@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGetAll, apiSend } from "@/lib/api";
 import { useTypingPing } from "@/lib/liveTicket";
 import type { TicketView } from "@/server/services/ticketService";
 import type { MacroRow, MessageVisibility, TicketRow } from "@/server/domain/models";
 import { useToast } from "./Toast";
+import { PromptDialog } from "./primitives";
 import { LabelWithHint } from "./ui";
 import { HINTS } from "@/lib/hints";
 
@@ -39,11 +40,12 @@ export default function TicketComposer({
   const [macros, setMacros] = useState<MacroRow[]>([]);
   const [showMacros, setShowMacros] = useState(false);
   const [targetLang, setTargetLang] = useState("Hindi");
+  const [escalating, setEscalating] = useState(false);
   const toast = useToast();
   const pingTyping = useTypingPing(ticket.id);
 
   useEffect(() => {
-    apiGet<MacroRow[]>("/macros").then(setMacros).catch(() => setMacros([]));
+    apiGetAll<MacroRow>("/macros").then(setMacros).catch(() => setMacros([]));
   }, []);
 
   function insertMacro(macro: MacroRow) {
@@ -73,6 +75,9 @@ export default function TicketComposer({
   );
   const canRerun = ["open", "in_progress", "escalated", "reopened"].includes(ticket.status);
   const isSuggest = ticket.status === "pending_agent";
+  // Any live ticket can hit a wall, not just one the AI drafted; already-
+  // escalated tickets are excluded so the reason is not overwritten.
+  const canEscalate = active && ticket.status !== "escalated";
   const isResolved = ["closed", "auto_resolved", "resolved", "cancelled"].includes(ticket.status);
   const hasText = body.trim().length > 0;
 
@@ -268,42 +273,35 @@ export default function TicketComposer({
               </button>
             ) : null}
             {isSuggest ? (
-              <>
-                <button
-                  className="btn btn-ghost"
-                  disabled={!!busy}
-                  onClick={() =>
-                    run(
-                      "accept",
-                      () => action({ action: "accept_suggestion" }),
-                      () => toast.success({ title: "Draft sent", description: "Ticket resolved." }),
-                      "Could not send draft"
-                    )
-                  }
-                  aria-label={`Approve draft. ${HINTS.approveDraft}`}
-                >
-                  <LabelWithHint info={HINTS.approveDraft} size={12} nested>
-                    Approve draft
-                  </LabelWithHint>
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  disabled={!!busy}
-                  onClick={() =>
-                    run(
-                      "esc",
-                      () => apiSend(`/tickets/${ticket.id}`, "PATCH", { status: "escalated" }),
-                      () => toast.info({ title: "Escalated" }),
-                      "Could not escalate"
-                    )
-                  }
-                  aria-label={`Escalate. ${HINTS.escalate}`}
-                >
-                  <LabelWithHint info={HINTS.escalate} size={12} nested>
-                    Escalate
-                  </LabelWithHint>
-                </button>
-              </>
+              <button
+                className="btn btn-ghost"
+                disabled={!!busy}
+                onClick={() =>
+                  run(
+                    "accept",
+                    () => action({ action: "accept_suggestion" }),
+                    () => toast.success({ title: "Draft sent", description: "Ticket resolved." }),
+                    "Could not send draft"
+                  )
+                }
+                aria-label={`Approve draft. ${HINTS.approveDraft}`}
+              >
+                <LabelWithHint info={HINTS.approveDraft} size={12} nested>
+                  Approve draft
+                </LabelWithHint>
+              </button>
+            ) : null}
+            {canEscalate ? (
+              <button
+                className="btn btn-ghost"
+                disabled={!!busy}
+                onClick={() => setEscalating(true)}
+                aria-label={`Escalate. ${HINTS.escalate}`}
+              >
+                <LabelWithHint info={HINTS.escalate} size={12} nested>
+                  Escalate
+                </LabelWithHint>
+              </button>
             ) : null}
             {active && ticket.status !== "pending" ? (
               <button
@@ -371,6 +369,30 @@ export default function TicketComposer({
           </div>
         </div>
       </div>
+
+      <PromptDialog
+        open={escalating}
+        title="Escalate for reassignment"
+        description="Every dispatcher is notified and the ticket moves to the top of their triage board. Explain what you tried and where you got stuck so the next person does not start over."
+        label="Why can you not resolve this?"
+        placeholder="e.g. Needs domain admin rights on the AD server, which I do not have."
+        confirmLabel="Escalate"
+        required
+        multiline
+        busy={busy === "esc"}
+        onCancel={() => setEscalating(false)}
+        onConfirm={(reason) =>
+          run(
+            "esc",
+            () => action({ action: "escalate", reason }),
+            () => {
+              setEscalating(false);
+              toast.info({ title: "Escalated", description: "Dispatchers have been notified." });
+            },
+            "Could not escalate"
+          )
+        }
+      />
     </div>
   );
 }

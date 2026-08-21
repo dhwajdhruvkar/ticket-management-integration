@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiGetAll } from "@/lib/api";
 import type { Metrics } from "@/server/services/metricsService";
 import type { TicketRow, UserRow } from "@/server/domain/models";
 import {
@@ -97,8 +97,8 @@ export default function DashboardPage() {
     try {
       const [m, rows, ppl, audit] = await Promise.all([
         apiGet<Metrics>("/metrics"),
-        apiGet<TicketRow[]>("/tickets").catch(() => [] as TicketRow[]),
-        apiGet<UserRow[]>("/users").catch(() => [] as UserRow[]),
+        apiGetAll<TicketRow>("/tickets").catch(() => [] as TicketRow[]),
+        apiGetAll<UserRow>("/users").catch(() => [] as UserRow[]),
         apiGet<{ valid: boolean }>("/audit?verify=1").catch(() => null),
       ]);
       setMetrics(m);
@@ -225,7 +225,7 @@ function RequesterDashboard({ name }: { name: string }) {
   const firstName = name.split(" ")[0] || name;
 
   useEffect(() => {
-    apiGet<TicketRow[]>("/tickets")
+    apiGetAll<TicketRow>("/tickets")
       .then((rows) => setTickets(rows))
       .catch(() => setTickets([]))
       .finally(() => setLoading(false));

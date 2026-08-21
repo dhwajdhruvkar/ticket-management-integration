@@ -1,8 +1,20 @@
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { can } from "@/server/auth/rbac";
 import { getStore } from "@/server/data";
-import { createUser, UserServiceError, type CreateUserInput } from "@/server/services/userService";
+import {
+  createUser,
+  listUsers,
+  UserServiceError,
+  type CreateUserInput,
+} from "@/server/services/userService";
 import type { Role, UserRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
@@ -13,13 +25,30 @@ export async function GET(req: Request) {
   // Agent+ may list users (assignment pickers, triage, leaderboard); requesters cannot.
   if (!can(actor.role as Role, "report.read")) return fail("Forbidden.", 403);
 
-  const store = await getStore();
   const url = new URL(req.url);
-  const where: Partial<UserRow> = { tenantId };
+  const where: Partial<UserRow> = {};
   const role = url.searchParams.get("role");
   if (role) where.role = role as UserRow["role"];
-  const users = await store.users.list(where);
-  return ok(users.map(({ ...u }) => u));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "name",
+    defaultSortDir: "asc",
+    allowedSortBy: [
+      "name",
+      "email",
+      "role",
+      "active",
+      "createdAt",
+      "updatedAt",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listUsers(
+    tenantId,
+    where,
+    listOptionsFromPagination<UserRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

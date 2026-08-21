@@ -10,6 +10,7 @@
 import { appendAudit } from "../audit/auditChain";
 import { assessChangeRisk } from "../ai/aiService";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now, reference } from "../domain/ids";
 import type {
   ApprovalRow,
@@ -32,11 +33,12 @@ export interface ChangeView extends ChangeRow {
   approvals: ApprovalRow[];
 }
 
-export async function listChanges(tenantId: string): Promise<ChangeRow[]> {
+export async function listChanges(
+  tenantId: string,
+  options: ListOptions<ChangeRow> = { orderBy: { field: "createdAt", dir: "desc" } }
+): Promise<PageResult<ChangeRow>> {
   const store = await getStore();
-  return (await store.changes.list({ tenantId })).sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  return pageCollection(store.changes, { tenantId }, options);
 }
 
 export async function getChangeView(id: string, tenantId?: string): Promise<ChangeView | null> {
@@ -113,7 +115,11 @@ export async function updateChange(
   if (options.tenantId && existing.tenantId !== options.tenantId) return null;
 
   // Identity and tenancy are never patchable from the API surface.
-  const { id: _id, tenantId: _tenantId, reference: _ref, createdAt: _created, ...safe } = patch;
+  const safe = { ...patch };
+  delete safe.id;
+  delete safe.tenantId;
+  delete safe.reference;
+  delete safe.createdAt;
 
   if (safe.status && safe.status !== existing.status) {
     if (!canTransitionChange(existing.status, safe.status)) {

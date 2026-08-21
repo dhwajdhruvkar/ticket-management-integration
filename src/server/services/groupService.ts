@@ -13,10 +13,11 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import { notifyTemplate } from "../notify/templates";
 import { priorityCode } from "../domain/priority";
-import { mutateTicket } from "./ticketService";
+import { listActiveTickets, mutateTicket } from "./ticketService";
 import type {
   AssignmentGroupRow,
   AssignmentStrategy,
@@ -27,9 +28,12 @@ import type {
 
 const UNSOLVED = ["new", "open", "in_progress", "pending", "pending_agent", "escalated", "reopened"];
 
-export async function listGroups(tenantId: string): Promise<AssignmentGroupRow[]> {
+export async function listGroups(
+  tenantId: string,
+  options: ListOptions<AssignmentGroupRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<AssignmentGroupRow>> {
   const store = await getStore();
-  return (await store.groups.list({ tenantId })).sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.groups, { tenantId }, options);
 }
 
 export async function createGroup(
@@ -138,6 +142,113 @@ export function pickAssignee(
 }
 
 /**
+ * Pick who should take over a ticket its current owner is not progressing:
+ * the least-loaded member who is active and available for dispatch, never the
+ * person already holding it. Ties break on name so the choice is stable.
+ */
+export function pickReassignee(
+  members: UserRow[],
+  openCounts: Map<string, number>,
+  currentAssigneeId?: string | null
+): UserRow | null {
+  const candidates = members.filter(
+    (m) => m.active && m.available !== false && m.id !== currentAssigneeId
+  );
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, m) => {
+    const load = openCounts.get(m.id) ?? 0;
+    const bestLoad = openCounts.get(best.id) ?? 0;
+    if (load !== bestLoad) return load < bestLoad ? m : best;
+    return m.name.localeCompare(best.name) < 0 ? m : best;
+  });
+}
+
+/**
+ * Hand a ticket to someone else — backs the "reassign" automation action, so a
+ * breached SLA can move the work instead of only flagging it.
+ *
+ * Candidates come from the ticket's assignment group, or the group owning its
+ * category when it has none. If that pool is exhausted (everyone away, or the
+ * current assignee is the only member) it widens to every agent in the tenant,
+ * because an escalated ticket with nobody left to take it just breaches again.
+ */
+export async function reassignToLeastLoaded(
+  ticket: TicketRow,
+  actor = "automation"
+): Promise<TicketRow | null> {
+  const store = await getStore();
+  const [users, groups, tickets] = await Promise.all([
+    store.users.list({ tenantId: ticket.tenantId }),
+    store.groups.list({ tenantId: ticket.tenantId }),
+    listActiveTickets(ticket.tenantId),
+  ]);
+
+  const group =
+    groups.find((g) => g.id === ticket.assignmentGroupId) ??
+    groups.find((g) => (g.categories ?? []).includes(ticket.category));
+
+  const byId = new Map(users.map((u) => [u.id, u]));
+  const groupPool = (group?.memberIds ?? [])
+    .map((id) => byId.get(id))
+    .filter((u): u is UserRow => !!u);
+  const tenantPool = users.filter((u) => u.role !== "requester");
+
+  const openCounts = new Map<string, number>();
+  for (const t of tickets) {
+    if (t.assigneeId && UNSOLVED.includes(t.status)) {
+      openCounts.set(t.assigneeId, (openCounts.get(t.assigneeId) ?? 0) + 1);
+    }
+  }
+
+  const next =
+    pickReassignee(groupPool, openCounts, ticket.assigneeId) ??
+    pickReassignee(tenantPool, openCounts, ticket.assigneeId);
+  if (!next) return null;
+
+  const previous = ticket.assigneeId ? byId.get(ticket.assigneeId) : null;
+  const load = openCounts.get(next.id) ?? 0;
+
+  const patch: Partial<TicketRow> = { assigneeId: next.id };
+  if (group && group.id !== ticket.assignmentGroupId) patch.assignmentGroupId = group.id;
+  // A new owner is the answer to an escalation: back to the active queue, off
+  // the dispatcher's board. The reason stays as context for the new owner.
+  if (ticket.status === "escalated") patch.status = "in_progress";
+
+  const updated = await mutateTicket(ticket.id, patch, {
+    type: "assigned",
+    message: previous
+      ? `Reassigned from ${previous.name} to ${next.name} (least loaded, ${load} open).`
+      : `Assigned to ${next.name} (least loaded, ${load} open).`,
+  });
+  await appendAudit({
+    tenantId: ticket.tenantId,
+    actor,
+    action: "ticket.reassigned",
+    ticketId: ticket.id,
+    payload: {
+      from: previous?.name ?? null,
+      to: next.name,
+      openCount: load,
+      ...(group ? { group: group.name } : {}),
+    },
+  });
+  await notifyTemplate({
+    tenantId: ticket.tenantId,
+    to: next.email,
+    key: "ticket_assigned",
+    link: `/tickets/${ticket.id}`,
+    vars: {
+      reference: ticket.reference,
+      subject: ticket.subject,
+      assignee_name: next.name,
+      priority: priorityCode(ticket.priority),
+      group_clause: group ? ` via the ${group.name} group` : "",
+    },
+  });
+  return updated;
+}
+
+/**
  * Category-based routing: route to the first matching group, then auto-assign
  * an individual member when the group's strategy calls for it.
  */
@@ -172,7 +283,7 @@ export async function routeTicketToGroup(ticket: TicketRow): Promise<TicketRow |
     .filter((u): u is UserRow => !!u);
   const openCounts = new Map<string, number>();
   if (strategy === "least_loaded") {
-    const tickets = await store.tickets.list({ tenantId: ticket.tenantId });
+    const tickets = await listActiveTickets(ticket.tenantId);
     for (const t of tickets) {
       if (t.assigneeId && UNSOLVED.includes(t.status)) {
         openCounts.set(t.assigneeId, (openCounts.get(t.assigneeId) ?? 0) + 1);

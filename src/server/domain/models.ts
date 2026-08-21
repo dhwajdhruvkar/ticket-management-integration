@@ -155,6 +155,10 @@ export interface TicketRow extends Entity {
   mergedIntoId?: string | null;
   satisfaction?: string | null;
   resolutionNotes?: string | null;
+  /** Why the assigned agent could not resolve it, captured on manual escalation. */
+  escalationReason?: string | null;
+  escalatedById?: string | null;
+  escalatedAt?: string | null;
   firstRespondedAt?: string | null;
   resolvedAt?: string | null;
   closedAt?: string | null;
@@ -166,6 +170,7 @@ export interface TicketRow extends Entity {
   slaPausedMins: number;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
 }
 
 export type AssignmentStrategy = "manual" | "round_robin" | "least_loaded";

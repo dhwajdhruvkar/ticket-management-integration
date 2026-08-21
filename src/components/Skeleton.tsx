@@ -183,7 +183,7 @@ export function CardGridSkeleton({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(auto-fit, minmax(280px, 1fr))`,
+          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
           gap: "1rem",
         }}
       >

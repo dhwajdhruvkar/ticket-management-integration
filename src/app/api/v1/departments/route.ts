@@ -1,12 +1,19 @@
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { can } from "@/server/auth/rbac";
 import {
   createDepartment,
   listDepartments,
   DepartmentServiceError,
 } from "@/server/services/departmentService";
-import type { Role } from "@/server/domain/models";
+import type { DepartmentRow, Role } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +22,18 @@ export async function GET(req: Request) {
   const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
   // Agent+ may read departments (pickers); requesters cannot.
   if (!can(actor.role as Role, "report.read")) return fail("Forbidden.", 403);
-  return ok(await listDepartments(tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "name",
+    defaultSortDir: "asc",
+    allowedSortBy: ["name", "createdAt", "updatedAt"] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listDepartments(
+    tenantId,
+    listOptionsFromPagination<DepartmentRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

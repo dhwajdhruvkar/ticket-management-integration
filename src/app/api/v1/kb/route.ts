@@ -1,4 +1,11 @@
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { isResponse, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { createArticle, listArticles, type NewArticleInput } from "@/server/services/kbService";
@@ -30,7 +37,26 @@ export async function GET(req: Request) {
     where.status = "published";
     where.isPublic = true;
   }
-  return ok(await listArticles(ctx.tenantId, where));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "title",
+    defaultSortDir: "asc",
+    allowedSortBy: [
+      "title",
+      "category",
+      "status",
+      "version",
+      "createdAt",
+      "updatedAt",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listArticles(
+    ctx.tenantId,
+    where,
+    listOptionsFromPagination<ArticleRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

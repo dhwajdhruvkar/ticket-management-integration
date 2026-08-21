@@ -13,7 +13,7 @@ function ticket(overrides: Partial<TicketRow>): TicketRow {
     satisfaction: null, resolutionNotes: null,
     firstRespondedAt: null, resolvedAt: null, closedAt: null, dueResponseAt: null, dueResolveAt: null,
     slaPolicyId: null, slaPausedAt: null, slaPausedMins: 0,
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), deletedAt: null,
   };
   return { ...base, ...overrides };
 }

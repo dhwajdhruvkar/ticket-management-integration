@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { MacroRow, MessageVisibility } from "../domain/models";
 
@@ -18,9 +19,12 @@ export interface NewMacroInput {
   category?: string | null;
 }
 
-export async function listMacros(tenantId: string): Promise<MacroRow[]> {
+export async function listMacros(
+  tenantId: string,
+  options: ListOptions<MacroRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<MacroRow>> {
   const store = await getStore();
-  return (await store.macros.list({ tenantId })).sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.macros, { tenantId }, options);
 }
 
 export async function createMacro(tenantId: string, input: NewMacroInput): Promise<MacroRow> {

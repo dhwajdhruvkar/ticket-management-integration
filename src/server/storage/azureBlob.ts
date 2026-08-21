@@ -10,8 +10,11 @@
 
 import { createHmac } from "node:crypto";
 import { config } from "../config";
-import { logger } from "../observability/logger";
-import type { BlobStore } from "./blobStore";
+import {
+  validateBlobKey,
+  type BlobPutOptions,
+  type BlobStore,
+} from "./blobStore";
 
 const API_VERSION = "2021-08-06";
 
@@ -31,13 +34,37 @@ export function parseConnectionString(conn: string): AzureBlobAccount | null {
   }
   const accountName = parts.get("AccountName");
   const accountKey = parts.get("AccountKey");
-  if (!accountName || !accountKey) return null;
+  const endpointSuffix = parts.get("EndpointSuffix") ?? "core.windows.net";
+  const protocol = (parts.get("DefaultEndpointsProtocol") ?? "https").toLowerCase();
+  if (
+    !accountName ||
+    !/^[a-z0-9]{3,24}$/.test(accountName) ||
+    !accountKey ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(accountKey) ||
+    Buffer.from(accountKey, "base64").length === 0 ||
+    !/^[a-z0-9.-]+$/i.test(endpointSuffix) ||
+    (protocol !== "https" && protocol !== "http")
+  ) {
+    return null;
+  }
   return {
     accountName,
     accountKey,
-    endpointSuffix: parts.get("EndpointSuffix") ?? "core.windows.net",
-    protocol: parts.get("DefaultEndpointsProtocol") ?? "https",
+    endpointSuffix,
+    protocol,
   };
+}
+
+export function validateContainerName(container: string): string {
+  if (
+    container.length < 3 ||
+    container.length > 63 ||
+    !/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(container) ||
+    container.includes("--")
+  ) {
+    throw new Error("ATTACHMENTS_CONTAINER must be a valid Azure container name.");
+  }
+  return container;
 }
 
 export interface SignInput {
@@ -93,12 +120,16 @@ export function signSharedKey(stringToSign: string, accountKeyBase64: string): s
 }
 
 export class AzureBlobStore implements BlobStore {
-  private containerReady = false;
+  private containerReady: Promise<void> | null = null;
 
   constructor(
     private readonly account: AzureBlobAccount,
-    private readonly container: string
-  ) {}
+    container: string
+  ) {
+    this.container = validateContainerName(container);
+  }
+
+  private readonly container: string;
 
   private url(path: string, query = ""): string {
     const { protocol, accountName, endpointSuffix } = this.account;
@@ -145,30 +176,40 @@ export class AzureBlobStore implements BlobStore {
     });
   }
 
-  private async ensureContainer(): Promise<void> {
-    if (this.containerReady) return;
+  private async createContainer(): Promise<void> {
     const res = await this.request("PUT", `/${this.container}`, {
       query: { restype: "container" },
     });
-    if (res.ok || res.status === 409) {
-      this.containerReady = true;
-      return;
-    }
-    throw new Error(`Azure container create failed: ${res.status} ${await res.text()}`);
+    if (res.ok || res.status === 409) return;
+    throw new Error(`Azure container create failed: ${res.status} ${(await res.text()).slice(0, 500)}`);
   }
 
-  async put(key: string, bytes: Buffer): Promise<string> {
+  private async ensureContainer(): Promise<void> {
+    if (!this.containerReady) {
+      this.containerReady = this.createContainer().catch((error) => {
+        this.containerReady = null;
+        throw error;
+      });
+    }
+    await this.containerReady;
+  }
+
+  async put(key: string, bytes: Buffer, options?: BlobPutOptions): Promise<string> {
+    validateBlobKey(key);
     await this.ensureContainer();
     const res = await this.request("PUT", `/${this.container}/${key}`, {
       body: bytes,
-      contentType: "application/octet-stream",
+      contentType: options?.contentType ?? "application/octet-stream",
       extraMsHeaders: { "x-ms-blob-type": "BlockBlob" },
     });
-    if (!res.ok) throw new Error(`Azure PutBlob failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+      throw new Error(`Azure PutBlob failed: ${res.status} ${(await res.text()).slice(0, 500)}`);
+    }
     return this.url(`/${this.container}/${key}`);
   }
 
   async get(key: string): Promise<Buffer | null> {
+    validateBlobKey(key);
     const res = await this.request("GET", `/${this.container}/${key}`);
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Azure GetBlob failed: ${res.status}`);
@@ -176,18 +217,20 @@ export class AzureBlobStore implements BlobStore {
   }
 
   async delete(key: string): Promise<boolean> {
+    validateBlobKey(key);
     const res = await this.request("DELETE", `/${this.container}/${key}`);
-    return res.ok || res.status === 404;
+    if (res.status === 404) return false;
+    if (!res.ok) throw new Error(`Azure DeleteBlob failed: ${res.status}`);
+    return true;
   }
 }
 
-/** Build the Azure adapter from config, or null when not configured/parsable. */
+/** Build the Azure adapter, or null only when Azure storage is not configured. */
 export function azureBlobFromConfig(): AzureBlobStore | null {
   if (!config.blobConnString) return null;
   const account = parseConnectionString(config.blobConnString);
   if (!account) {
-    logger.warn("AZURE_STORAGE_CONNECTION_STRING is set but unparsable; using local disk");
-    return null;
+    throw new Error("AZURE_STORAGE_CONNECTION_STRING is set but invalid.");
   }
   return new AzureBlobStore(account, config.attachmentsContainer);
 }

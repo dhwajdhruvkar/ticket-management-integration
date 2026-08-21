@@ -7,6 +7,7 @@
 // =============================================================================
 
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { CustomFieldDefRow, CustomFieldType } from "../domain/models";
 
@@ -41,9 +42,12 @@ function deriveKey(label: string, taken: Set<string>): string {
   return key;
 }
 
-export async function listCustomFields(tenantId: string): Promise<CustomFieldDefRow[]> {
+export async function listCustomFields(
+  tenantId: string,
+  options: ListOptions<CustomFieldDefRow> = { orderBy: { field: "order", dir: "asc" } }
+): Promise<PageResult<CustomFieldDefRow>> {
   const store = await getStore();
-  return (await store.customFieldDefs.list({ tenantId })).sort((a, b) => a.order - b.order);
+  return pageCollection(store.customFieldDefs, { tenantId }, options);
 }
 
 export async function createCustomField(

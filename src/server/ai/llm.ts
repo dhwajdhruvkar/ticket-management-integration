@@ -7,6 +7,7 @@
 // =============================================================================
 
 import { config } from "../config";
+import { logger } from "../observability/logger";
 import type { SearchHit } from "./vectorSearch";
 
 export const TEMPLATE_MODEL = "helpdesk-offline-template";
@@ -45,7 +46,7 @@ export async function generateAnswer(
     const result = await chat(system, user);
     if (result && result.text.trim()) return { answer: result.text.trim(), model: result.model };
   } catch (err) {
-    console.error("[llm] provider failed, using offline template:", err);
+    logger.error("LLM provider failed; using offline template", { error: err });
   }
   return { answer: templateAnswer(hits), model: TEMPLATE_MODEL };
 }
@@ -56,7 +57,7 @@ export async function complete(system: string, user: string): Promise<string | n
     const result = await chat(system, user);
     return result?.text?.trim() ?? null;
   } catch (err) {
-    console.error("[llm] complete failed:", err);
+    logger.error("LLM completion failed", { error: err });
     return null;
   }
 }

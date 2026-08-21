@@ -1,12 +1,19 @@
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { can, isAgentRole } from "@/server/auth/rbac";
 import {
   createCustomField,
   listCustomFields,
   type NewCustomFieldInput,
 } from "@/server/services/customFieldService";
-import type { Role } from "@/server/domain/models";
+import type { CustomFieldDefRow, Role } from "@/server/domain/models";
 
 // =============================================================================
 // /api/v1/custom-fields — tenant-defined custom ticket fields.
@@ -21,7 +28,25 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
   if (!isAgentRole(actor.role as Role)) return fail("Forbidden.", 403);
-  return ok(await listCustomFields(tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "order",
+    defaultSortDir: "asc",
+    allowedSortBy: [
+      "order",
+      "label",
+      "key",
+      "type",
+      "createdAt",
+      "updatedAt",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listCustomFields(
+    tenantId,
+    listOptionsFromPagination<CustomFieldDefRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

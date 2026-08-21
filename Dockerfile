@@ -24,8 +24,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts/check-production-security.cjs ./scripts/check-production-security.cjs
+COPY --from=builder /app/scripts/check-production-environment.cjs ./scripts/check-production-environment.cjs
 
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000 HOSTNAME=0.0.0.0
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "node scripts/check-production-environment.cjs && exec node server.js"]

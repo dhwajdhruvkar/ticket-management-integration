@@ -9,6 +9,7 @@
 import { appendAudit } from "../audit/auditChain";
 import { embed } from "../ai/embeddings";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { ArticleRow, ArticleStatus, TicketCategory } from "../domain/models";
 
@@ -28,11 +29,11 @@ export function articleEmbeddingText(a: { title: string; content: string; tags: 
 
 export async function listArticles(
   tenantId: string,
-  where: Partial<ArticleRow> = {}
-): Promise<ArticleRow[]> {
+  where: Partial<ArticleRow> = {},
+  options: ListOptions<ArticleRow> = { orderBy: { field: "title", dir: "asc" } }
+): Promise<PageResult<ArticleRow>> {
   const store = await getStore();
-  const rows = await store.articles.list({ tenantId, ...where });
-  return rows.sort((a, b) => a.title.localeCompare(b.title));
+  return pageCollection(store.articles, { tenantId, ...where }, options);
 }
 
 export async function getArticle(id: string, tenantId?: string): Promise<ArticleRow | null> {

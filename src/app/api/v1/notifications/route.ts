@@ -1,28 +1,44 @@
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, readJson } from "@/server/http";
+import { fail, ok, paginated, parsePagination, readJson } from "@/server/http";
 import { getStore } from "@/server/data";
 import { now } from "@/server/domain/ids";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const LIMIT = 25;
-
 /** The signed-in user's notification feed (bell dropdown), newest first. */
 export async function GET(req: Request) {
   const [actor, tenantId] = await Promise.all([currentActor(req), currentTenantId(req)]);
-  if (!actor.email) return ok({ items: [], unread: 0 });
+  const parsed = parsePagination(req, {
+    defaultSortBy: "createdAt",
+    defaultSortDir: "desc",
+    allowedSortBy: ["createdAt"] as const,
+    defaultPageSize: 25,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  if (!actor.email) {
+    return paginated({ items: [], unread: 0 }, 0, pagination);
+  }
 
   const store = await getStore();
   const all = await store.notifications.list({ tenantId });
   const mine = all
     .filter((n) => n.toAddress.toLowerCase() === actor.email!.toLowerCase())
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => {
+      const primary = a.createdAt.localeCompare(b.createdAt);
+      if (primary !== 0) return pagination.sortDir === "asc" ? primary : -primary;
+      return a.id.localeCompare(b.id);
+    });
 
-  return ok({
-    items: mine.slice(0, LIMIT),
-    unread: mine.filter((n) => !n.readAt).length,
-  });
+  return paginated(
+    {
+      items: mine.slice(pagination.skip, pagination.skip + pagination.take),
+      unread: mine.filter((n) => !n.readAt).length,
+    },
+    mine.length,
+    pagination
+  );
 }
 
 /** Mark the caller's notifications read: { op: "mark_read", id? } (no id = all). */

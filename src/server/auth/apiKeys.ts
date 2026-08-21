@@ -11,6 +11,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { ApiKeyRow, Role } from "../domain/models";
 
@@ -87,11 +88,12 @@ export async function createApiKey(
   return { record, key };
 }
 
-export async function listApiKeys(tenantId: string): Promise<ApiKeyRow[]> {
+export async function listApiKeys(
+  tenantId: string,
+  options: ListOptions<ApiKeyRow> = { orderBy: { field: "createdAt", dir: "desc" } }
+): Promise<PageResult<ApiKeyRow>> {
   const store = await getStore();
-  return (await store.apiKeys.list({ tenantId })).sort((a, b) =>
-    b.createdAt.localeCompare(a.createdAt)
-  );
+  return pageCollection(store.apiKeys, { tenantId }, options);
 }
 
 export async function revokeApiKey(tenantId: string, id: string, actor = "system"): Promise<boolean> {

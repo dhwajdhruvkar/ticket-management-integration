@@ -8,7 +8,9 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
+import { listActiveTickets } from "./ticketService";
 import type {
   AssetRow,
   AssetStatus,
@@ -17,9 +19,12 @@ import type {
   CIType,
 } from "../domain/models";
 
-export async function listAssets(tenantId: string): Promise<AssetRow[]> {
+export async function listAssets(
+  tenantId: string,
+  options: ListOptions<AssetRow> = { orderBy: { field: "tag", dir: "asc" } }
+): Promise<PageResult<AssetRow>> {
   const store = await getStore();
-  return (await store.assets.list({ tenantId })).sort((a, b) => a.tag.localeCompare(b.tag));
+  return pageCollection(store.assets, { tenantId }, options);
 }
 
 export async function createAsset(
@@ -45,9 +50,12 @@ export async function createAsset(
   return asset;
 }
 
-export async function listCIs(tenantId: string): Promise<CIRow[]> {
+export async function listCIs(
+  tenantId: string,
+  options: ListOptions<CIRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<CIRow>> {
   const store = await getStore();
-  return (await store.cis.list({ tenantId })).sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.cis, { tenantId }, options);
 }
 
 export async function createCI(
@@ -129,7 +137,7 @@ export async function impactOf(ciId: string, tenantId?: string): Promise<ImpactA
 
   // Explicit CMDB links first; fall back to a subject-name match for tickets
   // raised before CI linking existed.
-  const tickets = (await store.tickets.list({ tenantId: ci.tenantId })).filter(
+  const tickets = (await listActiveTickets(ci.tenantId)).filter(
     (t) => (t.ciIds ?? []).includes(ci.id) || t.subject.toLowerCase().includes(ci.name.toLowerCase())
   );
 

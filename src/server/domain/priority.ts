@@ -12,13 +12,7 @@
 // =============================================================================
 
 import type { ImpactLevel, TicketPriority } from "./models";
-
-export const PRIORITY_ORDER: TicketPriority[] = ["critical", "high", "medium", "low", "very_low"];
-
-/** P-code label for a priority, e.g. "P1". */
-export function priorityCode(priority: TicketPriority): string {
-  return `P${PRIORITY_ORDER.indexOf(priority) + 1}`;
-}
+export { PRIORITY_ORDER, priorityCode } from "../../shared/priority";
 
 const MATRIX: Record<ImpactLevel, Record<ImpactLevel, TicketPriority>> = {
   high: { high: "critical", medium: "high", low: "medium" },

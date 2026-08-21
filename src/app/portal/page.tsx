@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiSend } from "@/lib/api";
 import { usePersona } from "@/components/Persona";
 import { InfoHint, LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
 import { CloseButton, Drawer } from "@/components/primitives";
@@ -81,14 +81,14 @@ export default function PortalPage() {
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    apiGet<Article[]>("/kb?public=1").then(setArticles).catch(() => setArticles([]));
-    apiGet<CatalogItem[]>("/catalog").then(setCatalog).catch(() => setCatalog([]));
+    apiGetAll<Article>("/kb?public=1").then(setArticles).catch(() => setArticles([]));
+    apiGetAll<CatalogItem>("/catalog").then(setCatalog).catch(() => setCatalog([]));
   }, []);
 
   useEffect(() => {
     if (!ready || !persona.email) return;
     setEmail(persona.email);
-    apiGet<TicketRow[]>("/tickets")
+    apiGetAll<TicketRow>("/tickets")
       .then((all) => setRecent(all.slice(0, 3)))
       .catch(() => setRecent([]));
   }, [ready, persona.email]);
@@ -156,7 +156,7 @@ export default function PortalPage() {
       setSubject("");
       setBody("");
       setSelectedCatalog(null);
-      apiGet<TicketRow[]>("/tickets")
+      apiGetAll<TicketRow>("/tickets")
         .then((all) => setRecent(all.slice(0, 3)))
         .catch(() => {});
     } finally {

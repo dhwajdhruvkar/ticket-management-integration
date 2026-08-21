@@ -9,9 +9,11 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import { withRetry } from "../resilience";
 import { getTicket, mutateTicket, recordEvent } from "./ticketService";
+import { reassignToLeastLoaded } from "./groupService";
 import { applySla } from "./slaService";
 import { notify } from "../notify/notifier";
 import type { AutomationRow, TicketRow } from "../domain/models";
@@ -33,7 +35,15 @@ export interface ConditionGroups {
 export type RuleConditions = Condition[] | ConditionGroups;
 
 export interface Action {
-  type: "assign" | "set_priority" | "set_status" | "set_category" | "add_tag" | "notify" | "run_ai";
+  type:
+    | "assign"
+    | "reassign"
+    | "set_priority"
+    | "set_status"
+    | "set_category"
+    | "add_tag"
+    | "notify"
+    | "run_ai";
   assigneeId?: string;
   priority?: TicketRow["priority"];
   status?: TicketRow["status"];
@@ -43,9 +53,12 @@ export interface Action {
   message?: string;
 }
 
-export async function listAutomations(tenantId: string): Promise<AutomationRow[]> {
+export async function listAutomations(
+  tenantId: string,
+  options: ListOptions<AutomationRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<AutomationRow>> {
   const store = await getStore();
-  return (await store.automations.list({ tenantId })).sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.automations, { tenantId }, options);
 }
 
 export async function createAutomation(
@@ -226,6 +239,9 @@ async function applyAction(tenantId: string, ticketId: string, action: Action): 
           await mutateTicket(ticketId, { assigneeId: action.assigneeId });
         }
       }
+      break;
+    case "reassign":
+      await reassignToLeastLoaded(ticket);
       break;
     case "set_priority":
       if (action.priority && action.priority !== ticket.priority) {

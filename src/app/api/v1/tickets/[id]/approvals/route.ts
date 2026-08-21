@@ -1,9 +1,17 @@
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { isResponse, loadTicket, requirePermission } from "@/server/guards";
 import {
   decideTicketApproval,
   listTicketApprovals,
 } from "@/server/services/approvalService";
+import type { ApprovalRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +33,18 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const ticket = await loadTicket(ctx, id);
   if (isResponse(ticket)) return ticket;
 
-  return ok(await listTicketApprovals(id));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "createdAt",
+    defaultSortDir: "asc",
+    allowedSortBy: ["createdAt", "state", "approverName"] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listTicketApprovals(
+    id,
+    listOptionsFromPagination<ApprovalRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 interface DecisionBody {

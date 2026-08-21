@@ -8,6 +8,7 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { TenantRow } from "../domain/models";
 
@@ -33,11 +34,12 @@ function slugify(name: string): string {
  * List organizations. Pass `onlyId` for a tenant admin: they administer one
  * organization and have no business enumerating the others on the deployment.
  */
-export async function listOrganizations(onlyId?: string): Promise<TenantRow[]> {
+export async function listOrganizations(
+  onlyId?: string,
+  options: ListOptions<TenantRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<TenantRow>> {
   const store = await getStore();
-  const all = await store.tenants.list();
-  const scoped = onlyId ? all.filter((t) => t.id === onlyId) : all;
-  return scoped.sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.tenants, onlyId ? { id: onlyId } : undefined, options);
 }
 
 export async function createOrganization(

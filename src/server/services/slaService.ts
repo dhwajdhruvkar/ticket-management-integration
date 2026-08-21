@@ -63,6 +63,7 @@ async function policyFor(tenantId: string, priority: TicketPriority): Promise<Sl
  * hold is not silently clawed back by the recalculation.
  */
 export async function applySla(ticket: TicketRow): Promise<TicketRow> {
+  if (ticket.deletedAt) return ticket;
   const store = await getStore();
   const policy = await policyFor(ticket.tenantId, ticket.priority);
   const target = policy

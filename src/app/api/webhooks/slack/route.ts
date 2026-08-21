@@ -5,6 +5,7 @@ import {
   verifySlackRequest,
 } from "@/server/channels/slack";
 import { clientKey, rateLimit } from "@/server/rateLimit";
+import { readTextBody } from "@/server/http";
 
 // =============================================================================
 // POST /api/webhooks/slack
@@ -22,7 +23,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Rate limit exceeded." }, { status: 429 });
   }
 
-  const rawBody = await req.text();
+  const rawBody = await readTextBody(req);
+  if (rawBody instanceof NextResponse) return rawBody;
   const verdict = verifySlackRequest(req, rawBody);
   if (!verdict.ok) {
     return NextResponse.json({ ok: false, source: "slack", error: verdict.reason }, { status: 401 });

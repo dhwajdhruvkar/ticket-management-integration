@@ -23,6 +23,17 @@ function allSet(...names: string[]): boolean {
   return names.every((n) => !!val(n));
 }
 
+function positiveInteger(name: string, fallback: number): number {
+  const raw = val(name);
+  if (raw === undefined) return fallback;
+  if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a positive integer.`);
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+  return parsed;
+}
+
 const databaseUrl = val("DATABASE_URL");
 const explicitDriver = val("DATA_DRIVER");
 const dataDriver: DataDriver =
@@ -52,6 +63,7 @@ const auth = {
 
 const redisUrl = val("REDIS_URL");
 const blobConnString = val("AZURE_STORAGE_CONNECTION_STRING");
+const attachmentMaxBytes = positiveInteger("ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024);
 
 const entraConfigured = allSet(
   "AUTH_MICROSOFT_ENTRA_ID_ID",
@@ -126,7 +138,7 @@ export const config = {
   /** Active email provider for ingestion + outbound (graph | brevo | none). */
   emailProvider,
   /** Max upload size for ticket attachments (bytes). */
-  attachmentMaxBytes: Number(val("ATTACHMENT_MAX_BYTES") ?? 10 * 1024 * 1024),
+  attachmentMaxBytes,
   /** Azure Blob container for attachments (when the blob feature is on). */
   attachmentsContainer: val("ATTACHMENTS_CONTAINER") ?? "attachments",
 

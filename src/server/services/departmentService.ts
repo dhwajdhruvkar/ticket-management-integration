@@ -8,6 +8,7 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { DepartmentRow } from "../domain/models";
 
@@ -18,9 +19,12 @@ export class DepartmentServiceError extends Error {
   }
 }
 
-export async function listDepartments(tenantId: string): Promise<DepartmentRow[]> {
+export async function listDepartments(
+  tenantId: string,
+  options: ListOptions<DepartmentRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<DepartmentRow>> {
   const store = await getStore();
-  return (await store.departments.list({ tenantId })).sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.departments, { tenantId }, options);
 }
 
 export async function createDepartment(

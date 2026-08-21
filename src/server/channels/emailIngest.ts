@@ -182,6 +182,7 @@ export async function processInboundEmail(
       try {
         const bytes = Buffer.from(att.contentBase64, "base64");
         await saveAttachment(
+          tenantId,
           ticketId,
           { fileName: att.fileName, mimeType: att.mimeType, bytes },
           `email:${from}`

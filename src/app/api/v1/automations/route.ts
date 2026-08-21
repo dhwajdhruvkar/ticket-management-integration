@@ -1,4 +1,11 @@
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { isResponse, requirePermission } from "@/server/guards";
 import {
   createAutomation,
@@ -7,6 +14,7 @@ import {
   type Action,
   type RuleConditions,
 } from "@/server/services/automationService";
+import type { AutomationRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +39,25 @@ export async function GET(req: Request) {
       await dryRun(ctx.tenantId, dryRunTicket, url.searchParams.get("trigger") ?? "ticket.created")
     );
   }
-  return ok(await listAutomations(ctx.tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "name",
+    defaultSortDir: "asc",
+    allowedSortBy: [
+      "name",
+      "enabled",
+      "trigger",
+      "runCount",
+      "createdAt",
+      "updatedAt",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listAutomations(
+    ctx.tenantId,
+    listOptionsFromPagination<AutomationRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

@@ -9,6 +9,7 @@
 // =============================================================================
 
 import { config } from "../config";
+import { logger } from "../observability/logger";
 
 export const EMBEDDING_DIM = 384;
 export const BOW_MODEL = "helpdesk-hashed-bow-384";
@@ -25,7 +26,9 @@ export async function embed(text: string): Promise<EmbedResult> {
       const vector = await azureEmbed(text);
       return { vector, model: AOAI_EMBED_MODEL };
     } catch (err) {
-      console.error("[embeddings] Azure OpenAI failed, using hashed fallback:", err);
+      logger.error("Azure OpenAI embeddings failed; using hashed fallback", {
+        error: err,
+      });
     }
   }
   return { vector: bowEmbed(text), model: BOW_MODEL };

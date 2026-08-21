@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { fail } from "@/server/http";
 import { actorContext, isResponse, loadTicket, requirePermission } from "@/server/guards";
 import { can } from "@/server/auth/rbac";
-import { getStore } from "@/server/data";
-import { deleteAttachment, readAttachment } from "@/server/services/attachmentService";
+import {
+  deleteAttachment,
+  getAttachmentMetadata,
+  readAttachment,
+} from "@/server/services/attachmentService";
 
 // =============================================================================
 // /api/v1/attachments/[id]
@@ -22,22 +25,28 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const ctx = await actorContext(req);
   if (!can(ctx.role, "ticket.read")) return fail("Forbidden.", 403);
 
-  const found = await readAttachment(id);
-  if (!found) return fail("Attachment not found.", 404);
+  const metadata = await getAttachmentMetadata(ctx.tenantId, id);
+  if (!metadata) return fail("Attachment not found.", 404);
 
   // Access follows the parent ticket, which carries the tenant and the owner.
-  const ticket = await loadTicket(ctx, found.record.ticketId);
+  const ticket = await loadTicket(ctx, metadata.ticketId);
   if (isResponse(ticket)) return fail("Attachment not found.", 404);
+
+  // Fetch the binary only after tenant and requester ownership checks pass.
+  const found = await readAttachment(ctx.tenantId, id);
+  if (!found) return fail("Attachment not found.", 404);
 
   const encodedName = encodeURIComponent(found.record.fileName);
   return new NextResponse(new Uint8Array(found.bytes), {
     status: 200,
     headers: {
       "Content-Type": found.record.mimeType,
-      "Content-Length": String(found.record.sizeBytes),
+      "Content-Length": String(found.bytes.length),
       "Content-Disposition": `attachment; filename*=UTF-8''${encodedName}`,
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "private, max-age=0",
+      "Content-Security-Policy": "sandbox; default-src 'none'",
+      "Cross-Origin-Resource-Policy": "same-origin",
     },
   });
 }
@@ -47,13 +56,12 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const ctx = await requirePermission(req, "ticket.write");
   if (isResponse(ctx)) return ctx;
 
-  const store = await getStore();
-  const record = await store.attachments.get(id);
+  const record = await getAttachmentMetadata(ctx.tenantId, id);
   if (!record) return fail("Attachment not found.", 404);
   const ticket = await loadTicket(ctx, record.ticketId);
   if (isResponse(ticket)) return fail("Attachment not found.", 404);
 
-  const removed = await deleteAttachment(id, ctx.actor.name);
+  const removed = await deleteAttachment(ctx.tenantId, id, ctx.actor.name);
   if (!removed) return fail("Attachment not found.", 404);
   return NextResponse.json({ ok: true, data: { deleted: true } });
 }

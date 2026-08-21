@@ -15,6 +15,7 @@ import { currentActor, currentTenantId, type ActingUser } from "./context";
 import { assertTenant, fail } from "./http";
 import { can, isAgentRole, type Permission } from "./auth/rbac";
 import { getStore } from "./data";
+import { getTicket } from "./services/ticketService";
 import type { Role, TicketRow } from "./domain/models";
 
 export interface ActorContext {
@@ -54,8 +55,7 @@ export async function loadTicket(
   ctx: ActorContext,
   ticketId: string
 ): Promise<TicketRow | NextResponse> {
-  const store = await getStore();
-  const ticket = assertTenant(await store.tickets.get(ticketId), ctx.tenantId);
+  const ticket = await getTicket(ticketId, ctx.tenantId);
   if (!ticket) return fail("Ticket not found.", 404);
   if (
     !isAgentRole(ctx.role) &&

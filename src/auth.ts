@@ -1,9 +1,11 @@
+import { randomBytes } from "node:crypto";
 import NextAuth, { type NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import { authConfig } from "./auth.config";
 import { config } from "@/server/config";
 import { getStore } from "@/server/data";
+import { logger } from "@/server/observability/logger";
 
 // =============================================================================
 // Full (Node) auth.
@@ -16,6 +18,24 @@ import { getStore } from "@/server/data";
 // =============================================================================
 
 const providers: NextAuthConfig["providers"] = [];
+
+if (
+  !config.demoMode &&
+  (!config.auth.secret || config.auth.secret.length < 32)
+) {
+  throw new Error(
+    "Production authentication requires AUTH_SECRET generated from at least 32 random bytes."
+  );
+}
+
+// Demo mode still needs a signing key, but it must not rely on a committed
+// fallback. Keep a random value stable for this process (including dev HMR).
+const authRuntime = globalThis as typeof globalThis & {
+  __netlinkDemoAuthSecret?: string;
+};
+const demoAuthSecret =
+  authRuntime.__netlinkDemoAuthSecret ?? randomBytes(32).toString("base64url");
+authRuntime.__netlinkDemoAuthSecret = demoAuthSecret;
 
 // The passwordless demo provider only exists in demo mode; production
 // deployments (DEMO_MODE=false or Entra configured) sign in via SSO only.
@@ -50,7 +70,7 @@ if (config.features.entraId) {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
-  secret: config.auth.secret ?? "dev-insecure-secret-change-me",
+  secret: config.auth.secret ?? demoAuthSecret,
   providers,
   events: {
     // Login/logout land on the tamper-evident audit chain (compliance trail).
@@ -71,7 +91,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
         }
       } catch (err) {
-        console.error("[auth] signin audit failed:", err);
+        logger.error("auth signin audit failed", { error: err });
       }
     },
     async signOut(message) {
@@ -91,7 +111,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           });
         }
       } catch (err) {
-        console.error("[auth] signout audit failed:", err);
+        logger.error("auth signout audit failed", { error: err });
       }
     },
   },

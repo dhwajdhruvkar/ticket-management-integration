@@ -8,7 +8,7 @@ import { usePersona } from "@/components/Persona";
 import { useTheme } from "@/components/Theme";
 import { useToast } from "@/components/Toast";
 import { LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiSend } from "@/lib/api";
 import { HINTS } from "@/lib/hints";
 import type { TicketRow, TicketStatus, UserPreferences } from "@/server/domain/models";
 
@@ -113,7 +113,7 @@ export default function ProfileView() {
     if (!ready) return;
     load();
     setEditing(false);
-    apiGet<TicketRow[]>("/tickets").then(setTickets).catch(() => setTickets([]));
+    apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
   }, [ready, persona.id, load]);
 
   const isAgent = persona.role === "agent";

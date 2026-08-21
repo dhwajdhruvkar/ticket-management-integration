@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGetAll, apiSend } from "@/lib/api";
 import type {
   AssignmentGroupRow,
   ImpactLevel,
@@ -12,7 +12,7 @@ import type {
   TicketStatus,
   UserRow,
 } from "@/server/domain/models";
-import { PRIORITY_ORDER } from "@/server/domain/priority";
+import { PRIORITY_ORDER } from "@/shared/priority";
 import {
   Avatar,
   IMPACT_LEVELS,
@@ -188,7 +188,7 @@ export default function TicketsExplorer() {
   const [tickets, setTickets] = useState<TicketRow[] | null>(null);
 
   const refresh = useCallback(() => {
-    apiGet<TicketRow[]>("/tickets").then(setTickets).catch(() => setTickets([]));
+    apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
   }, []);
 
   useEffect(() => {
@@ -237,8 +237,8 @@ function AgentExplorer({
 
   useEffect(() => {
     if (!ready) return;
-    apiGet<UserRow[]>("/users").then(setUsers).catch(() => {});
-    apiGet<AssignmentGroupRow[]>("/groups").then(setGroups).catch(() => {});
+    apiGetAll<UserRow>("/users").then(setUsers).catch(() => {});
+    apiGetAll<AssignmentGroupRow>("/groups").then(setGroups).catch(() => {});
   }, [ready, persona.id]);
 
   useEffect(() => {

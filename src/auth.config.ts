@@ -3,7 +3,7 @@ import type { NextAuthConfig } from "next-auth";
 // =============================================================================
 // Edge-safe auth configuration (no database imports).
 //
-// Shared by middleware (edge) and the full Node auth (src/auth.ts). Token
+// Shared by the network proxy and the full Node auth (src/auth.ts). Token
 // callbacks only read/write the JWT so they run anywhere; the DB-backed
 // Credentials provider is added in src/auth.ts.
 // =============================================================================
@@ -33,7 +33,7 @@ export const authConfig = {
     },
     authorized({ auth, request }) {
       // Pages: require a session (false -> redirect to /signin).
-      // API paths: always pass here; middleware.ts returns JSON 401s itself so
+      // API paths: always pass here; proxy.ts returns JSON 401s itself so
       // machines get a proper status code instead of an HTML redirect.
       if (request.nextUrl.pathname.startsWith("/api")) return true;
       return !!auth?.user;

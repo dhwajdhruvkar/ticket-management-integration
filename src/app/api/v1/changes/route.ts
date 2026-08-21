@@ -1,6 +1,14 @@
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { isResponse, requirePermission } from "@/server/guards";
 import { createChange, listChanges, type NewChangeInput } from "@/server/services/changeService";
+import type { ChangeRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +22,25 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const ctx = await requirePermission(req, "change.read");
   if (isResponse(ctx)) return ctx;
-  return ok(await listChanges(ctx.tenantId));
+  const parsed = parsePagination(req, {
+    defaultSortBy: "createdAt",
+    defaultSortDir: "desc",
+    allowedSortBy: [
+      "createdAt",
+      "updatedAt",
+      "reference",
+      "title",
+      "status",
+      "riskScore",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
+  const result = await listChanges(
+    ctx.tenantId,
+    listOptionsFromPagination<ChangeRow>(pagination)
+  );
+  return paginated(result.data, result.total, pagination);
 }
 
 export async function POST(req: Request) {

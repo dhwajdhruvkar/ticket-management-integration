@@ -1,5 +1,12 @@
 import { currentActor, currentTenantId } from "@/server/context";
-import { fail, ok, readJson } from "@/server/http";
+import {
+  fail,
+  listOptionsFromPagination,
+  ok,
+  paginated,
+  parsePagination,
+  readJson,
+} from "@/server/http";
 import { can, isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
 import { listTickets, type NewTicketInput } from "@/server/services/ticketService";
@@ -24,6 +31,20 @@ export async function GET(req: Request) {
   const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
   const role = actor.role as Role;
   if (!can(role, "ticket.read")) return fail("Forbidden.", 403);
+  const parsed = parsePagination(req, {
+    defaultSortBy: "createdAt",
+    defaultSortDir: "desc",
+    allowedSortBy: [
+      "createdAt",
+      "updatedAt",
+      "reference",
+      "priority",
+      "status",
+      "subject",
+    ] as const,
+  });
+  if (!parsed.ok) return parsed.response;
+  const pagination = parsed.value;
 
   const url = new URL(req.url);
   const where: Partial<TicketRow> = {};
@@ -40,10 +61,16 @@ export async function GET(req: Request) {
 
   // Record security: requesters only ever see their own tickets.
   if (!isAgentRole(role)) {
-    if (!actor.email) return ok([]);
+    if (!actor.email) return paginated([], 0, pagination);
     where.requesterEmail = actor.email;
   }
-  return ok(await listTickets(tenantId, where));
+
+  const { data, total } = await listTickets(
+    tenantId,
+    where,
+    listOptionsFromPagination<TicketRow>(pagination)
+  );
+  return paginated(data, total, pagination);
 }
 
 // POST: create a ticket (requesters file as themselves; runs the intake pipeline).

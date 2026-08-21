@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiGetAll } from "@/lib/api";
 import type { AuditRow } from "@/server/domain/models";
 import { auditActionLabel, LabelWithHint, timeAgo } from "./ui";
 import { HINTS } from "@/lib/hints";
@@ -52,7 +52,7 @@ export default function AuditViewer() {
       setError(null);
       try {
         const [recs, result] = await Promise.all([
-          apiGet<AuditRow[]>("/audit"),
+          apiGetAll<AuditRow>("/audit"),
           apiGet<AuditVerification>("/audit?verify=1"),
         ]);
         setRecords([...recs].sort((a, b) => b.index - a.index));

@@ -4,6 +4,7 @@ import { intakeTicket } from "@/server/services/intake";
 import { AdapterError, normalizeZendesk } from "@/server/channels/webhookAdapters";
 import { verifyWebhookRequest } from "@/server/channels/webhookSecurity";
 import { clientKey, rateLimit } from "@/server/rateLimit";
+import { readTextBody } from "@/server/http";
 
 // =============================================================================
 // POST /api/webhooks/zendesk
@@ -22,7 +23,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Rate limit exceeded." }, { status: 429 });
   }
 
-  const rawBody = await req.text();
+  const rawBody = await readTextBody(req);
+  if (rawBody instanceof NextResponse) return rawBody;
   const verdict = verifyWebhookRequest("zendesk", req, rawBody);
   if (!verdict.ok) {
     return NextResponse.json({ ok: false, source: "zendesk", error: verdict.reason }, { status: 401 });

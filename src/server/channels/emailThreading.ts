@@ -14,6 +14,7 @@
 // =============================================================================
 
 import { getStore } from "../data";
+import { listActiveTickets } from "../services/ticketService";
 import type { EmailMessageRow } from "../domain/models";
 
 /** "[INC-8F3K2A] Re: printer" -> "INC-8F3K2A". Case-insensitive, first match. */
@@ -77,8 +78,12 @@ export async function resolveThreadTicket(
   const store = await getStore();
   const [ledger, tickets] = await Promise.all([
     store.emails.list({ tenantId }),
-    store.tickets.list({ tenantId }),
+    listActiveTickets(tenantId),
   ]);
+  const activeTicketIds = new Set(tickets.map((ticket) => ticket.id));
+  const activeLedger = ledger.filter(
+    (row) => !row.ticketId || activeTicketIds.has(row.ticketId)
+  );
   const byReference = new Map(tickets.map((t) => [t.reference.toUpperCase(), t.id]));
-  return matchThread(candidate, ledger, (ref) => byReference.get(ref) ?? null);
+  return matchThread(candidate, activeLedger, (ref) => byReference.get(ref) ?? null);
 }

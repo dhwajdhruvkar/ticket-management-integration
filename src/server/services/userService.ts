@@ -9,6 +9,7 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { Role, UserRow } from "../domain/models";
 
@@ -61,12 +62,11 @@ async function resolveDepartmentName(
 /** List tenant users (optionally filtered), sorted by display name. */
 export async function listUsers(
   tenantId: string,
-  where: Partial<UserRow> = {}
-): Promise<UserRow[]> {
+  where: Partial<UserRow> = {},
+  options: ListOptions<UserRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<UserRow>> {
   const store = await getStore();
-  return (await store.users.list({ tenantId, ...where })).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  return pageCollection(store.users, { tenantId, ...where }, options);
 }
 
 export interface CreateUserInput {

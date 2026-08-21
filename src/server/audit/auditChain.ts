@@ -119,9 +119,18 @@ export async function verifyChain(tenantId: string): Promise<AuditVerification> 
   return { valid: true, length: records.length, brokenAt: null, reason: null };
 }
 
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
+
 /** Newest-first audit records for a tenant, optionally filtered to one ticket. */
-export async function getAudit(tenantId: string, ticketId?: string): Promise<AuditRow[]> {
+export async function getAudit(
+  tenantId: string,
+  ticketId?: string,
+  options?: ListOptions<AuditRow>
+): Promise<PageResult<AuditRow>> {
   const store = await getStore();
-  const records = (await store.audit.list({ tenantId })).sort((a, b) => b.index - a.index);
-  return ticketId ? records.filter((r) => r.ticketId === ticketId) : records;
+  const where: Partial<AuditRow> = { tenantId };
+  if (ticketId) where.ticketId = ticketId;
+  const opt = options ?? { orderBy: { field: "index", dir: "desc" } };
+
+  return pageCollection(store.audit, where, opt);
 }

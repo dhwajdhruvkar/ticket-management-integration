@@ -58,13 +58,41 @@ export interface NewTicketInput {
   ciIds?: string[];
 }
 
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
+
 export async function listTickets(
   tenantId: string,
-  where: Partial<TicketRow> = {}
+  where: Partial<TicketRow> = {},
+  options?: ListOptions<TicketRow>
+): Promise<PageResult<TicketRow>> {
+  const store = await getStore();
+  const opt = options ?? { orderBy: { field: "createdAt", dir: "desc" } };
+  const filter: Partial<TicketRow> = opt.includeDeleted
+    ? { tenantId, ...where }
+    : { tenantId, ...where, deletedAt: null };
+  return pageCollection(store.tickets, filter, opt);
+}
+
+/** Operational reads always hide soft-deleted tickets. */
+export async function listActiveTickets(
+  tenantId: string,
+  where: Partial<TicketRow> = {},
+  options?: ListOptions<TicketRow>
 ): Promise<TicketRow[]> {
   const store = await getStore();
-  const rows = await store.tickets.list({ tenantId, ...where });
-  return rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return store.tickets.list({ tenantId, ...where, deletedAt: null }, options);
+}
+
+/**
+ * Historical exports deliberately retain soft-deleted rows. Deletion removes
+ * a ticket from normal operations, not from compliance/reporting history.
+ */
+export async function listTicketsForReporting(
+  tenantId: string,
+  options?: ListOptions<TicketRow>
+): Promise<TicketRow[]> {
+  const store = await getStore();
+  return store.tickets.list({ tenantId }, options);
 }
 
 /**
@@ -74,7 +102,7 @@ export async function listTickets(
 export async function getTicket(id: string, tenantId?: string): Promise<TicketRow | null> {
   const store = await getStore();
   const ticket = await store.tickets.get(id);
-  if (!ticket) return null;
+  if (!ticket || ticket.deletedAt) return null;
   if (tenantId && ticket.tenantId !== tenantId) return null;
   return ticket;
 }
@@ -94,7 +122,7 @@ export async function getTicketView(
 ): Promise<TicketView | null> {
   const store = await getStore();
   const ticket = await store.tickets.get(id);
-  if (!ticket) return null;
+  if (!ticket || ticket.deletedAt) return null;
   if (options.tenantId && ticket.tenantId !== options.tenantId) return null;
 
   const [messages, events, resolutions, approvals, assignee, group] = await Promise.all([
@@ -175,6 +203,9 @@ export async function createTicket(
     mergedIntoId: null,
     satisfaction: null,
     resolutionNotes: null,
+    escalationReason: null,
+    escalatedById: null,
+    escalatedAt: null,
     firstRespondedAt: null,
     resolvedAt: null,
     closedAt: null,
@@ -185,6 +216,7 @@ export async function createTicket(
     slaPausedMins: 0,
     createdAt: ts,
     updatedAt: ts,
+    deletedAt: null,
   };
   await store.tickets.create(ticket);
   await recordEvent(ticket.id, "created", `Ticket ingested via ${ticket.channel}.`);
@@ -217,7 +249,7 @@ export async function mutateTicket(
 ): Promise<TicketRow | null> {
   const store = await getStore();
   const current = await store.tickets.get(id);
-  if (!current) return null;
+  if (!current || current.deletedAt) return null;
 
   let full: Partial<TicketRow> = { ...patch };
   if (patch.status && patch.status !== current.status) {
@@ -259,6 +291,29 @@ export async function mutateTicket(
     }
   }
   return updated;
+}
+
+export async function deleteTicket(id: string, actor: string): Promise<boolean> {
+  const store = await getStore();
+  const current = await store.tickets.get(id);
+  if (!current || current.deletedAt) return false;
+
+  const updated = await mutateTicket(
+    id,
+    { deletedAt: now() },
+    { type: "deleted", message: `Ticket soft-deleted by ${actor}.` }
+  );
+
+  if (updated) {
+    await appendAudit({
+      tenantId: current.tenantId,
+      actor,
+      action: "ticket.deleted",
+      ticketId: id,
+    });
+    return true;
+  }
+  return false;
 }
 
 export async function addMessage(

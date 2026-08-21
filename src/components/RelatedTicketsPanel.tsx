@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGetAll, apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
 import type { TicketRow } from "@/server/domain/models";
 import { useToast } from "./Toast";
@@ -29,7 +29,7 @@ export default function RelatedTicketsPanel({
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGet<TicketRow[]>("/tickets").then(setAll).catch(() => setAll([]));
+    apiGetAll<TicketRow>("/tickets").then(setAll).catch(() => setAll([]));
   }, []);
 
   useEffect(() => {

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { apiGet, ApiError, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, ApiError, apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
 import type { AssignmentGroupRow, CIRow, CustomFieldDefRow, UserRow } from "@/server/domain/models";
 import {
@@ -81,10 +81,10 @@ export default function TicketDetailPage() {
     if (!ready) return;
     refresh();
     if (persona.role === "agent") {
-      apiGet<UserRow[]>("/users").then(setUsers).catch(() => {});
-      apiGet<AssignmentGroupRow[]>("/groups").then(setGroups).catch(() => {});
-      apiGet<CIRow[]>("/cis").then(setCis).catch(() => {});
-      apiGet<CustomFieldDefRow[]>("/custom-fields").then(setCustomFieldDefs).catch(() => {});
+      apiGetAll<UserRow>("/users").then(setUsers).catch(() => {});
+      apiGetAll<AssignmentGroupRow>("/groups").then(setGroups).catch(() => {});
+      apiGetAll<CIRow>("/cis").then(setCis).catch(() => {});
+      apiGetAll<CustomFieldDefRow>("/custom-fields").then(setCustomFieldDefs).catch(() => {});
     }
   }, [ready, persona.role, persona.id, refresh]);
 

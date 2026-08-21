@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiSend } from "@/lib/api";
 import { AIPanel, Avatar, InfoHint, LabelWithHint } from "@/components/ui";
 import { HINTS } from "@/lib/hints";
 import { useAgentOnly, usePersona } from "@/components/Persona";
@@ -65,7 +65,7 @@ export default function ChangesPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const list = await apiGet<Change[]>("/changes");
+      const list = await apiGetAll<Change>("/changes");
       const views = await Promise.all(list.map((c) => apiGet<Change>(`/changes/${c.id}`).catch(() => c)));
       setChanges(views);
     } catch {
@@ -76,7 +76,7 @@ export default function ChangesPage() {
   useEffect(() => {
     if (!isAgent) return;
     refresh();
-    apiGet<UserRow[]>("/users").then(setUsers).catch(() => {});
+    apiGetAll<UserRow>("/users").then(setUsers).catch(() => {});
   }, [isAgent, refresh]);
 
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) {

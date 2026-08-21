@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiSend } from "@/lib/api";
 import { HINTS } from "@/lib/hints";
 import { AIPanel, LabelWithHint } from "@/components/ui";
 import { useToast } from "@/components/Toast";
@@ -83,9 +83,9 @@ export default function ProblemsPage() {
     try {
       const [m, list, cl, inc] = await Promise.all([
         apiGet<Metrics>("/problems?metrics=1"),
-        apiGet<Problem[]>("/problems"),
+        apiGetAll<Problem>("/problems"),
         apiGet<Cluster[]>("/problems?suggest=1").catch(() => []),
-        apiGet<Incident[]>("/tickets?type=incident").catch(() => []),
+        apiGetAll<Incident>("/tickets?type=incident").catch(() => []),
       ]);
       setMetrics(m);
       setProblems(list);

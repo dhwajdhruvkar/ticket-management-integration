@@ -132,6 +132,7 @@ export const HINTS = {
 
   // --- Triage ---------------------------------------------------------------
   triageQueue: "Tickets that have arrived but do not yet have an owner. Assign them to get the SLA clock working for you.",
+  triageEscalations: "Tickets an agent could not resolve and handed back, with the reason they gave. Reassigning one clears it from this lane.",
   triageSpecialists: "Agents in the assignment group that matches this ticket's category, so they are the closest fit.",
   triageCommon: "Every other available agent, for when the specialist group is at capacity.",
   teamWorkload: "Current open tickets per agent, so you can assign to whoever has room rather than whoever is nearest the top.",

@@ -9,6 +9,7 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import { notifyTemplate } from "../notify/templates";
 import { withRetry } from "../resilience";
@@ -21,10 +22,12 @@ async function tenantApprover(tenantId: string): Promise<UserRow | null> {
   return users.find((u) => u.role === "manager") ?? users.find((u) => u.role === "tenant_admin") ?? null;
 }
 
-export async function listTicketApprovals(ticketId: string): Promise<ApprovalRow[]> {
+export async function listTicketApprovals(
+  ticketId: string,
+  options: ListOptions<ApprovalRow> = { orderBy: { field: "createdAt", dir: "asc" } }
+): Promise<PageResult<ApprovalRow>> {
   const store = await getStore();
-  const rows = await store.approvals.list({ ticketId });
-  return rows.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  return pageCollection(store.approvals, { ticketId }, options);
 }
 
 /** Hold the ticket pending approval and notify the approver + requester. */

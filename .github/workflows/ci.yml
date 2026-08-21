@@ -20,8 +20,12 @@ jobs:
         run: npx prisma generate
       - name: Type check
         run: npm run typecheck
+      - name: Lint
+        run: npm run lint
       - name: Unit tests
         run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
       - name: Build
         run: npm run build
         env:

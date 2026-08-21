@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { apiGet, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiSend } from "@/lib/api";
 import { HINTS } from "@/lib/hints";
 import { LabelWithHint } from "@/components/ui";
 import { useToast } from "@/components/Toast";
@@ -55,7 +55,10 @@ export default function AssetsPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [a, c] = await Promise.all([apiGet<Asset[]>("/assets"), apiGet<CI[]>("/cis")]);
+      const [a, c] = await Promise.all([
+        apiGetAll<Asset>("/assets"),
+        apiGetAll<CI>("/cis"),
+      ]);
       setAssets(a);
       setCIs(c);
       setLoadError(null);

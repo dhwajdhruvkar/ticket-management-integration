@@ -8,6 +8,7 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
+import { pageCollection, type ListOptions, type PageResult } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { BusinessCalendarRow } from "../domain/models";
 
@@ -30,9 +31,12 @@ function assertValidWindow(startHour: number, endHour: number, workDays: number[
   }
 }
 
-export async function listCalendars(tenantId: string): Promise<BusinessCalendarRow[]> {
+export async function listCalendars(
+  tenantId: string,
+  options: ListOptions<BusinessCalendarRow> = { orderBy: { field: "name", dir: "asc" } }
+): Promise<PageResult<BusinessCalendarRow>> {
   const store = await getStore();
-  return (await store.calendars.list({ tenantId })).sort((a, b) => a.name.localeCompare(b.name));
+  return pageCollection(store.calendars, { tenantId }, options);
 }
 
 export async function createCalendar(

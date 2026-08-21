@@ -618,6 +618,7 @@ export async function buildSeed(): Promise<SeedData> {
       slaPausedMins: paused ? 15 : 0,
       createdAt,
       updatedAt: createdAt,
+      deletedAt: null,
     });
 
     events.push(mkEvent(id, "created", `Ticket ingested via portal.`, createdAt));

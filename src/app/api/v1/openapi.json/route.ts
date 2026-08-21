@@ -15,6 +15,31 @@ const envelope = (dataSchema: Record<string, unknown>) => ({
 });
 
 const ID = { name: "id", in: "path", required: true, schema: { type: "string" } };
+const PAGINATION = [
+  {
+    name: "page",
+    in: "query",
+    schema: { type: "integer", minimum: 1, default: 1 },
+  },
+  {
+    name: "pageSize",
+    in: "query",
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+  },
+  {
+    name: "limit",
+    in: "query",
+    deprecated: true,
+    description: "Legacy alias for pageSize.",
+    schema: { type: "integer", minimum: 1, maximum: 100 },
+  },
+  { name: "sortBy", in: "query", schema: { type: "string" } },
+  {
+    name: "sortDir",
+    in: "query",
+    schema: { type: "string", enum: ["asc", "desc"] },
+  },
+] as const;
 
 const SPEC = {
   openapi: "3.1.0",
@@ -34,6 +59,22 @@ const SPEC = {
     },
     schemas: {
       Envelope: envelope({ type: "object" }),
+      PageMeta: {
+        type: "object",
+        required: ["total", "page", "pageSize", "limit", "totalPages"],
+        properties: {
+          total: { type: "integer", minimum: 0 },
+          page: { type: "integer", minimum: 1 },
+          pageSize: { type: "integer", minimum: 1, maximum: 100 },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 100,
+            description: "Backward-compatible alias for pageSize.",
+          },
+          totalPages: { type: "integer", minimum: 0 },
+        },
+      },
       Ticket: {
         type: "object",
         properties: {
@@ -62,6 +103,7 @@ const SPEC = {
       get: {
         summary: "List tickets (requesters see their own only)",
         parameters: [
+          ...PAGINATION,
           { name: "status", in: "query", schema: { type: "string" } },
           { name: "type", in: "query", schema: { type: "string" } },
           { name: "assigneeId", in: "query", schema: { type: "string" }, description: "User id, or 'unassigned' for the dispatch queue." },
@@ -96,10 +138,11 @@ const SPEC = {
     "/tickets/{id}": {
       get: { summary: "Ticket detail view (messages, events, SLA, approvals)", parameters: [ID], responses: { "200": { description: "Ticket view" }, "404": { description: "Not found" } } },
       patch: { summary: "Update ticket fields (agent)", parameters: [ID], responses: { "200": { description: "Updated" } } },
+      delete: { summary: "Soft-delete a ticket (manager/admin); history and reporting are preserved", parameters: [ID], responses: { "200": { description: "Soft-deleted" }, "403": { description: "Forbidden" }, "404": { description: "Not found" } } },
     },
     "/tickets/{id}/actions": {
       post: {
-        summary: "Lifecycle actions (assign, resolve, close, reopen, accept_suggestion, feedback...)",
+        summary: "Lifecycle actions (assign, resolve, close, reopen, escalate, accept_suggestion, feedback...)",
         parameters: [ID],
         responses: { "200": { description: "Action applied" } },
       },
@@ -108,7 +151,7 @@ const SPEC = {
       post: { summary: "Append a public reply or internal note", parameters: [ID], responses: { "200": { description: "Message added" } } },
     },
     "/tickets/{id}/attachments": {
-      get: { summary: "List attachments", parameters: [ID], responses: { "200": { description: "Attachment metadata" } } },
+      get: { summary: "List attachments", parameters: [ID, ...PAGINATION], responses: { "200": { description: "Paginated attachment metadata" } } },
       post: {
         summary: "Upload attachments (multipart/form-data, field `file`, max 5 files / 10 MB each)",
         parameters: [ID],
@@ -120,7 +163,7 @@ const SPEC = {
       delete: { summary: "Delete an attachment (agent)", parameters: [ID], responses: { "200": { description: "Deleted" } } },
     },
     "/tickets/{id}/approvals": {
-      get: { summary: "List approvals for a ticket", parameters: [ID], responses: { "200": { description: "Approvals" } } },
+      get: { summary: "List approvals for a ticket", parameters: [ID, ...PAGINATION], responses: { "200": { description: "Paginated approvals" } } },
       post: { summary: "Decide a pending approval (manager/admin)", parameters: [ID], responses: { "200": { description: "Decision recorded" } } },
     },
     "/tickets/{id}/links": {
@@ -139,43 +182,48 @@ const SPEC = {
       },
     },
     "/kb": {
-      get: { summary: "List knowledge articles", responses: { "200": { description: "Articles" } } },
+      get: { summary: "List knowledge articles", parameters: PAGINATION, responses: { "200": { description: "Paginated articles" } } },
       post: { summary: "Create an article (embeds for retrieval)", responses: { "200": { description: "Created" } } },
     },
     "/kb/search": {
       get: {
         summary: "Vector search",
-        parameters: [{ name: "q", in: "query", required: true, schema: { type: "string" } }],
-        responses: { "200": { description: "Hits with scores" } },
+        parameters: [
+          { name: "q", in: "query", required: true, schema: { type: "string" } },
+          ...PAGINATION,
+          { name: "k", in: "query", deprecated: true, description: "Legacy initial page-size parameter (maximum 25).", schema: { type: "integer", minimum: 1, maximum: 25 } },
+        ],
+        responses: { "200": { description: "Paginated hits with scores" } },
       },
     },
     "/kb/{id}": {
       patch: { summary: "Update an article (re-embeds)", parameters: [ID], responses: { "200": { description: "Updated" } } },
       delete: { summary: "Delete an article", parameters: [ID], responses: { "200": { description: "Deleted" } } },
     },
-    "/problems": { get: { summary: "List problems (?metrics=1, ?suggest=1 for AI clusters)", responses: { "200": { description: "Problems" } } }, post: { summary: "Create a problem (or from an AI cluster)", responses: { "200": { description: "Created" } } } },
+    "/problems": { get: { summary: "List problems (?metrics=1, ?suggest=1 return non-list views)", parameters: PAGINATION, responses: { "200": { description: "Paginated problems or requested aggregate" } } }, post: { summary: "Create a problem (or from an AI cluster)", responses: { "200": { description: "Created" } } } },
     "/problems/{id}": { get: { summary: "Problem detail", parameters: [ID], responses: { "200": { description: "Problem" } } }, patch: { summary: "Update (status, RCA, workaround, known error)", parameters: [ID], responses: { "200": { description: "Updated" } } } },
     "/problems/{id}/actions": { post: { summary: "Actions: link/unlink incident, publish workaround, raise change, AI RCA, add note", parameters: [ID], responses: { "200": { description: "Applied" } } } },
-    "/changes": { get: { summary: "List changes", responses: { "200": { description: "Changes" } } }, post: { summary: "Create a change (AI risk-scored)", responses: { "200": { description: "Created" } } } },
+    "/changes": { get: { summary: "List changes", parameters: PAGINATION, responses: { "200": { description: "Paginated changes" } } }, post: { summary: "Create a change (AI risk-scored)", responses: { "200": { description: "Created" } } } },
     "/changes/{id}/approvals": { post: { summary: "Submit for CAB / decide an approval", parameters: [ID], responses: { "200": { description: "Recorded" } } } },
-    "/assets": { get: { summary: "List assets", responses: { "200": { description: "Assets" } } }, post: { summary: "Create an asset", responses: { "200": { description: "Created" } } } },
-    "/cis": { get: { summary: "List configuration items", responses: { "200": { description: "CIs" } } }, post: { summary: "Create a CI or link a dependency", responses: { "200": { description: "Created" } } } },
+    "/assets": { get: { summary: "List assets", parameters: PAGINATION, responses: { "200": { description: "Paginated assets" } } }, post: { summary: "Create an asset", responses: { "200": { description: "Created" } } } },
+    "/cis": { get: { summary: "List configuration items", parameters: PAGINATION, responses: { "200": { description: "Paginated CIs" } } }, post: { summary: "Create a CI or link a dependency", responses: { "200": { description: "Created" } } } },
     "/cis/{id}/impact": { get: { summary: "Impact analysis (dependents + related tickets)", parameters: [ID], responses: { "200": { description: "Impact" } } } },
-    "/groups": { get: { summary: "List assignment groups", responses: { "200": { description: "Groups" } } }, post: { summary: "Create a group (admin)", responses: { "201": { description: "Created" } } } },
+    "/groups": { get: { summary: "List assignment groups", parameters: PAGINATION, responses: { "200": { description: "Paginated groups" } } }, post: { summary: "Create a group (admin)", responses: { "201": { description: "Created" } } } },
     "/groups/{id}": { patch: { summary: "Update members/categories/strategy (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } } },
-    "/sla-policies": { get: { summary: "List SLA policies", responses: { "200": { description: "Policies" } } } },
+    "/sla-policies": { get: { summary: "List SLA policies", parameters: PAGINATION, responses: { "200": { description: "Paginated policies" } } } },
     "/sla-policies/{id}": { patch: { summary: "Update targets / link a business calendar (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } } },
-    "/calendars": { get: { summary: "List business calendars", responses: { "200": { description: "Calendars" } } }, post: { summary: "Create a calendar (admin)", responses: { "201": { description: "Created" } } } },
+    "/calendars": { get: { summary: "List business calendars", parameters: PAGINATION, responses: { "200": { description: "Paginated calendars" } } }, post: { summary: "Create a calendar (admin)", responses: { "201": { description: "Created" } } } },
     "/calendars/{id}": { patch: { summary: "Update a calendar (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } }, delete: { summary: "Delete a calendar (admin)", parameters: [ID], responses: { "200": { description: "Deleted" } } } },
-    "/automations": { get: { summary: "List automation rules", responses: { "200": { description: "Rules" } } }, post: { summary: "Create a rule (admin)", responses: { "200": { description: "Created" } } } },
+    "/automations": { get: { summary: "List automation rules (?dryRun returns a non-list view)", parameters: PAGINATION, responses: { "200": { description: "Paginated rules or dry-run result" } } }, post: { summary: "Create a rule (admin)", responses: { "200": { description: "Created" } } } },
     "/automations/{id}": { patch: { summary: "Toggle/update a rule (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } } },
-    "/macros": { get: { summary: "List macros / canned responses (agent+)", responses: { "200": { description: "Macros" } } }, post: { summary: "Create a macro (admin)", responses: { "201": { description: "Created" } } } },
+    "/macros": { get: { summary: "List macros / canned responses (agent+)", parameters: PAGINATION, responses: { "200": { description: "Paginated macros" } } }, post: { summary: "Create a macro (admin)", responses: { "201": { description: "Created" } } } },
     "/macros/{id}": { patch: { summary: "Update a macro (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } }, delete: { summary: "Delete a macro (admin)", parameters: [ID], responses: { "200": { description: "Deleted" } } } },
-    "/custom-fields": { get: { summary: "List custom field definitions (agent+)", responses: { "200": { description: "Definitions" } } }, post: { summary: "Create a custom field (admin)", responses: { "201": { description: "Created" } } } },
+    "/custom-fields": { get: { summary: "List custom field definitions (agent+)", parameters: PAGINATION, responses: { "200": { description: "Paginated definitions" } } }, post: { summary: "Create a custom field (admin)", responses: { "201": { description: "Created" } } } },
     "/custom-fields/{id}": { patch: { summary: "Update a custom field (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } }, delete: { summary: "Delete a custom field (admin)", parameters: [ID], responses: { "200": { description: "Deleted" } } } },
-    "/api-keys": { get: { summary: "List API keys (admin; hashes never returned)", responses: { "200": { description: "Keys" } } }, post: { summary: "Create a key (admin) — full secret returned once", responses: { "201": { description: "Created" } } } },
+    "/api-keys": { get: { summary: "List API keys (admin; hashes never returned)", parameters: PAGINATION, responses: { "200": { description: "Paginated keys" } } }, post: { summary: "Create a key (admin) — full secret returned once", responses: { "201": { description: "Created" } } } },
     "/api-keys/{id}": { delete: { summary: "Revoke a key (admin)", parameters: [ID], responses: { "200": { description: "Revoked" } } } },
-    "/triage": { get: { summary: "Dispatcher board: unassigned queue + per-agent open-load, availability, and group memberships (manager/admin)", responses: { "200": { description: "Triage board" }, "403": { description: "Not a dispatcher" } } } },
+    "/triage": { get: { summary: "Dispatcher board: unassigned queue, escalations, and per-agent open-load, availability and group memberships (manager+)", responses: { "200": { description: "Triage board" }, "403": { description: "Lacks ticket.dispatch" } } } },
+    "/triage/assign": { post: { summary: "Bulk assign tickets (manager+); omit assigneeId to send each to its best fit", responses: { "200": { description: "Assigned + skipped ids" }, "403": { description: "Lacks ticket.dispatch" } } } },
     "/metrics": { get: { summary: "Workspace KPIs (deflection, MTTR, SLA compliance, backlog...)", responses: { "200": { description: "Metrics" } } } },
     "/reports": { get: { summary: "Per-ticket report rows (?format=csv or ?format=pdf for a downloadable report)", responses: { "200": { description: "Report (JSON, CSV, or PDF)" } } } },
     "/reports/trends": {
@@ -185,12 +233,14 @@ const SPEC = {
         responses: { "200": { description: "Trend points" } },
       },
     },
-    "/notifications": { get: { summary: "Current user's notification feed + unread count", responses: { "200": { description: "Feed" } } }, post: { summary: "Mark notifications read", responses: { "200": { description: "Marked" } } } },
+    "/notifications": { get: { summary: "Current user's paginated notification feed + total unread count", parameters: PAGINATION, responses: { "200": { description: "Paginated feed" } } }, post: { summary: "Mark notifications read", responses: { "200": { description: "Marked" } } } },
     "/events": { get: { summary: "Server-Sent Events stream (notifications + ticket updates)", responses: { "200": { description: "text/event-stream" } } } },
-    "/audit": { get: { summary: "Audit chain (?verify=1 recomputes hashes)", responses: { "200": { description: "Records / verification" } } } },
-    "/users": { get: { summary: "List users", responses: { "200": { description: "Users" } } } },
+    "/audit": { get: { summary: "Audit chain (?verify=1 returns a non-list integrity result)", parameters: PAGINATION, responses: { "200": { description: "Paginated records or verification result" } } } },
+    "/users": { get: { summary: "List users", parameters: PAGINATION, responses: { "200": { description: "Paginated users" } } } },
+    "/departments": { get: { summary: "List departments", parameters: PAGINATION, responses: { "200": { description: "Paginated departments" } } }, post: { summary: "Create a department (admin)", responses: { "201": { description: "Created" } } } },
+    "/organizations": { get: { summary: "List organizations (admin)", parameters: PAGINATION, responses: { "200": { description: "Paginated organizations" } } }, post: { summary: "Create an organization (super admin)", responses: { "201": { description: "Created" } } } },
     "/me": { get: { summary: "Current user profile", responses: { "200": { description: "Profile" } } }, patch: { summary: "Update profile/preferences", responses: { "200": { description: "Updated" } } } },
-    "/catalog": { get: { summary: "Service request catalog", responses: { "200": { description: "Items" } } } },
+    "/catalog": { get: { summary: "Service request catalog", parameters: PAGINATION, responses: { "200": { description: "Paginated items" } } } },
   },
 } as const;
 
