@@ -370,9 +370,10 @@ Previously reported phases requiring remediation have now been re-verified.
   credentials are present.
 - Aligned the Vercel project itself to the tested Node.js 22.x runtime and the
   explicit Next.js framework preset.
-- Created the code-only release branch `phase12-production-deployment` and
-  prepared it for publication as `main` in the newly selected repository. No
-  populated environment file or credential is tracked.
+- Published the code-only release branch `phase12-production-deployment` as
+  `main` in `dhwajdhruvkar/ticket-management-integration`; the initial remote
+  release head was verified at commit `1974d72`. No populated environment file
+  or credential is tracked.
 
 ### Verification
 
@@ -409,13 +410,16 @@ Previously reported phases requiring remediation have now been re-verified.
   `AUTH_MICROSOFT_ENTRA_ID_ID`,
   `AUTH_MICROSOFT_ENTRA_ID_SECRET`, `AUTH_MICROSOFT_ENTRA_ID_ISSUER`, and
   `AZURE_STORAGE_CONNECTION_STRING`. `DIRECT_URL` remains migration-job-only.
-- GitHub Actions reports that jobs cannot start because the GitHub account is
-  locked by a billing issue. Local gates are green, but GitHub CI cannot provide
-  independent evidence until that account issue is resolved.
+- GitHub Actions run `32483004426` in the new repository created a job with no
+  steps or runner. Its failure annotation states that the job was not started
+  because the account is locked due to a billing issue. Local gates are green,
+  but GitHub CI cannot provide independent evidence until that issue is
+  resolved.
 - The owner explicitly authorized publication to
-  `github.com/dhwajdhruvkar/ticket-management-integration`. A complete history
-  scan found no configured local secret value in the release commits; generic
-  credential-pattern matches are limited to placeholders and synthetic tests.
+  `github.com/dhwajdhruvkar/ticket-management-integration`, and remote `main`
+  was verified after the push. A complete history scan found no configured
+  local secret value in the release commits; generic credential-pattern matches
+  are limited to placeholders and synthetic tests.
 
 ### Confirmed
 
@@ -438,10 +442,11 @@ Previously reported phases requiring remediation have now been re-verified.
 
 ### Phase 12 release status
 
-Phase 12 is approved and its code-only release candidate is ready. Typecheck,
-lint, tests, Prisma generation, dependency audit, and the production build all
-pass. Live deployment and endpoint verification remain gated on the required
-production credentials and explicit authorization for sensitive Vercel upload.
+Phase 12 is approved and its code-only release candidate is published.
+Typecheck, lint, tests, Prisma generation, dependency audit, and the production
+build all pass. Live deployment and endpoint verification remain gated on the
+required production credentials and explicit authorization for sensitive
+Vercel upload.
 
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
@@ -511,8 +516,8 @@ handoff and stop.
 
 ## Instructions for Next Agent
 Read this file and the master prompt first. Phase 12 release preparation is
-complete and publication is authorized for
-`github.com/dhwajdhruvkar/ticket-management-integration`, but live deployment is
-not. Continue only after the owner authorizes sensitive upload to
+complete and published at
+`github.com/dhwajdhruvkar/ticket-management-integration`, but live deployment
+is not. Continue only after the owner authorizes sensitive upload to
 `dhwaj-s-projects/netlink-support` and supplies the missing Entra/Azure values.
 Complete only Phase 12, update this handoff, report, and STOP.
