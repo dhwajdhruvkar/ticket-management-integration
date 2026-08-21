@@ -361,15 +361,18 @@ Previously reported phases requiring remediation have now been re-verified.
   before `next build`, matching the existing fail-closed Docker startup gate.
 - Added lint and production dependency audit jobs to GitHub CI.
 - Created the Vercel project `dhwaj-s-projects/netlink-support` and linked this
-  workspace to it. Its Git connection to
+  workspace to it. Its former Git connection to
   `https://github.com/dhwajdhruvkar/helpdesk-ai` was verified, then temporarily
-  disconnected so publishing the release branch cannot create an
-  environment-less preview deployment.
+  disconnected so publishing a release cannot create an environment-less
+  deployment. The owner selected
+  `https://github.com/dhwajdhruvkar/ticket-management-integration` as the new
+  production source repository; Vercel remains disconnected until the required
+  credentials are present.
 - Aligned the Vercel project itself to the tested Node.js 22.x runtime and the
   explicit Next.js framework preset.
-- Created the code-only release branch `phase12-production-deployment`. No
-  populated environment file or credential is tracked. The verified local
-  release commit is `3e7510a`.
+- Created the code-only release branch `phase12-production-deployment` and
+  prepared it for publication as `main` in the newly selected repository. No
+  populated environment file or credential is tracked.
 
 ### Verification
 
@@ -409,9 +412,10 @@ Previously reported phases requiring remediation have now been re-verified.
 - GitHub Actions reports that jobs cannot start because the GitHub account is
   locked by a billing issue. Local gates are green, but GitHub CI cannot provide
   independent evidence until that account issue is resolved.
-- Publishing commit `3e7510a` to
-  `github.com/dhwajdhruvkar/helpdesk-ai` requires explicit authorization for
-  that code payload and destination. The rejected push transferred no code.
+- The owner explicitly authorized publication to
+  `github.com/dhwajdhruvkar/ticket-management-integration`. A complete history
+  scan found no configured local secret value in the release commits; generic
+  credential-pattern matches are limited to placeholders and synthetic tests.
 
 ### Confirmed
 
@@ -431,8 +435,6 @@ Previously reported phases requiring remediation have now been re-verified.
    are supplied and sensitive Vercel secret upload is explicitly authorized.
 2. GitHub Actions cannot start while the repository owner's billing lock is
    active.
-3. The local release commit cannot be pushed until publication to the named
-   GitHub repository is explicitly authorized.
 
 ### Phase 12 release status
 
@@ -509,8 +511,8 @@ handoff and stop.
 
 ## Instructions for Next Agent
 Read this file and the master prompt first. Phase 12 release preparation is
-complete but live deployment is not. Continue only after the owner explicitly
-authorizes publication to `github.com/dhwajdhruvkar/helpdesk-ai`, authorizes
-sensitive upload to `dhwaj-s-projects/netlink-support`, and supplies the missing
-Entra/Azure values. Complete only Phase 12, update this handoff, report, and
-STOP.
+complete and publication is authorized for
+`github.com/dhwajdhruvkar/ticket-management-integration`, but live deployment is
+not. Continue only after the owner authorizes sensitive upload to
+`dhwaj-s-projects/netlink-support` and supplies the missing Entra/Azure values.
+Complete only Phase 12, update this handoff, report, and STOP.
