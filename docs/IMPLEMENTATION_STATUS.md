@@ -362,7 +362,8 @@ Previously reported phases requiring remediation have now been re-verified.
   disconnected so publishing the release branch cannot create an
   environment-less preview deployment.
 - Created the code-only release branch `phase12-production-deployment`. No
-  populated environment file or credential is tracked.
+  populated environment file or credential is tracked. The verified local
+  release commit is `3e7510a`.
 
 ### Verification
 
@@ -398,6 +399,9 @@ Previously reported phases requiring remediation have now been re-verified.
 - GitHub Actions reports that jobs cannot start because the GitHub account is
   locked by a billing issue. Local gates are green, but GitHub CI cannot provide
   independent evidence until that account issue is resolved.
+- Publishing commit `3e7510a` to
+  `github.com/dhwajdhruvkar/helpdesk-ai` requires explicit authorization for
+  that code payload and destination. The rejected push transferred no code.
 
 ### Confirmed
 
@@ -417,6 +421,8 @@ Previously reported phases requiring remediation have now been re-verified.
    are supplied and sensitive Vercel secret upload is explicitly authorized.
 2. GitHub Actions cannot start while the repository owner's billing lock is
    active.
+3. The local release commit cannot be pushed until publication to the named
+   GitHub repository is explicitly authorized.
 
 ### Phase 12 release status
 
@@ -494,6 +500,7 @@ handoff and stop.
 ## Instructions for Next Agent
 Read this file and the master prompt first. Phase 12 release preparation is
 complete but live deployment is not. Continue only after the owner explicitly
-authorizes sensitive upload to `dhwaj-s-projects/netlink-support` and supplies
-the missing Entra/Azure values. Complete only Phase 12, update this handoff,
-report, and STOP.
+authorizes publication to `github.com/dhwajdhruvkar/helpdesk-ai`, authorizes
+sensitive upload to `dhwaj-s-projects/netlink-support`, and supplies the missing
+Entra/Azure values. Complete only Phase 12, update this handoff, report, and
+STOP.
