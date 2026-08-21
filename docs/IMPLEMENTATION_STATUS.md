@@ -351,10 +351,14 @@ Previously reported phases requiring remediation have now been re-verified.
   to patched Next.js 16.3.2 and Auth.js beta.32 packages, removed the unused
   Transformers/ONNX/native image dependency chain, and pinned Prisma's
   transitive `deepmerge-ts` package to the compatible security-fixed 8.0.0 API.
+- Replaced the deprecated `vite-tsconfig-paths` test plugin with Vite's native
+  `resolve.tsconfigPaths` support.
 - Migrated the deprecated `src/middleware.ts` convention to the supported
   Next.js 16 `src/proxy.ts` convention. Authentication and API gateway behavior
   are unchanged and now build without Edge/Jose compatibility warnings.
 - Added `vercel.json` to select the Next.js framework preset explicitly.
+- Added a Vercel build gate that runs the production environment validator
+  before `next build`, matching the existing fail-closed Docker startup gate.
 - Added lint and production dependency audit jobs to GitHub CI.
 - Created the Vercel project `dhwaj-s-projects/netlink-support` and linked this
   workspace to it. Its Git connection to
@@ -373,9 +377,11 @@ Previously reported phases requiring remediation have now been re-verified.
 - Prisma Client 6.19.3 generation passed against the checked-in schema.
 - TypeScript passed.
 - ESLint passed with zero warnings.
-- Full test suite passed: 26 files, 200/200 tests.
+- Full test suite passed: 26 files, 201/201 tests.
 - The optimized Next.js 16.3.2 Turbopack production build passed and emitted
   every expected page/API route, including `/api/v1/health`, without warnings.
+- The Vercel build path rejects an incomplete environment before compilation;
+  its success path passed validation and a full build with synthetic values.
 - `npm audit --omit=dev` reports 0 vulnerabilities.
 - Vercel project inspection confirms the project exists and has zero
   deployments. Its Node.js 22.x runtime and Next.js framework preset match the
@@ -413,7 +419,7 @@ Previously reported phases requiring remediation have now been re-verified.
 - Prisma validation passed and both checked-in migrations are applied.
 - Every ID in `.data/store.json` exists in PostgreSQL: 0 missing IDs across all
   27 persisted entity collections. The source JSON was not changed.
-- TypeScript passed, all 200 tests passed, and the production build passed.
+- TypeScript passed, all 201 tests passed, and the production build passed.
 - API keys are hashed, revocable, permission controlled, and tenant scoped.
 - No `NEXT_PUBLIC_*` secrets or client imports of server modules were found.
 - Production startup now rejects development/demo persistence, authentication,
@@ -464,7 +470,7 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Focused Phase 9 attachment tests: 8/8 passed.
 - Focused Phase 10 production-environment tests: 15/15 passed.
 - Focused Phase 11 production-migration tests: 3/3 passed.
-- Tests: 26 files, 200/200 passed.
+- Tests: 26 files, 201/201 passed.
 - Prisma validation: passed.
 - Migration status: 2/2 applied; database schema is up to date.
 - JSON source-ID preservation: passed; 275 checked, 0 missing.

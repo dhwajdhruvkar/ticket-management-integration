@@ -161,4 +161,21 @@ describe("Phase 10 production environment", () => {
     expect(gitignore).toContain("!.env.*.example");
     expect(dockerignore).toContain(".env*");
   });
+
+  it("keeps Docker startup and Vercel builds fail-closed", () => {
+    const packageJson = JSON.parse(
+      readFileSync(resolve(process.cwd(), "package.json"), "utf8")
+    ) as { scripts?: Record<string, string> };
+    const dockerfile = readFileSync(
+      resolve(process.cwd(), "Dockerfile"),
+      "utf8"
+    );
+
+    expect(packageJson.scripts?.["vercel-build"]).toBe(
+      "npm run environment:check && next build"
+    );
+    expect(dockerfile).toContain(
+      "node scripts/check-production-environment.cjs && exec node server.js"
+    );
+  });
 });
