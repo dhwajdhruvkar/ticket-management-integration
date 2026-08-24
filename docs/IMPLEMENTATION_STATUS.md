@@ -7,7 +7,8 @@ Safely evolve the existing Netlink Support application from its current local/me
 Phase 14 — OpenAPI and integration documentation **COMPLETE (2026-08-24)**
 
 The verified release is live at https://netlink-support.vercel.app from GitHub
-`main`; Phase 14 runtime application code was finalized in commit `3a6b602`.
+`main`; Phase 14 API code was finalized in commit `3a6b602`, and the approved
+post-phase Production sign-in presentation adjustment is commit `0b68834`.
 The protected OpenAPI 3.1 contract and external developer guide now accurately
 cover the Production API's authentication, permissions, tickets, messages,
 pagination, errors, health, API-key administration, rate limits, and supported
@@ -597,6 +598,29 @@ real Neon database.
   is Ready. GitHub Actions remains blocked by the repository owner's billing
   lock.
 
+## Post-Phase 14 Production Sign-in Presentation — COMPLETE (2026-08-24)
+
+- Replaced the large API-only warning card with the same polished email and six
+  persona-card layout used by the local demo, matching the requested deployed
+  appearance.
+- Kept `DEMO_MODE=false` and did not register the passwordless credentials
+  provider in Production. When a preview control is used, the page stays on
+  `/signin` and explains inline that browser access activates when Microsoft
+  Entra ID is connected.
+- Added focused source-contract coverage proving that the Production preview is
+  present while the real demo provider remains gated by `config.demoMode`.
+- Focused sign-in/production-environment tests passed: 2 files, 18/18 tests.
+  TypeScript, zero-warning lint, the optimized Production build, diff checks,
+  and CodeGraph verification passed.
+- Local Production-mode browser verification matched the requested layout.
+  Live Production verification found six persona cards, no API-only warning,
+  safe inline preview behavior, health 200, and no recent error/warning logs.
+- Runtime commit `0b68834` was pushed to `production-showcase-login` and
+  GitHub `main`. Vercel deployment
+  `dpl_LWNhjn1Pkqh3RvKEs49DP3HxdxVB` reached Ready at the canonical URL.
+- No environment setting, provider credential, API authentication behavior,
+  package, schema, migration, database row, or secret was changed.
+
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
 **Data driver: `DATA_DRIVER=prisma` backed by Neon PostgreSQL (cloud).**
@@ -638,6 +662,7 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   passed.
 - Focused Phase 14 OpenAPI/API-key/external-integration tests: 3 files, 16/16
   passed.
+- Focused Production sign-in/environment tests: 2 files, 18/18 passed.
 - Last complete regression baseline (Phase 13): 27 files, 207/207 passed.
 - Phase 15 full regression suite: not started; explicit approval is required.
 - Prisma validation: passed.
@@ -671,6 +696,10 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   `README.md`.
 - Focused contract coverage: `tests/openapi.test.ts`.
 - Handoff: `docs/IMPLEMENTATION_STATUS.md`.
+
+## Post-Phase 14 Adjustment Files
+- Sign-in presentation: `src/app/signin/SignInClient.tsx`.
+- Focused security/presentation coverage: `tests/signin.test.ts`.
 
 ## Remaining Work
 - Phase 15 — Complete regression testing
