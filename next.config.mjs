@@ -12,10 +12,14 @@ const securityHeaders = [
   },
 ];
 
+const isVercelBuild = process.env.VERCEL === "1";
+
 const nextConfig = {
   reactStrictMode: true,
-  // Standalone output for a minimal production Docker image.
-  output: "standalone",
+  // Standalone output is for the minimal Docker image. Vercel supplies its own
+  // Next.js build adapter, and Next.js 16.3 currently omits a trace file that
+  // standalone finalization expects when that adapter is active.
+  output: isVercelBuild ? undefined : "standalone",
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
