@@ -4,15 +4,14 @@
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
 
 ## Current Phase
-Phase 13 — External integration testing **COMPLETE (2026-08-24)**
+Phase 14 — OpenAPI and integration documentation **COMPLETE (2026-08-24)**
 
 The verified release is live at https://netlink-support.vercel.app from GitHub
-`main`; Phase 13 runtime application code was finalized in commit `171eb8a`.
-The complete external flow was proven against Production: authenticated ticket
-create/read/update/message/list/pagination operations persisted through Prisma
-to Neon, and the same ticket appeared correctly in the existing local UI
-connected to that database. The controlled test ticket was then soft-deleted
-and every temporary verification key was revoked.
+`main`; Phase 14 runtime application code was finalized in commit `3a6b602`.
+The protected OpenAPI 3.1 contract and external developer guide now accurately
+cover the Production API's authentication, permissions, tickets, messages,
+pagination, errors, health, API-key administration, rate limits, and supported
+same-origin/backend-to-backend access model.
 
 ## Completed Phases
 - Phase 0 — Pre-flight verification
@@ -29,6 +28,7 @@ and every temporary verification key was revoked.
 - Phase 11 — Production database migration (executed and verified)
 - Phase 12 — Production deployment (released and live-verified)
 - Phase 13 — External integration testing (production end-to-end verified)
+- Phase 14 — OpenAPI and integration documentation (released and verified)
 
 Previously reported phases requiring remediation have now been re-verified.
 
@@ -530,6 +530,73 @@ real Neon database.
   local demo-auth application connected to the same Production Neon data; the
   hosted M2M API leg used the real Production URL throughout.
 
+## Phase 14 OpenAPI and Integration Documentation — COMPLETE (2026-08-24)
+
+### Implemented
+
+- Replaced the partial API description with an OpenAPI 3.1 contract versioned
+  `2.0.0`, using the canonical Production base URL plus a relative current-
+  origin server for controlled local use.
+- Documented bearer and `x-api-key` authentication, the same-origin session
+  alternative, endpoint-level RBAC requirements, tickets, ticket messages,
+  pagination and sorting, health, API-key administration, standard envelopes,
+  error responses, and relevant 400/401/403/404/413/429 outcomes.
+- Documented message retrieval accurately through `GET /tickets/{id}` because
+  the API has no separate message-list endpoint.
+- Added reusable schemas for tickets, messages, page metadata, API keys,
+  creation/update inputs, envelopes, health, and errors. The API-key creation
+  response marks the one-time full secret as read-only.
+- Protected `GET /api/v1/openapi.json` with the shared `ticket.read` permission
+  guard. Missing, malformed, unknown, expired, and revoked keys return 401;
+  valid authenticated identities without the permission return 403.
+- Moved API-key list/create/revoke routes onto the shared `admin` guard so they
+  preserve the same 401-versus-403 contract as the rest of the external API.
+- Added `docs/EXTERNAL_API_GUIDE.md` with the Production base URL, safe API-key
+  bootstrap/setup, permissions, complete curl and JavaScript ticket workflows,
+  pagination, error handling, rate limits, CORS/origin guidance, health, and
+  OpenAPI download instructions. All examples use placeholders, never secrets.
+- Linked the external developer guide from the README and added focused
+  contract tests that also scan the new documentation for secret-shaped data.
+
+### Verification
+
+- Focused Phase 14/API-key/external-integration tests passed: 3 files, 16/16
+  tests.
+- TypeScript passed. ESLint passed with zero warnings.
+- The optimized Next.js 16.3.2 Production build passed; the protected OpenAPI
+  route is emitted dynamically.
+- Local route checks confirmed the contract is served to an authorized demo
+  actor and that a fake presented key receives 401 from both the OpenAPI and
+  API-key administration routes.
+- Production runtime commit `3a6b602` was pushed to both
+  `phase14-openapi-documentation` and GitHub `main`. Vercel deployment
+  `dpl_FYy3NrqBewYmnn78FgYfWTv7CjUi` reached Ready and serves the canonical
+  URL. Live checks returned health 200, unauthenticated OpenAPI 401, fake-key
+  OpenAPI 401, and fake-key API-key administration 401.
+- Recent Production error and warning log queries returned no records.
+- CodeGraph was used before and after the change to trace the documented auth,
+  permission, ticket, message, pagination, and API-key paths.
+- Diff whitespace checks and a Phase 14 artifact scan passed; no real secret,
+  package, schema, migration, seed, database write, or cleanup was introduced.
+- The full 27-file/207-test suite was intentionally not repeated because the
+  master plan reserves complete regression testing for approval-gated Phase 15.
+  Phase 13 remains the most recent completed full-suite baseline.
+
+### Production integration notes
+
+- Production remains intentionally API-key-only while Microsoft Entra ID is
+  deferred, and attachment operations remain disabled until Azure Blob is
+  configured.
+- Browser-direct cross-origin integration is not supported. External systems
+  should call the API backend-to-backend over HTTPS without an `Origin` header.
+- Rate limiting is currently per process/edge isolate: 200 requests/minute/IP
+  at the API gateway, 60 ticket creates/minute/IP, and 10 API-key creates/
+  minute/IP. Responses do not currently include `Retry-After` or quota headers.
+- Vercel Preview builds remain unavailable because core credentials exist only
+  in the approved Production environment; the GitHub `main` Production build
+  is Ready. GitHub Actions remains blocked by the repository owner's billing
+  lock.
+
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
 **Data driver: `DATA_DRIVER=prisma` backed by Neon PostgreSQL (cloud).**
@@ -541,6 +608,9 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - **RBAC Identity Mapping**: API keys act with their assigned role (`agent`, `requester`, etc.) rather than a specific user, enabling robust integration boundaries.
 - **Intake Webhook (`/api/v1/intake`)**: External monitoring tools can file P1 incidents. Successfully mapped a critical `alert` payload to `impact: high` / `urgency: high` and linked it directly to a CMDB CI (`PROD-01 App Server`).
 - **REST Surface**: General endpoints (e.g. `GET /api/v1/tickets`, `POST /api/v1/tickets`) successfully authorize via API key and return correct datasets constrained by the key's tenant.
+- **Published contract**: The protected OpenAPI 3.1 document at
+  `/api/v1/openapi.json` and `docs/EXTERNAL_API_GUIDE.md` describe the verified
+  Production integration surface, permissions, examples, and limitations.
 - **Live verification**: Production passed the complete 200/401/403
   authentication matrix plus create/get/update/message/list/pagination. The
   created ticket persisted to Neon, appeared in the existing UI, and was then
@@ -566,16 +636,20 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Focused Phase 11 production-migration tests: 3/3 passed.
 - Focused Phase 13 external-integration and related authorization tests: 61/61
   passed.
-- Tests: 27 files, 207/207 passed.
+- Focused Phase 14 OpenAPI/API-key/external-integration tests: 3 files, 16/16
+  passed.
+- Last complete regression baseline (Phase 13): 27 files, 207/207 passed.
+- Phase 15 full regression suite: not started; explicit approval is required.
 - Prisma validation: passed.
 - Migration status: 2/2 applied; database schema is up to date.
 - JSON source-ID preservation: passed; 275 checked, 0 missing.
 - Production build: passed on Next.js 16.3.2 without warnings.
 - Lint: passed with zero warnings.
 - Production dependency audit: 0 vulnerabilities.
-- Hosted Vercel build: passed for Phase 13 runtime application commit
-  `171eb8a`.
+- Hosted Vercel build: passed for Phase 14 runtime application commit
+  `3a6b602`.
 - Live Production API/database/UI external-integration workflow: passed.
+- Live Phase 14 health and protected-route authentication checks: passed.
 
 ## Known Issues
 - `admin@netlink.com` resolves as `agent` role, not `tenant_admin` (design-correct, not a bug)
@@ -585,29 +659,31 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   Controlled UI verification uses local demo authentication against the same
   Neon database.
 - GitHub Actions jobs are blocked by an account billing lock.
+- Vercel Preview builds lack the Production-only core secrets and fail the
+  intentional environment preflight; GitHub `main` Production is Ready.
 
 ## Files Changed in Latest Phase
-- Authentication and authorization: `src/server/context.ts`,
-  `src/server/guards.ts`, and `src/server/auth/rbac.ts`.
-- Ticket API permission enforcement: `src/app/api/v1/tickets/route.ts`,
-  `src/app/api/v1/tickets/[id]/messages/route.ts`, and
-  `src/app/api/v1/me/route.ts`.
-- Regression coverage: `tests/externalIntegration.test.ts` and
-  `tests/itil.test.ts`.
+- OpenAPI contract and credential guard:
+  `src/app/api/v1/openapi.json/route.ts`.
+- API-key administration guards: `src/app/api/v1/api-keys/route.ts` and
+  `src/app/api/v1/api-keys/[id]/route.ts`.
+- External developer documentation: `docs/EXTERNAL_API_GUIDE.md` and
+  `README.md`.
+- Focused contract coverage: `tests/openapi.test.ts`.
 - Handoff: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Remaining Work
-- Phase 14 — OpenAPI + integration documentation
 - Phase 15 — Complete regression testing
 - Phase 16 — Final CodeGraph audit
 
 ## Next Phase
-Phase 14 — OpenAPI and integration documentation. Await explicit approval.
-Do not begin Phase 14 until the user approves it.
+Phase 15 — Complete regression testing. Await explicit approval.
+Do not begin Phase 15 until the user approves it.
 
 ## Instructions for Next Agent
-Read this file and the master prompt first. Phase 13 is complete at
+Read this file and the master prompt first. Phase 14 is complete at
 `https://netlink-support.vercel.app`; runtime application code was finalized in
-GitHub commit `171eb8a`. Do not repeat integration writes, restore the
-soft-deleted test ticket, or rotate secrets. Continue only after explicit Phase
-14 approval. Execute only Phase 14, update this handoff, report, and STOP.
+GitHub commit `3a6b602`. Do not repeat integration writes, restore the
+soft-deleted Phase 13 test ticket, rotate secrets, or expose credentials.
+Continue only after explicit Phase 15 approval. Execute only Phase 15, update
+this handoff, report, and STOP.
