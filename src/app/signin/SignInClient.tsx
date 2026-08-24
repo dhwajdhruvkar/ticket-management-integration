@@ -12,8 +12,9 @@ import { signIn } from "next-auth/react";
 // Right: focused CTA hierarchy. The server page passes which providers exist:
 //   - ssoEnabled  -> "Sign in with Microsoft" (Entra ID)
 //   - demoMode    -> passwordless email sign-in + demo persona cards
-// In production mode with SSO unset, an operator notice explains what to
-// configure instead of rendering buttons that would fail.
+// With no Production browser provider, the same polished credential card is a
+// visual preview. Its controls explain that Entra is deferred and never call
+// the absent passwordless provider.
 // =============================================================================
 
 interface DemoUser {
@@ -61,7 +62,7 @@ function subheading(ssoEnabled: boolean, demoMode: boolean): string {
   }
   if (ssoEnabled) return "Sign in with your Microsoft work account to continue.";
   if (demoMode) return "Pick a demo identity to explore the workspace.";
-  return "Authentication is required to continue.";
+  return "Pick a demo identity to explore the workspace.";
 }
 
 export default function SignInClient({
@@ -73,8 +74,17 @@ export default function SignInClient({
 }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const showCredentialPanel = demoMode || !ssoEnabled;
 
   async function demoSignIn(value: string, key: string) {
+    if (!demoMode) {
+      setAuthNotice(
+        "This is a preview of the sign-in experience. Browser access will activate when Microsoft Entra ID is connected."
+      );
+      return;
+    }
+    setAuthNotice(null);
     setBusy(key);
     try {
       await signIn("demo", { email: value, callbackUrl: "/" });
@@ -84,6 +94,7 @@ export default function SignInClient({
   }
 
   async function ssoSignIn() {
+    setAuthNotice(null);
     setBusy("sso");
     try {
       await signIn("microsoft-entra-id", { callbackUrl: "/" });
@@ -163,21 +174,7 @@ export default function SignInClient({
             </button>
           ) : null}
 
-          {!ssoEnabled && !demoMode ? (
-            <div className="signin-note" role="alert">
-              <strong>API-only deployment.</strong>
-              <p>
-                Browser sign-in is intentionally disabled while Microsoft Entra ID is
-                deferred. Integrations can continue with API keys. To enable UI access
-                later, configure{" "}
-                <code>AUTH_MICROSOFT_ENTRA_ID_ID</code>,{" "}
-                <code>AUTH_MICROSOFT_ENTRA_ID_SECRET</code> and{" "}
-                <code>AUTH_MICROSOFT_ENTRA_ID_ISSUER</code>, then restart the server.
-              </p>
-            </div>
-          ) : null}
-
-          {demoMode ? (
+          {showCredentialPanel ? (
             <>
               <div className="signin-divider">
                 <span>{ssoEnabled ? "OR CONTINUE WITH EMAIL" : "CONTINUE WITH EMAIL"}</span>
@@ -213,10 +210,17 @@ export default function SignInClient({
                   </button>
                 </div>
                 <p className="signin-help">
-                  Demo credentials — any seeded email works. In production, this is Entra ID
-                  only.
+                  {demoMode
+                    ? "Demo credentials — any seeded email works."
+                    : "Authentication preview — Microsoft Entra ID remains deferred."}
                 </p>
               </form>
+
+              {authNotice ? (
+                <p className="signin-preview-notice" role="status">
+                  {authNotice}
+                </p>
+              ) : null}
 
               <div className="signin-divider signin-divider-alt">
                 <span>QUICK DEMO IDENTITIES</span>
@@ -479,24 +483,6 @@ export default function SignInClient({
           align-items: center;
           justify-content: center;
         }
-        .signin-note {
-          border: 1px solid var(--warning-border);
-          background: var(--warning-bg);
-          color: var(--warning-fg);
-          border-radius: 12px;
-          padding: 0.85rem 1rem;
-          font-size: 0.85rem;
-          line-height: 1.55;
-        }
-        .signin-note p {
-          margin: 6px 0 0;
-        }
-        .signin-note code {
-          font-size: 0.78rem;
-          background: rgba(0, 0, 0, 0.06);
-          padding: 1px 4px;
-          border-radius: 4px;
-        }
         .signin-divider {
           position: relative;
           display: flex;
@@ -554,6 +540,16 @@ export default function SignInClient({
           font-size: 0.72rem;
           color: var(--muted);
           margin: 4px 0 0;
+        }
+        .signin-preview-notice {
+          border: 1px solid var(--info-border);
+          background: var(--info-bg);
+          color: var(--info-fg);
+          border-radius: 10px;
+          padding: 0.65rem 0.75rem;
+          font-size: 0.74rem;
+          line-height: 1.45;
+          margin: 12px 0 0;
         }
 
         .signin-personas {
