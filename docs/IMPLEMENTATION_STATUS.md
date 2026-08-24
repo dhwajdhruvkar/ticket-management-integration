@@ -4,16 +4,15 @@
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
 
 ## Current Phase
-Phase 14 — OpenAPI and integration documentation **COMPLETE (2026-08-24)**
+Phase 15 — Complete regression testing **COMPLETE (2026-08-24)**
 
 The verified release is live at https://netlink-support.vercel.app from GitHub
 `main`; Phase 14 API code was finalized in commit `3a6b602`, and the approved
 post-phase functional public-demo authentication adjustment is commit
 `559c345`.
-The protected OpenAPI 3.1 contract and external developer guide now accurately
-cover the Production API's authentication, permissions, tickets, messages,
-pagination, errors, health, API-key administration, rate limits, and supported
-same-origin/backend-to-backend access model.
+The complete 29-file regression suite and every required static, database, and
+build gate pass on the current public-demo Production release. No test was
+removed or weakened, and no genuine regression required a runtime fix.
 
 ## Completed Phases
 - Phase 0 — Pre-flight verification
@@ -31,6 +30,7 @@ same-origin/backend-to-backend access model.
 - Phase 12 — Production deployment (released and live-verified)
 - Phase 13 — External integration testing (production end-to-end verified)
 - Phase 14 — OpenAPI and integration documentation (released and verified)
+- Phase 15 — Complete regression testing (29 files, 217/217 tests verified)
 
 Previously reported phases requiring remediation have now been re-verified.
 
@@ -642,6 +642,29 @@ real Neon database.
   secret was changed. The only database writes were the expected sign-in audit
   events.
 
+## Phase 15 Complete Regression Test — COMPLETE (2026-08-24)
+
+- Ran the repository's complete existing Vitest suite through the actual
+  `npm test` package script: 29/29 files and 217/217 tests passed.
+- The passing suite covers API keys, authentication and RBAC, assignment and
+  triage, priority, SLA and pause behavior, automation, tamper-evident audit,
+  webhook security, email ingestion/sending/threading, AI and embeddings,
+  PrismaStore query construction, Production migration verification, REST API
+  behavior, pagination, CORS/origin controls, tenant isolation, attachments,
+  security hardening, public-demo sign-in, and the OpenAPI contract.
+- `npm run typecheck` passed, and `npm run lint` passed with zero warnings.
+- `npx prisma validate` passed. The read-only Neon migration check found 2/2
+  migrations applied and reported the Production database schema up to date.
+- `npm run build` passed on Next.js 16.3.2 and emitted the complete dynamic UI,
+  Auth.js, REST API, and webhook route surface.
+- Production environment and security rejection paths passed in their focused
+  automated coverage. The standalone preflight correctly rejects the local
+  development `.env`; it is intentionally validated with injected Production
+  variables by Vercel's `vercel-build` script during deployment.
+- No test was removed, skipped, or weakened. No genuine regression was found,
+  so no application, test, schema, migration, seed, package, credential, or
+  Production data change was required in Phase 15.
+
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
 **Data driver: `DATA_DRIVER=prisma` backed by Neon PostgreSQL (cloud).**
@@ -685,8 +708,7 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   passed.
 - Focused Production sign-in/environment tests: 2 files, 18/18 passed.
 - Focused functional public-demo/security tests: 5 files, 51/51 passed.
-- Last complete regression baseline (Phase 13): 27 files, 207/207 passed.
-- Phase 15 full regression suite: not started; explicit approval is required.
+- Complete Phase 15 regression suite: 29 files, 217/217 passed.
 - Prisma validation: passed.
 - Migration status: 2/2 applied; database schema is up to date.
 - JSON source-ID preservation: passed; 275 checked, 0 missing.
@@ -710,14 +732,8 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   intentional environment preflight; GitHub `main` Production is Ready.
 
 ## Files Changed in Latest Phase
-- OpenAPI contract and credential guard:
-  `src/app/api/v1/openapi.json/route.ts`.
-- API-key administration guards: `src/app/api/v1/api-keys/route.ts` and
-  `src/app/api/v1/api-keys/[id]/route.ts`.
-- External developer documentation: `docs/EXTERNAL_API_GUIDE.md` and
-  `README.md`.
-- Focused contract coverage: `tests/openapi.test.ts`.
-- Handoff: `docs/IMPLEMENTATION_STATUS.md`.
+- Phase 15 required no runtime or test change. Only this handoff file records
+  the completed regression evidence: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Post-Phase 14 Adjustment Files
 - Auth configuration and provider: `src/server/config.ts`, `src/auth.ts`,
@@ -731,17 +747,16 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   `tests/productionEnvironment.test.ts`, and `tests/openapi.test.ts`.
 
 ## Remaining Work
-- Phase 15 — Complete regression testing
 - Phase 16 — Final CodeGraph audit
 
 ## Next Phase
-Phase 15 — Complete regression testing. Await explicit approval.
-Do not begin Phase 15 until the user approves it.
+Phase 16 — Final CodeGraph audit. Await explicit approval.
+Do not begin Phase 16 until the user approves it.
 
 ## Instructions for Next Agent
 Read this file and the master prompt first. Phase 14 is complete at
 `https://netlink-support.vercel.app`; current runtime application code was
-finalized in GitHub commit `559c345`. Do not repeat integration writes, restore the
-soft-deleted Phase 13 test ticket, rotate secrets, or expose credentials.
-Continue only after explicit Phase 15 approval. Execute only Phase 15, update
-this handoff, report, and STOP.
+finalized in GitHub commit `559c345`; Phase 15 found no runtime regression.
+Do not repeat integration writes, restore the soft-deleted Phase 13 test
+ticket, rotate secrets, or expose credentials. Continue only after explicit
+Phase 16 approval. Execute only Phase 16, update this handoff, report, and STOP.
