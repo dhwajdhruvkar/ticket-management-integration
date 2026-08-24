@@ -69,7 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body suppressHydrationWarning>
         <SessionProvider session={session} refetchOnWindowFocus={false}>
-          <ThemeProvider>
+          <ThemeProvider initialTheme={theme}>
             <PersonaProvider>
               <ToastProvider>
                 <AppShell>{children}</AppShell>

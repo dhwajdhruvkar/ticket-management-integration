@@ -23,7 +23,7 @@ import { useTheme } from "@/components/Theme";
 import { PRIORITY_ORDER, priorityCode } from "@/shared/priority";
 import type { TicketPriority } from "@/server/domain/models";
 import { InfoHint, LabelWithHint, timeAgo } from "@/components/ui";
-import { PromptDialog } from "@/components/primitives";
+import { CloseButton, Modal, PromptDialog } from "@/components/primitives";
 import { customFieldHint, HINTS } from "@/lib/hints";
 
 // =============================================================================
@@ -1698,11 +1698,20 @@ function DepartmentsSection() {
   );
 }
 
+type OrganizationDraft = {
+  name: string;
+  brand: string;
+  isInternal: boolean;
+};
+
+const EMPTY_ORGANIZATION: OrganizationDraft = { name: "", brand: "", isInternal: false };
+
 function OrganizationsSection() {
   const toast = useToast();
   const [orgs, setOrgs] = useState<TenantRow[]>([]);
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
+  const [editing, setEditing] = useState<TenantRow | "new" | null>(null);
+  const [draft, setDraft] = useState<OrganizationDraft>(EMPTY_ORGANIZATION);
+  const [discarding, setDiscarding] = useState<TenantRow | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -1712,17 +1721,69 @@ function OrganizationsSection() {
     load();
   }, [load]);
 
-  async function create() {
-    if (!name.trim()) return;
+  function startCreate() {
+    setDraft(EMPTY_ORGANIZATION);
+    setEditing("new");
+  }
+
+  function startEdit(organization: TenantRow) {
+    setDraft({
+      name: organization.name,
+      brand: organization.brand ?? "",
+      isInternal: organization.isInternal,
+    });
+    setEditing(organization);
+  }
+
+  function closeEditor() {
+    if (busy) return;
+    setEditing(null);
+    setDraft(EMPTY_ORGANIZATION);
+  }
+
+  async function save() {
+    const name = draft.name.trim();
+    if (!editing || !name) return;
     setBusy(true);
     try {
-      await apiSend("/organizations", "POST", { name: name.trim() });
-      toast.success({ title: "Organization created", description: name.trim() });
-      setName("");
-      setOpen(false);
+      const payload = {
+        name,
+        brand: draft.brand.trim() || null,
+        isInternal: draft.isInternal,
+      };
+      if (editing === "new") {
+        await apiSend("/organizations", "POST", payload);
+        toast.success({ title: "Organization created", description: name });
+      } else {
+        await apiSend(`/organizations/${editing.id}`, "PATCH", payload);
+        toast.success({ title: "Organization updated", description: name });
+      }
+      setEditing(null);
+      setDraft(EMPTY_ORGANIZATION);
       load();
     } catch (err) {
-      toast.error({ title: "Could not create organization", description: err instanceof Error ? err.message : String(err) });
+      toast.error({
+        title: editing === "new" ? "Could not create organization" : "Could not update organization",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function discard() {
+    if (!discarding) return;
+    setBusy(true);
+    try {
+      await apiSend(`/organizations/${discarding.id}`, "DELETE");
+      toast.info({ title: "Organization discarded", description: discarding.name });
+      setDiscarding(null);
+      load();
+    } catch (err) {
+      toast.error({
+        title: "Could not discard organization",
+        description: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setBusy(false);
     }
@@ -1734,38 +1795,185 @@ function OrganizationsSection() {
         <SectionHead
           icon={<OrgIcon />}
           title="Organizations"
-          hint="Provision additional organizations (tenants)."
+          hint="Create and manage isolated tenants on this deployment."
           info={HINTS.organizations}
         />
-        <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setOpen((o) => !o)}>
-          {open ? "Close" : "+ New organization"}
+        <button
+          type="button"
+          className="btn btn-primary"
+          style={{ flexShrink: 0 }}
+          onClick={startCreate}
+          disabled={busy || editing === "new"}
+        >
+          + New organization
         </button>
       </div>
-      {open ? (
-        <div className="panel-2 anim-fade-up" style={{ padding: "0.9rem", marginBottom: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <input className="input" placeholder="Organization name" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: "1 1 220px" }} />
-          <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !name.trim()}>
-            {busy ? "Creating…" : "Create"}
-          </button>
-        </div>
+
+      {editing ? (
+        <form
+          className="panel-2 anim-fade-up"
+          style={{ padding: "1rem", marginBottom: 12 }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save();
+          }}
+        >
+          <div style={{ fontSize: "0.88rem", fontWeight: 750, marginBottom: 10 }}>
+            {editing === "new" ? "Create organization" : `Edit ${editing.name}`}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <label className="label" style={{ display: "grid", gap: 6 }}>
+              Organization name
+              <input
+                className="input"
+                autoFocus
+                required
+                maxLength={120}
+                placeholder="e.g. Acme Support"
+                value={draft.name}
+                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              />
+            </label>
+            <label className="label" style={{ display: "grid", gap: 6 }}>
+              Display brand <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+              <input
+                className="input"
+                maxLength={120}
+                placeholder="Defaults to the organization name"
+                value={draft.brand}
+                onChange={(event) => setDraft((current) => ({ ...current, brand: event.target.value }))}
+              />
+            </label>
+          </div>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 9,
+              marginTop: 12,
+              cursor: "pointer",
+              fontSize: "0.8rem",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={draft.isInternal}
+              onChange={(event) => setDraft((current) => ({ ...current, isInternal: event.target.checked }))}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <strong>Internal organization</strong>
+              <span className="muted" style={{ display: "block", marginTop: 2 }}>
+                Protected platform tenants cannot be discarded.
+              </span>
+            </span>
+          </label>
+          <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 14 }}>
+            <button type="button" className="btn btn-ghost" onClick={closeEditor} disabled={busy}>
+              {editing === "new" ? "Discard draft" : "Cancel edit"}
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy || !draft.name.trim()}>
+              {busy ? "Saving…" : editing === "new" ? "Create organization" : "Save changes"}
+            </button>
+          </div>
+        </form>
       ) : null}
+
       {orgs.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.84rem", margin: 0 }}>No organizations yet.</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {orgs.map((o) => (
-            <div key={o.id} className="panel-2 flex items-center justify-between" style={{ padding: "0.6rem 0.8rem", gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>{o.name}</div>
-                <div className="muted" style={{ fontSize: "0.72rem" }}>
-                  {o.slug}
-                  {o.isInternal ? " · internal" : ""}
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {orgs.map((organization) => (
+            <div
+              key={organization.id}
+              className="panel-2 flex items-center justify-between"
+              style={{ padding: "0.7rem 0.8rem", gap: 12 }}
+            >
+              <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 9,
+                    background: "var(--brand-50)",
+                    color: "var(--brand-700)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <OrgIcon />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.86rem", fontWeight: 700 }}>{organization.name}</span>
+                    {organization.isInternal ? (
+                      <span className="badge" style={{ fontSize: "0.64rem", background: "var(--surface-3)" }}>
+                        Internal
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.71rem", marginTop: 2 }}>
+                    {organization.brand && organization.brand !== organization.name ? `${organization.brand} · ` : ""}
+                    Tenant ID: <span className="mono">{organization.slug}</span>
+                  </div>
                 </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
+                  onClick={() => startEdit(organization)}
+                  disabled={busy}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
+                  onClick={() => setDiscarding(organization)}
+                  disabled={busy || organization.isInternal}
+                  title={organization.isInternal ? "Internal organizations are protected." : "Discard this empty organization"}
+                >
+                  Discard
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      <Modal
+        open={discarding !== null}
+        onClose={() => {
+          if (!busy) setDiscarding(null);
+        }}
+        ariaLabel="Discard organization"
+        maxWidth={480}
+      >
+        <div style={{ padding: "1.1rem 1.2rem 1.2rem" }}>
+          <div className="flex items-center justify-between" style={{ gap: 12, marginBottom: 6 }}>
+            <h2 style={{ fontSize: "1rem", fontWeight: 750, margin: 0 }}>Discard organization?</h2>
+            <CloseButton onClick={() => setDiscarding(null)} />
+          </div>
+          <p className="muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, margin: "0 0 8px" }}>
+            <strong style={{ color: "var(--text)" }}>{discarding?.name}</strong> will be removed permanently.
+            Only empty organizations can be discarded; organizations containing users, tickets, or settings are protected.
+          </p>
+          <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 16 }}>
+            <button type="button" className="btn btn-ghost" onClick={() => setDiscarding(null)} disabled={busy}>
+              Keep organization
+            </button>
+            <button type="button" className="btn btn-danger" onClick={() => void discard()} disabled={busy}>
+              {busy ? "Discarding…" : "Discard organization"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }

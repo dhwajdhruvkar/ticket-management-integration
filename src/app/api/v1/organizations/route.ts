@@ -1,10 +1,12 @@
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import {
   fail,
   listOptionsFromPagination,
   ok,
   paginated,
+  parseBody,
   parsePagination,
-  readJson,
 } from "@/server/http";
 import { actorContext, isResponse, requirePermission } from "@/server/guards";
 import {
@@ -16,6 +18,12 @@ import type { TenantRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const CreateOrganizationSchema = z.object({
+  name: z.string().trim().min(1, 'name is required').max(120),
+  brand: z.string().trim().max(120).nullish(),
+  isInternal: z.boolean().optional(),
+});
 
 export async function GET(req: Request) {
   const ctx = await requirePermission(req, "admin");
@@ -44,7 +52,8 @@ export async function POST(req: Request) {
     return fail("Only a super admin can create organizations.", 403);
   }
 
-  const body = await readJson<{ name: string; brand?: string; isInternal?: boolean }>(req);
+  const body = await parseBody(req, CreateOrganizationSchema);
+  if (body instanceof NextResponse) return body;
   if (!body?.name?.trim()) return fail("name is required.");
   try {
     return ok(await createOrganization(body, actor.name), { status: 201 });
