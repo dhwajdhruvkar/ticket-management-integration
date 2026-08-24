@@ -393,7 +393,7 @@ const CORE_SCHEMAS = {
         properties: {
           authentication: {
             type: "string",
-            enum: ["demo", "entra", "api-key-only"],
+            enum: ["demo", "public-demo", "entra", "api-key-only"],
           },
           attachmentStorage: {
             type: "string",

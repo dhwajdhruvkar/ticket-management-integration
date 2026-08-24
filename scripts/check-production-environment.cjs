@@ -108,6 +108,24 @@ function validateEntra(env, errors) {
   }
 }
 
+function validatePublicDemoAuth(env, errors) {
+  const raw = value(env, "PUBLIC_DEMO_AUTH");
+  if (raw && raw !== "true" && raw !== "false") {
+    errors.push("PUBLIC_DEMO_AUTH must be explicitly true or false when provided.");
+    return;
+  }
+  if (
+    raw === "true" &&
+    (value(env, "AUTH_MICROSOFT_ENTRA_ID_ID") ||
+      value(env, "AUTH_MICROSOFT_ENTRA_ID_SECRET") ||
+      value(env, "AUTH_MICROSOFT_ENTRA_ID_ISSUER"))
+  ) {
+    errors.push(
+      "PUBLIC_DEMO_AUTH must be false when Microsoft Entra ID is configured."
+    );
+  }
+}
+
 function validateAzureStorage(env, errors) {
   const raw = value(env, "AZURE_STORAGE_CONNECTION_STRING");
   if (!raw) {
@@ -182,6 +200,7 @@ function validateProductionEnvironmentEnv(env) {
   }
 
   validateEntra(env, errors);
+  validatePublicDemoAuth(env, errors);
   validateAzureStorage(env, errors);
 
   return { ok: errors.length === 0, errors };
@@ -197,7 +216,9 @@ function main() {
   }
   const authMode = value(process.env, "AUTH_MICROSOFT_ENTRA_ID_ID")
     ? "entra"
-    : "api-key-only";
+    : value(process.env, "PUBLIC_DEMO_AUTH") === "true"
+      ? "public-demo"
+      : "api-key-only";
   const attachmentStorage = value(process.env, "AZURE_STORAGE_CONNECTION_STRING")
     ? "azure"
     : "disabled";

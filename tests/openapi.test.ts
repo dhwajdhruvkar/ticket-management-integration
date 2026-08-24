@@ -70,6 +70,14 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
       expect(schemas).toHaveProperty(name);
     }
 
+    const healthProperties = object(object(schemas.HealthResponse).properties);
+    const profileProperties = object(
+      object(healthProperties.productionProfile).properties
+    );
+    expect(
+      object(profileProperties.authentication).enum as Array<string>
+    ).toContain("public-demo");
+
     const apiKeySchema = object(schemas.ApiKey);
     expect(object(apiKeySchema.properties)).not.toHaveProperty("keyHash");
 

@@ -3,6 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
+import {
+  isPublicDemoEmail,
+  PUBLIC_DEMO_USERS,
+  type PublicDemoUser,
+} from "@/shared/publicDemoUsers";
 
 // =============================================================================
 // SignIn — split-screen entrance (client half).
@@ -12,26 +17,11 @@ import { signIn } from "next-auth/react";
 // Right: focused CTA hierarchy. The server page passes which providers exist:
 //   - ssoEnabled  -> "Sign in with Microsoft" (Entra ID)
 //   - demoMode    -> passwordless email sign-in + demo persona cards
+//   - publicDemoAuth -> the approved six-user Production demo allowlist
 // With no Production browser provider, the same polished credential card is a
 // visual preview. Its controls explain that Entra is deferred and never call
 // the absent passwordless provider.
 // =============================================================================
-
-interface DemoUser {
-  email: string;
-  name: string;
-  role: string;
-  tint: "brand" | "info" | "warning" | "muted" | "violet" | "success";
-}
-
-const DEMO_USERS: DemoUser[] = [
-  { email: "vikram.rao@netlink.com", name: "Vikram Rao", role: "Platform admin", tint: "violet" },
-  { email: "priya.sharma@netlink.com", name: "Priya Sharma", role: "Tenant admin", tint: "brand" },
-  { email: "meera.nair@netlink.com", name: "Meera Nair", role: "Manager", tint: "warning" },
-  { email: "arjun.mehta@netlink.com", name: "Arjun Mehta", role: "Service desk agent", tint: "info" },
-  { email: "anita.desai@netlink.com", name: "Anita Desai", role: "HR operations", tint: "success" },
-  { email: "dana.lee@netlink.com", name: "Dana Lee", role: "Requester", tint: "muted" },
-];
 
 const FEATURES = [
   { title: "AI triage on every intake", body: "Auto-classification, RAG resolution, and safety guardrails." },
@@ -39,7 +29,7 @@ const FEATURES = [
   { title: "Live SLA & CSAT", body: "Staged escalation, at-risk warnings, and reporting out of the box." },
 ];
 
-const TINT_CLASSES: Record<DemoUser["tint"], { bg: string; fg: string; border: string }> = {
+const TINT_CLASSES: Record<PublicDemoUser["tint"], { bg: string; fg: string; border: string }> = {
   brand: { bg: "var(--brand-50)", fg: "var(--brand-700)", border: "var(--brand-100)" },
   info: { bg: "var(--info-bg)", fg: "var(--info-fg)", border: "var(--info-border)" },
   warning: { bg: "var(--warning-bg)", fg: "var(--warning-fg)", border: "var(--warning-border)" },
@@ -56,31 +46,42 @@ function initialsOf(name: string): string {
     .slice(0, 2);
 }
 
-function subheading(ssoEnabled: boolean, demoMode: boolean): string {
-  if (ssoEnabled && demoMode) {
+function subheading(
+  ssoEnabled: boolean,
+  credentialLoginEnabled: boolean
+): string {
+  if (ssoEnabled && credentialLoginEnabled) {
     return "Sign in with your Microsoft account, or pick a demo identity to explore the workspace.";
   }
   if (ssoEnabled) return "Sign in with your Microsoft work account to continue.";
-  if (demoMode) return "Pick a demo identity to explore the workspace.";
   return "Pick a demo identity to explore the workspace.";
 }
 
 export default function SignInClient({
   ssoEnabled,
   demoMode,
+  publicDemoAuth,
 }: {
   ssoEnabled: boolean;
   demoMode: boolean;
+  publicDemoAuth: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
-  const showCredentialPanel = demoMode || !ssoEnabled;
+  const credentialLoginEnabled = demoMode || publicDemoAuth;
+  const showCredentialPanel = credentialLoginEnabled || !ssoEnabled;
 
   async function demoSignIn(value: string, key: string) {
-    if (!demoMode) {
+    if (!credentialLoginEnabled) {
       setAuthNotice(
         "This is a preview of the sign-in experience. Browser access will activate when Microsoft Entra ID is connected."
+      );
+      return;
+    }
+    if (publicDemoAuth && !isPublicDemoEmail(value)) {
+      setAuthNotice(
+        "Public demo access is limited to the six identities shown below."
       );
       return;
     }
@@ -158,7 +159,9 @@ export default function SignInClient({
         <div className="signin-card anim-fade-up">
           <div className="signin-card-head">
             <h2 className="signin-card-title">Welcome back</h2>
-            <p className="signin-card-sub">{subheading(ssoEnabled, demoMode)}</p>
+            <p className="signin-card-sub">
+              {subheading(ssoEnabled, credentialLoginEnabled)}
+            </p>
           </div>
 
           {ssoEnabled ? (
@@ -212,7 +215,9 @@ export default function SignInClient({
                 <p className="signin-help">
                   {demoMode
                     ? "Demo credentials — any seeded email works."
-                    : "Authentication preview — Microsoft Entra ID remains deferred."}
+                    : publicDemoAuth
+                      ? "Public demo access — choose one of the six approved identities."
+                      : "Authentication preview — Microsoft Entra ID remains deferred."}
                 </p>
               </form>
 
@@ -227,7 +232,7 @@ export default function SignInClient({
               </div>
 
               <div className="signin-personas stagger">
-                {DEMO_USERS.map((u) => {
+                {PUBLIC_DEMO_USERS.map((u) => {
                   const tint = TINT_CLASSES[u.tint];
                   const key = u.email;
                   const loading = busy === key;

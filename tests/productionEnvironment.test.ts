@@ -61,6 +61,7 @@ describe("Phase 10 production environment", () => {
     expect(resolveAuthMode(false, false)).toBe("api-key-only");
     expect(resolveAuthMode(false, true)).toBe("entra");
     expect(resolveAuthMode(true, false)).toBe("demo");
+    expect(resolveAuthMode(false, false, true)).toBe("public-demo");
     expect(resolveAttachmentStorage(false, false)).toBe("disabled");
     expect(resolveAttachmentStorage(false, true)).toBe("azure");
     expect(resolveAttachmentStorage(true, false)).toBe("local");
@@ -93,6 +94,29 @@ describe("Phase 10 production environment", () => {
         AZURE_STORAGE_CONNECTION_STRING: undefined,
       })
     ).toEqual({ ok: true, errors: [] });
+  });
+
+  it("accepts explicit public demo auth without Entra", () => {
+    expect(
+      validate({
+        PUBLIC_DEMO_AUTH: "true",
+        AUTH_MICROSOFT_ENTRA_ID_ID: undefined,
+        AUTH_MICROSOFT_ENTRA_ID_SECRET: undefined,
+        AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
+      })
+    ).toEqual({ ok: true, errors: [] });
+  });
+
+  it("rejects malformed public demo auth and combining it with Entra", () => {
+    const malformed = validate({ PUBLIC_DEMO_AUTH: "yes" });
+    expect(malformed.ok).toBe(false);
+    expect(malformed.errors.join(" ")).toContain("PUBLIC_DEMO_AUTH");
+
+    const combined = validate({ PUBLIC_DEMO_AUTH: "true" });
+    expect(combined.ok).toBe(false);
+    expect(combined.errors.join(" ")).toContain(
+      "PUBLIC_DEMO_AUTH must be false"
+    );
   });
 
   it("allows the migration-only direct URL to be absent at app startup", () => {
@@ -207,6 +231,7 @@ describe("Phase 10 production environment", () => {
     expect(source).toContain(
       "# AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0"
     );
+    expect(source).toContain("# PUBLIC_DEMO_AUTH=false");
     expect(source).toContain("# AZURE_STORAGE_CONNECTION_STRING=");
     expect(source).not.toMatch(/(?:GROQ|GEMINI|SENTRY|WEBHOOK|REDIS|ALLOWED_ORIGINS)=/);
   });

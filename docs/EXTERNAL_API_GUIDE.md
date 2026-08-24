@@ -446,7 +446,7 @@ GET /health requires no authentication:
 curl "$NETLINK_BASE_URL/health"
 ~~~
 
-Check productionProfile and features before using optional capabilities. The current production profile is API-key-only with attachment storage disabled until Entra ID and Azure Blob credentials are configured.
+Check productionProfile and features before using optional capabilities. The current production profile reports `public-demo` browser authentication for the six approved showcase identities. External integrations still authenticate with API keys. Attachment storage remains disabled until Azure Blob credentials are configured; Microsoft Entra ID is deferred.
 
 ## Download the OpenAPI document
 

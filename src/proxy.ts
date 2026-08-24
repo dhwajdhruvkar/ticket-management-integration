@@ -27,6 +27,8 @@ const entraConfigured = !!(
   process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER
 );
 const DEMO_MODE = demoModeEnv ? demoModeEnv === "true" : !entraConfigured;
+const PUBLIC_DEMO_AUTH =
+  process.env.PUBLIC_DEMO_AUTH?.trim() === "true" && !entraConfigured;
 
 const { auth } = NextAuth(authConfig);
 
@@ -91,6 +93,18 @@ function handleApiV1Request(
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
+  if (pathname === "/api/auth/callback/demo" && PUBLIC_DEMO_AUTH) {
+    const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    const clientIp = fwd || req.headers.get("x-real-ip") || "local";
+    if (!edgeRateLimit(`public-demo-auth:${clientIp}`, 30, 60_000)) {
+      return NextResponse.json(
+        { ok: false, error: "Too many sign-in attempts. Please try again shortly." },
+        { status: 429 }
+      );
+    }
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/v1")) {
     return handleApiV1Request(req);
   }
@@ -112,5 +126,6 @@ export const config = {
     // would bounce anyone who wants to read the terms before agreeing to them.
     "/((?!api|_next/static|_next/image|favicon\\.ico|signin|legal).*)",
     "/api/v1/:path*",
+    "/api/auth/callback/demo",
   ],
 };

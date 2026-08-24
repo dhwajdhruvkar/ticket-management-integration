@@ -155,7 +155,11 @@ own tickets, writes need agent+, approvals need manager+.
 **Demo vs production mode** (`DEMO_MODE`, defaults off once Entra ID is
 configured): demo mode keeps the zero-infra conveniences — passwordless demo
 sign-in and the `x-actor` header for headless testing. Production mode disables
-both; `/api/v1` then requires a session cookie or an **API key**
+both by default. The explicit `PUBLIC_DEMO_AUTH=true` showcase option restores
+passwordless browser sign-in only for the six identities displayed on
+`/signin`; it does not restore `x-actor`, tenant headers, open webhooks, or
+other demo-mode fallbacks. Disable it when Entra is configured. In every
+Production profile, `/api/v1` requires a session cookie or an **API key**
 (`Authorization: Bearer nlk_…`, minted per-integration in Settings → API keys,
 SHA-256-hashed at rest, revocable, audited), and unsigned webhooks are
 rejected.

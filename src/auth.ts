@@ -6,15 +6,16 @@ import { authConfig } from "./auth.config";
 import { config } from "@/server/config";
 import { getStore } from "@/server/data";
 import { logger } from "@/server/observability/logger";
+import { canUsePasswordlessCredential } from "@/shared/publicDemoUsers";
 
 // =============================================================================
 // Full (Node) auth.
 //
-// - Credentials provider: demo sign-in by email against seeded users (no
-//   password) so the workspace is usable with zero identity infrastructure.
+// - Credentials provider: passwordless local demo sign-in, plus the explicitly
+//   approved six-user public demo allowlist when PUBLIC_DEMO_AUTH=true.
 // - Microsoft Entra ID: optional production UI SSO, enabled automatically when
 //   the complete AUTH_MICROSOFT_* trio is present. Without it, production has
-//   no browser provider and remains API-key-only. New SSO users are
+//   no browser provider unless public demo auth is explicitly enabled. New SSO users are
 //   auto-provisioned as requesters in the internal tenant.
 // =============================================================================
 
@@ -38,21 +39,40 @@ const demoAuthSecret =
   authRuntime.__netlinkDemoAuthSecret ?? randomBytes(32).toString("base64url");
 authRuntime.__netlinkDemoAuthSecret = demoAuthSecret;
 
-// The passwordless demo provider only exists in demo mode. Production either
-// signs in through Entra or registers no UI provider (API-key-only profile).
-if (config.demoMode) {
+// PUBLIC_DEMO_AUTH does not enable the other DEMO_MODE conveniences. It only
+// exposes this provider, and authorize() still enforces the shared six-email
+// allowlist and the internal tenant boundary.
+if (config.demoMode || config.publicDemoAuth) {
   providers.push(
     Credentials({
       id: "demo",
-      name: "Demo user",
+      name: config.publicDemoAuth ? "Public demo user" : "Demo user",
       credentials: { email: { label: "Email", type: "email" } },
       async authorize(creds) {
         const email = String(creds?.email ?? "").trim().toLowerCase();
-        if (!email) return null;
+        if (
+          !email ||
+          !canUsePasswordlessCredential(
+            email,
+            config.demoMode,
+            config.publicDemoAuth
+          )
+        ) {
+          return null;
+        }
         const store = await getStore();
         const users = await store.users.list();
         const user = users.find((u) => u.email.toLowerCase() === email && u.active);
         if (!user) return null;
+
+        if (config.publicDemoAuth && !config.demoMode) {
+          const tenants = await store.tenants.list();
+          const internalTenantIds = new Set(
+            tenants.filter((tenant) => tenant.isInternal).map((tenant) => tenant.id)
+          );
+          if (!internalTenantIds.has(user.tenantId)) return null;
+        }
+
         return { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId };
       },
     })

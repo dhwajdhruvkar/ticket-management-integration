@@ -7,21 +7,24 @@
 //   - no DATABASE_URL  -> in-memory/JSON store
 //   - no Azure OpenAI  -> hashed-embedding + offline template
 //   - no Redis         -> in-process job scheduler
-//   - no Entra ID      -> API-key-only access when demo mode is disabled
+//   - no Entra ID      -> explicit public demo auth or API-key-only access
 //   - no Azure Blob    -> local attachments in demo mode, disabled otherwise
 // This is what lets the production architecture run as a zero-infra demo.
 // =============================================================================
 
 export type DataDriver = "memory" | "prisma";
 export type EmailProvider = "graph" | "brevo" | "none";
-export type AuthMode = "demo" | "entra" | "api-key-only";
+export type AuthMode = "demo" | "public-demo" | "entra" | "api-key-only";
 export type AttachmentStorageMode = "local" | "azure" | "disabled";
 
 export function resolveAuthMode(
   demoMode: boolean,
-  entraConfigured: boolean
+  entraConfigured: boolean,
+  publicDemoAuth = false
 ): AuthMode {
-  return demoMode ? "demo" : entraConfigured ? "entra" : "api-key-only";
+  if (demoMode) return "demo";
+  if (entraConfigured) return "entra";
+  return publicDemoAuth ? "public-demo" : "api-key-only";
 }
 
 export function resolveAttachmentStorage(
@@ -94,7 +97,10 @@ const entraConfigured = allSet(
 // always wins. Production deployments should set DEMO_MODE=false explicitly.
 const demoModeEnv = val("DEMO_MODE");
 const demoMode = demoModeEnv !== undefined ? demoModeEnv === "true" : !entraConfigured;
-const authMode = resolveAuthMode(demoMode, entraConfigured);
+// Unlike DEMO_MODE, this opt-in enables only the allowlisted browser
+// credentials provider. API header fallbacks and open webhooks remain off.
+const publicDemoAuth = val("PUBLIC_DEMO_AUTH") === "true" && !entraConfigured;
+const authMode = resolveAuthMode(demoMode, entraConfigured, publicDemoAuth);
 const attachmentStorage = resolveAttachmentStorage(demoMode, !!blobConnString);
 
 // Shared secret(s) for inbound webhook HMAC (x-webhook-signature). A per-source
@@ -152,6 +158,7 @@ export const config = {
   llmProvider: val("LLM_PROVIDER"),
   sentryDsn: val("SENTRY_DSN"),
   demoMode,
+  publicDemoAuth,
   webhookSecrets,
   slack,
   brevo,
@@ -169,6 +176,7 @@ export const config = {
     azureOpenAI: allSet("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY"),
     redis: !!redisUrl,
     entraId: entraConfigured,
+    publicDemoAuth,
     graph: graphConfigured,
     blob: !!blobConnString,
     attachments: attachmentStorage !== "disabled",
