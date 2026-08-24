@@ -4,14 +4,15 @@
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
 
 ## Current Phase
-Phase 12 — Production deployment **COMPLETE (2026-08-24)**
+Phase 13 — External integration testing **COMPLETE (2026-08-24)**
 
 The verified release is live at https://netlink-support.vercel.app from GitHub
-`main`; its runtime application code was finalized in commit `b5e07a7`.
-Vercel Production uses Prisma with the approved pooled Neon runtime URL and a
-newly generated Auth.js secret. Microsoft Entra ID and Azure Blob remain
-intentionally deferred: the live profile is API-key-only and attachment binary
-operations fail safely with HTTP 503.
+`main`; Phase 13 runtime application code was finalized in commit `171eb8a`.
+The complete external flow was proven against Production: authenticated ticket
+create/read/update/message/list/pagination operations persisted through Prisma
+to Neon, and the same ticket appeared correctly in the existing local UI
+connected to that database. The controlled test ticket was then soft-deleted
+and every temporary verification key was revoked.
 
 ## Completed Phases
 - Phase 0 — Pre-flight verification
@@ -27,6 +28,7 @@ operations fail safely with HTTP 503.
 - Phase 10 — Production environment (implemented and verified)
 - Phase 11 — Production database migration (executed and verified)
 - Phase 12 — Production deployment (released and live-verified)
+- Phase 13 — External integration testing (production end-to-end verified)
 
 Previously reported phases requiring remediation have now been re-verified.
 
@@ -435,8 +437,9 @@ Previously reported phases requiring remediation have now been re-verified.
   specification.
 - The same authenticated key exercised the attachment route, which returned
   the expected HTTP 503 while Azure is deferred. The key was revoked in a
-  `finally` path; a subsequent live request was denied with the intentional
-  presented-but-invalid 403 response. Neon contains the inactive smoke-key row
+  `finally` path; at the Phase 12 checkpoint a subsequent live request was
+  denied with the then-existing presented-invalid 403 response. Phase 13
+  corrected that contract to 401. Neon contains the inactive smoke-key row
   plus both `auth.key_created` and `auth.key_revoked` audit events.
 - Recent Production error and warning log queries returned no records after the
   live checks.
@@ -458,13 +461,10 @@ Previously reported phases requiring remediation have now been re-verified.
   settings before serving traffic. Optional provider settings fail closed when
   partial or malformed; absent Azure disables attachments safely.
 
-### Remaining external issue and next-phase discrepancy
+### Remaining external issue
 
 1. GitHub Actions cannot start while the repository owner's billing lock is
    active. Local and Vercel release gates are green.
-2. The Phase 13 plan expects an invalid API key to return 401, while the current
-   intentional inert-actor/RBAC path returns 403 for a presented invalid or
-   revoked `nlk_` key. Phase 13 must reconcile the implementation and contract.
 
 ### Phase 12 release status
 
@@ -473,10 +473,67 @@ the canonical URL is live, all local and hosted release gates pass, and the
 API-only/attachments-disabled production profile has been verified against the
 real Neon database.
 
+## Phase 13 External Integration Testing — COMPLETE (2026-08-24)
+
+### Implemented
+
+- Reconciled the production authentication contract so missing, malformed,
+  unknown, expired, and revoked API keys return HTTP 401, while a valid
+  authenticated key that lacks a required permission returns HTTP 403.
+- Added the explicit `ticket.create` permission to the RBAC model and applied
+  permission guards consistently to ticket list/create and message reads.
+- Added route-level external-integration regression coverage for the complete
+  authentication matrix, ticket lifecycle, message visibility, pagination,
+  and persistence boundary.
+- Published Phase 13 runtime commit `171eb8a` to GitHub `main` and
+  `phase13-external-integration`. Vercel deployment
+  `dpl_ELBBPn1x2txAutt2RHs6EhiSwd2o` reached Ready and serves the canonical
+  Production URL.
+
+### Production end-to-end verification
+
+- Authentication results: valid manager key 200, no key 401, invalid key 401,
+  valid requester key without update permission 403, and revoked key 401.
+- Operation results: create ticket 201; get, update, add message, get messages,
+  list, and two-page pagination checks all returned 200.
+- The created record `INC-E4EF82` (`tkt_217812346fe645daab59`) persisted through
+  the Production Vercel API, Prisma driver, and Neon PostgreSQL with status
+  `in_progress`; its internal external-system message was persisted and returned.
+- The existing UI was opened locally against the same Neon database with the
+  seeded manager identity. The ticket appeared first in dashboard live activity,
+  then in the 18-row All tickets queue with the correct reference, subject,
+  requester, P4 priority, Service Desk group, status, and
+  `IT > External integration` classification. Its detail view displayed the
+  correct conversation and internal message.
+- Cleanup used the live authenticated DELETE route for only the exact test
+  ticket. It returned 200 and performed the designed recoverable soft delete.
+  The normal API list no longer returned the record, the database retained it
+  with `deletedAt`, and the refreshed UI count dropped from 18 to 17.
+- Both workflow keys and the final cleanup key were short-lived, never printed
+  or written to a tracked file, and confirmed inactive after use. Creation,
+  deletion, and revocation remain represented in the audit chain.
+- Recent Production error and warning log queries contained no records after
+  the integration run.
+
+### Verification
+
+- Focused Phase 13 and related authorization suites passed: 61/61 tests.
+- Full test suite passed: 27 files, 207/207 tests.
+- TypeScript passed.
+- ESLint passed with zero warnings.
+- Prisma schema validation and the optimized Next.js 16.3.2 Production build
+  passed; no package, schema, migration, or seed change was required.
+- CodeGraph traced the external request through route guards, RBAC, ticket
+  services, Prisma persistence, and the existing ticket UI consumers.
+- Microsoft Entra ID remains intentionally unconfigured, so Production browser
+  login is still disabled. The UI leg was therefore verified in the controlled
+  local demo-auth application connected to the same Production Neon data; the
+  hosted M2M API leg used the real Production URL throughout.
+
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
 **Data driver: `DATA_DRIVER=prisma` backed by Neon PostgreSQL (cloud).**
-**API is fully externally consumable and validated via M2M workflows.**
+**API is fully externally consumable and production-validated end to end via M2M workflows.**
 **Production: https://netlink-support.vercel.app (Vercel, GitHub main).**
 
 ## API Key / External Integration Status
@@ -484,9 +541,10 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - **RBAC Identity Mapping**: API keys act with their assigned role (`agent`, `requester`, etc.) rather than a specific user, enabling robust integration boundaries.
 - **Intake Webhook (`/api/v1/intake`)**: External monitoring tools can file P1 incidents. Successfully mapped a critical `alert` payload to `impact: high` / `urgency: high` and linked it directly to a CMDB CI (`PROD-01 App Server`).
 - **REST Surface**: General endpoints (e.g. `GET /api/v1/tickets`, `POST /api/v1/tickets`) successfully authorize via API key and return correct datasets constrained by the key's tenant.
-- **Live verification**: A temporary key authenticated against Production,
-  listed 17 tickets, retrieved the protected OpenAPI document, was revoked, and
-  was then denied; its create/revoke audit events remain in PostgreSQL.
+- **Live verification**: Production passed the complete 200/401/403
+  authentication matrix plus create/get/update/message/list/pagination. The
+  created ticket persisted to Neon, appeared in the existing UI, and was then
+  recoverably soft-deleted; all temporary keys are inactive.
 - **Standard Envelope**: All API endpoints use the `ok(data)` / `fail(error)` uniform envelope from `src/server/http.ts`, assuring the third-party Support Management System of consistent shape.
 - **Origin policy**: The supported third-party integration is backend-to-backend and uses no browser CORS policy. API-key requests work without an Origin header; same-origin UI requests continue to use their session.
 - **Production security**: Startup refuses demo mode or a weak Auth.js secret; request bodies are stream-bounded and operational logs redact credential-shaped data.
@@ -506,52 +564,50 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Focused Phase 9 attachment tests: 8/8 passed.
 - Focused Phase 10 production-environment tests: 15/15 passed.
 - Focused Phase 11 production-migration tests: 3/3 passed.
-- Tests: 26 files, 202/202 passed.
+- Focused Phase 13 external-integration and related authorization tests: 61/61
+  passed.
+- Tests: 27 files, 207/207 passed.
 - Prisma validation: passed.
 - Migration status: 2/2 applied; database schema is up to date.
 - JSON source-ID preservation: passed; 275 checked, 0 missing.
 - Production build: passed on Next.js 16.3.2 without warnings.
 - Lint: passed with zero warnings.
 - Production dependency audit: 0 vulnerabilities.
-- Hosted Vercel build: passed for runtime application commit `b5e07a7`.
-- Live Production API/database/security smoke test: passed.
+- Hosted Vercel build: passed for Phase 13 runtime application commit
+  `171eb8a`.
+- Live Production API/database/UI external-integration workflow: passed.
 
 ## Known Issues
 - `admin@netlink.com` resolves as `agent` role, not `tenant_admin` (design-correct, not a bug)
 - Groq LLM model `llama-3.3-70b-versatile` deprecated/removed — AI falls back to offline template (pre-existing, not a regression)
 - Browser dashboard login remains intentionally unavailable until Microsoft
   Entra ID is configured; Entra and Azure remain deferred optional capabilities.
-- Presented invalid/revoked API keys currently return 403; Phase 13's approved
-  contract expects 401 and must resolve that discrepancy.
+  Controlled UI verification uses local demo authentication against the same
+  Neon database.
 - GitHub Actions jobs are blocked by an account billing lock.
 
 ## Files Changed in Latest Phase
-- Deployment and CI configuration: `vercel.json`, `Dockerfile`,
-  `.dockerignore`, `.github/workflows/ci.yml`, and environment templates.
-- Release tooling and dependencies: `eslint.config.mjs`, `package.json`,
-  `package-lock.json`, `next.config.mjs`, and `tsconfig.json`.
-- Next.js 16 proxy migration, lint remediation, and release regression coverage
-  across `src/`, `scripts/`, and `tests/`.
+- Authentication and authorization: `src/server/context.ts`,
+  `src/server/guards.ts`, and `src/server/auth/rbac.ts`.
+- Ticket API permission enforcement: `src/app/api/v1/tickets/route.ts`,
+  `src/app/api/v1/tickets/[id]/messages/route.ts`, and
+  `src/app/api/v1/me/route.ts`.
+- Regression coverage: `tests/externalIntegration.test.ts` and
+  `tests/itil.test.ts`.
 - Handoff: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Remaining Work
-- Phase 13 — External integration testing
 - Phase 14 — OpenAPI + integration documentation
 - Phase 15 — Complete regression testing
 - Phase 16 — Final CodeGraph audit
 
 ## Next Phase
-Phase 13 — External integration testing. Await explicit approval. Use the real
-Production URL and a controlled API key to test valid/no/invalid/insufficient
-permission behavior plus ticket create/get/update/message/list/pagination flows.
-Reconcile the invalid-key status contract, verify PostgreSQL persistence and UI
-visibility within the intentionally API-only deployment constraints, update
-this handoff, and stop.
+Phase 14 — OpenAPI and integration documentation. Await explicit approval.
+Do not begin Phase 14 until the user approves it.
 
 ## Instructions for Next Agent
-Read this file and the master prompt first. Phase 12 is complete at
+Read this file and the master prompt first. Phase 13 is complete at
 `https://netlink-support.vercel.app`; runtime application code was finalized in
-GitHub commit `b5e07a7`. Do not repeat deployment or rotate secrets. Continue
-only after explicit Phase 13 approval. Execute only Phase 13, including the
-invalid-key status discrepancy and external-to-PostgreSQL-to-UI evidence, then
-update this handoff, report, and STOP.
+GitHub commit `171eb8a`. Do not repeat integration writes, restore the
+soft-deleted test ticket, or rotate secrets. Continue only after explicit Phase
+14 approval. Execute only Phase 14, update this handoff, report, and STOP.
