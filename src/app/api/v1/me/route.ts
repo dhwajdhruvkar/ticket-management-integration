@@ -1,6 +1,6 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { fail, ok, readJson } from "@/server/http";
 import { can, type Permission } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 import { config } from "@/server/config";
 import { getStore } from "@/server/data";
 import { appendAudit } from "@/server/audit/auditChain";
@@ -24,7 +24,9 @@ const ALL_PERMISSIONS: Permission[] = [
 ];
 
 export async function GET(req: Request) {
-  const [actor, tenantId] = await Promise.all([currentActor(req), currentTenantId(req)]);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { actor, tenantId } = ctx;
   const role = actor.role as Role;
   const permissions = ALL_PERMISSIONS.filter((p) => can(role, p));
 
@@ -69,7 +71,9 @@ interface ProfilePatch {
 
 /** Self-service profile update: users can only edit their own record. */
 export async function PATCH(req: Request) {
-  const [actor, tenantId] = await Promise.all([currentActor(req), currentTenantId(req)]);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { actor, tenantId } = ctx;
   if (!actor.id) return fail("No signed-in user to update.", 401);
 
   const body = await readJson<ProfilePatch>(req);

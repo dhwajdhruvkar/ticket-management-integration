@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Menu, Search, Plus, Bell, CheckCheck, Mail, MessageSquare, Webhook, ChevronRight } from "lucide-react";
 import { usePersona, PersonaSwitcher } from "./Persona";
-import { useShell } from "./AppShell";
+import { useShell } from "./ShellContext";
 import { apiGet, apiSend } from "@/lib/api";
 import { timeAgo } from "./ui";
 import type { NotificationRow } from "@/server/domain/models";

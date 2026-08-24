@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { fail, ok, parseBody } from "@/server/http";
-import { actorContext } from "@/server/guards";
+import { isResponse, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { intakeTicket } from "@/server/services/intake";
 import { handleTeamsActivity } from "@/server/channels/teams";
@@ -59,7 +59,8 @@ export async function POST(req: Request) {
   if (!rateLimit(clientKey(req, "intake"), 30, 60_000)) {
     return fail("Rate limit exceeded. Try again shortly.", 429);
   }
-  const ctx = await actorContext(req);
+  const ctx = await requirePermission(req, "ticket.create");
+  if (isResponse(ctx)) return ctx;
   const { tenantId } = ctx;
   const payload = await parseBody(req, IntakeSchema);
   if (payload instanceof NextResponse) return payload;

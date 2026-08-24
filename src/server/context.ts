@@ -42,6 +42,19 @@ export interface ActingUser {
 const ANONYMOUS: ActingUser = { name: "anonymous", role: "none" };
 
 const ADMIN_ROLES = new Set(["tenant_admin", "super_admin", "manager"]);
+const ROLE_RANK: Record<string, number> = {
+  requester: 0,
+  agent: 1,
+  manager: 2,
+  tenant_admin: 3,
+  super_admin: 4,
+};
+
+function canImpersonateRole(actorRole: string, targetRole: string): boolean {
+  const actorRank = ROLE_RANK[actorRole];
+  const targetRank = ROLE_RANK[targetRole];
+  return actorRank !== undefined && targetRank !== undefined && targetRank <= actorRank;
+}
 
 export async function currentTenantId(req?: Request): Promise<string> {
   const store = await getStore();
@@ -77,15 +90,20 @@ export async function currentTenantId(req?: Request): Promise<string> {
 export async function currentActor(req?: Request): Promise<ActingUser> {
   const base = await baseActor(req);
 
-  // Admin impersonation: act as another user for support/testing. Requires a
-  // real admin identity; the audit trail records the impersonated identity.
+  // Admin impersonation: act as another user for support/testing. It is limited
+  // to an active user in the actor's tenant and cannot elevate the actor's role.
+  // Machine API keys retain their configured identity and cannot impersonate.
   const impersonate = req?.headers.get("x-impersonate")?.trim();
-  if (impersonate && ADMIN_ROLES.has(base.role)) {
+  if (impersonate && !base.apiKeyId && ADMIN_ROLES.has(base.role)) {
     const store = await getStore();
+    const tenantId = await currentTenantId(req);
+    const byId = await store.users.get(impersonate);
     const target =
-      (await store.users.get(impersonate)) ??
-      (await store.users.list()).find((u) => u.email.toLowerCase() === impersonate.toLowerCase());
-    if (target) {
+      (byId?.tenantId === tenantId ? byId : null) ??
+      (await store.users.list({ tenantId })).find(
+        (u) => u.email.toLowerCase() === impersonate.toLowerCase()
+      );
+    if (target?.active && canImpersonateRole(base.role, target.role)) {
       return { id: target.id, name: target.name, role: target.role, email: target.email, impersonating: true };
     }
   }

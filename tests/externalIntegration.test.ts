@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("@/auth", () => ({ auth: vi.fn().mockResolvedValue(null) }));
 import { decideApiV1Access } from "@/server/auth/apiGateway";
 import { createApiKey, revokeApiKey } from "@/server/auth/apiKeys";
+import { currentActor } from "@/server/context";
 import { getStore } from "@/server/data";
 import {
   GET as listTicketsRoute,
@@ -18,6 +19,11 @@ import {
   PATCH as updateTicketRoute,
 } from "@/app/api/v1/tickets/[id]/route";
 import { POST as addMessageRoute } from "@/app/api/v1/tickets/[id]/messages/route";
+import { GET as getCatalogRoute } from "@/app/api/v1/catalog/route";
+import { GET as getEventsRoute } from "@/app/api/v1/events/route";
+import { POST as intakeRoute } from "@/app/api/v1/intake/route";
+import { GET as getMeRoute } from "@/app/api/v1/me/route";
+import { GET as getNotificationsRoute } from "@/app/api/v1/notifications/route";
 
 const TENANT = "tenant_netlink";
 
@@ -109,6 +115,95 @@ describe.sequential("Phase 13 external ticket integration contract", () => {
       ok: false,
       error: "Invalid, expired, or revoked API key.",
     });
+  });
+
+  it("rejects invalid API keys on every formerly context-only protected route", async () => {
+    const invalidKey = "nlk_invalid-phase16-key";
+    const responses = await Promise.all([
+      getCatalogRoute(request("/catalog", { key: invalidKey })),
+      getEventsRoute(request("/events", { key: invalidKey })),
+      intakeRoute(request("/intake", { method: "POST", key: invalidKey })),
+      getMeRoute(request("/me", { key: invalidKey })),
+      getNotificationsRoute(request("/notifications", { key: invalidKey })),
+    ]);
+
+    expect(responses.map((response) => response.status)).toEqual([401, 401, 401, 401, 401]);
+    for (const response of responses) {
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: "Invalid, expired, or revoked API key.",
+      });
+    }
+  });
+
+  it("keeps API-key identity fixed and confines session impersonation to lower roles in one tenant", async () => {
+    const apiKeyActor = await currentActor(
+      new Request("http://phase16.test/api/v1/me", {
+        headers: {
+          authorization: `Bearer ${managerKey}`,
+          "x-impersonate": "priya.sharma@netlink.com",
+        },
+      })
+    );
+    expect(apiKeyActor).toMatchObject({ apiKeyId: managerKeyId, role: "manager" });
+    expect(apiKeyActor.impersonating).not.toBe(true);
+
+    const managerHeaders = {
+      "x-actor": "meera.nair@netlink.com",
+      "x-tenant": TENANT,
+    };
+    const elevated = await currentActor(
+      new Request("http://phase16.test/api/v1/me", {
+        headers: { ...managerHeaders, "x-impersonate": "priya.sharma@netlink.com" },
+      })
+    );
+    expect(elevated).toMatchObject({ role: "manager", email: "meera.nair@netlink.com" });
+    expect(elevated.impersonating).not.toBe(true);
+
+    const allowed = await currentActor(
+      new Request("http://phase16.test/api/v1/me", {
+        headers: { ...managerHeaders, "x-impersonate": "dana.lee@netlink.com" },
+      })
+    );
+    expect(allowed).toMatchObject({
+      role: "requester",
+      email: "dana.lee@netlink.com",
+      impersonating: true,
+    });
+
+    const store = await getStore();
+    const users = await store.users.list({ tenantId: TENANT });
+    const template = users.find((user) => user.email === "dana.lee@netlink.com")!;
+    const otherTenantId = "tenant_phase16_other";
+    await store.tenants.create({
+      id: otherTenantId,
+      name: "Phase 16 Other Tenant",
+      slug: "phase16-other",
+      brand: null,
+      isInternal: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    await store.users.create({
+      ...template,
+      id: "usr_phase16_other_admin",
+      tenantId: otherTenantId,
+      email: "outside.admin@phase16.test",
+      name: "Outside Admin",
+      role: "super_admin",
+    });
+
+    try {
+      const crossTenant = await currentActor(
+        new Request("http://phase16.test/api/v1/me", {
+          headers: { ...managerHeaders, "x-impersonate": "usr_phase16_other_admin" },
+        })
+      );
+      expect(crossTenant).toMatchObject({ role: "manager", email: "meera.nair@netlink.com" });
+      expect(crossTenant.impersonating).not.toBe(true);
+    } finally {
+      await store.tenants.remove(otherTenantId);
+    }
   });
 
   it("creates a ticket through the same intake pipeline used in production", async () => {

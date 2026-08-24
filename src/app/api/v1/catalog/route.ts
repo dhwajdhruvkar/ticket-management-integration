@@ -1,4 +1,4 @@
-import { currentTenantId } from "@/server/context";
+import { isResponse, requirePermission } from "@/server/guards";
 import {
   listOptionsFromPagination,
   paginated,
@@ -14,7 +14,9 @@ export const dynamic = "force-dynamic";
 // GET /api/v1/catalog — active service-request catalog items for the portal
 // request form (name, description, category, whether approval is required).
 export async function GET(req: Request) {
-  const tenantId = await currentTenantId(req);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId } = ctx;
   const parsed = parsePagination(req, {
     defaultSortBy: "name",
     defaultSortDir: "asc",

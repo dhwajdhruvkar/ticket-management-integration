@@ -1,6 +1,6 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { subscribeEvents } from "@/server/events/bus";
 import { isAgentRole } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 import type { Role } from "@/server/domain/models";
 
 // =============================================================================
@@ -16,7 +16,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId, actor } = ctx;
   const agent = isAgentRole(actor.role as Role);
   const email = (actor.email ?? "").toLowerCase();
 

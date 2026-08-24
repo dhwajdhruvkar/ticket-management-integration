@@ -1,9 +1,10 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import IconRail from "./IconRail";
 import TopBar from "./TopBar";
+import { ShellContext, type RailMode, type ShellApi } from "./ShellContext";
 
 // =============================================================================
 // AppShell — responsive workspace chrome.
@@ -12,23 +13,6 @@ import TopBar from "./TopBar";
 //   768-1280px icon-only rail with tooltips
 //   <  768px   rail hidden; hamburger in the TopBar opens a slide-in drawer
 // =============================================================================
-
-type RailMode = "full" | "collapsed" | "drawer";
-
-interface ShellApi {
-  railMode: RailMode;
-  drawerOpen: boolean;
-  openDrawer: () => void;
-  closeDrawer: () => void;
-}
-
-const ShellContext = createContext<ShellApi | null>(null);
-
-export function useShell(): ShellApi {
-  const ctx = useContext(ShellContext);
-  if (!ctx) throw new Error("useShell() must be used inside <AppShell>");
-  return ctx;
-}
 
 function currentMode(): RailMode {
   if (typeof window === "undefined") return "full";

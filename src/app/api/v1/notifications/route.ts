@@ -1,5 +1,5 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import { fail, ok, paginated, parsePagination, readJson } from "@/server/http";
+import { isResponse, requirePermission } from "@/server/guards";
 import { getStore } from "@/server/data";
 import { now } from "@/server/domain/ids";
 
@@ -8,7 +8,9 @@ export const dynamic = "force-dynamic";
 
 /** The signed-in user's notification feed (bell dropdown), newest first. */
 export async function GET(req: Request) {
-  const [actor, tenantId] = await Promise.all([currentActor(req), currentTenantId(req)]);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { actor, tenantId } = ctx;
   const parsed = parsePagination(req, {
     defaultSortBy: "createdAt",
     defaultSortDir: "desc",
@@ -43,7 +45,9 @@ export async function GET(req: Request) {
 
 /** Mark the caller's notifications read: { op: "mark_read", id? } (no id = all). */
 export async function POST(req: Request) {
-  const [actor, tenantId] = await Promise.all([currentActor(req), currentTenantId(req)]);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { actor, tenantId } = ctx;
   if (!actor.email) return fail("No signed-in user.", 401);
 
   const body = await readJson<{ op?: string; id?: string }>(req);

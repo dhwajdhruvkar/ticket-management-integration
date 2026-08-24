@@ -4,15 +4,16 @@
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
 
 ## Current Phase
-Phase 15 — Complete regression testing **COMPLETE (2026-08-24)**
+Phase 16 — Final CodeGraph audit **COMPLETE (2026-08-24)**
 
 The verified release is live at https://netlink-support.vercel.app from GitHub
 `main`; Phase 14 API code was finalized in commit `3a6b602`, and the approved
 post-phase functional public-demo authentication adjustment is commit
 `559c345`.
-The complete 29-file regression suite and every required static, database, and
-build gate pass on the current public-demo Production release. No test was
-removed or weakened, and no genuine regression required a runtime fix.
+The final CodeGraph architecture/security audit is complete. Confirmed defects
+in invalid-key route validation, impersonation boundaries, static import
+cycles, and dead code were remediated. The complete test/static/database/build
+gate set passes on the final candidate.
 
 ## Completed Phases
 - Phase 0 — Pre-flight verification
@@ -31,6 +32,7 @@ removed or weakened, and no genuine regression required a runtime fix.
 - Phase 13 — External integration testing (production end-to-end verified)
 - Phase 14 — OpenAPI and integration documentation (released and verified)
 - Phase 15 — Complete regression testing (29 files, 217/217 tests verified)
+- Phase 16 — Final CodeGraph audit (completed and remediated)
 
 Previously reported phases requiring remediation have now been re-verified.
 
@@ -665,6 +667,68 @@ real Neon database.
   so no application, test, schema, migration, seed, package, credential, or
   Production data change was required in Phase 15.
 
+## Phase 16 Final CodeGraph Audit — COMPLETE (2026-08-24)
+
+### Architecture verification
+
+- Synced the repository-owned CodeGraph index to the final tree: 223 indexed
+  files, 3,028 nodes, 10,015 edges, and an up-to-date status.
+- Verified the browser path from client API helpers through `/api/v1`, the
+  proxy, shared permission/context guards, tenant-scoped services, the
+  `DataStore` port, `PrismaStore`, Prisma Client, and Neon PostgreSQL.
+- Verified the external path from API-key presentation through edge credential
+  presence, SHA-256/timing-safe key verification, actor and tenant context,
+  RBAC, record-level scoping, services, the datastore port, and PostgreSQL.
+  Invalid, expired, and revoked keys remain inert and cross-tenant record IDs
+  resolve as not found.
+- Confirmed all 55 protected `/api/v1` route files contain an authentication or
+  request-context boundary. `/api/v1/health` is the sole intentional public
+  route; Auth.js and signed webhook routes keep their separate boundaries.
+- Confirmed Prisma Client construction exists only in `PrismaStore`; migrations
+  and seed tooling are the intentional non-runtime exceptions. Client modules
+  have no runtime imports from server modules; shared domain imports are type
+  only.
+
+### Findings remediated
+
+- Added shared permission validation to catalog, events, intake, profile, and
+  notification routes. A syntactically shaped but invalid API key can no longer
+  reach context-only route behavior; all five now return the standard 401.
+- Hardened `x-impersonate`: machine API keys cannot impersonate, the target must
+  be active and belong to the actor's tenant, and the target role cannot exceed
+  the authenticated actor's role. Lower-role same-tenant support impersonation
+  remains available.
+- Removed both true static import cycles by extracting the attachment storage
+  port into `blobPort.ts` and the shell context into `ShellContext.tsx`.
+  Intentional lazy notification-provider imports are dynamic seams, not static
+  module cycles.
+- Removed the unreferenced `src/components/Icon.tsx` component after CodeGraph
+  and a TypeScript import-graph scan confirmed it was not a framework or dynamic
+  entry.
+
+### Integrity and safety checks
+
+- An independent TypeScript import-graph audit covered 180 source files and
+  found zero static import cycles, unresolved local imports, client-to-server
+  runtime imports, or unexplained zero-incoming production files.
+- Pattern review found no active `localStorage` or `sessionStorage` persistence.
+  `store.json`, `DATA_DRIVER`, and `MemoryStore` remain only in the intentional
+  local/demo/test/migration paths.
+- Retained `MemoryStore` deliberately: it provides zero-infrastructure local
+  demos, deterministic tests, and source-data migration compatibility behind
+  the same `DataStore` port. Production startup requires `DATA_DRIVER=prisma`
+  plus the pooled Neon URL, so it cannot silently select memory persistence.
+- A redacted scan of 220 tracked non-test production files found no hardcoded
+  API key, private key, provider token, live database URL, or literal secret.
+  `.env*` files remain ignored; only sanitized examples are tracked.
+- `npm ls --depth=0` resolved the declared dependency tree, and the complete
+  `npm audit` reported zero vulnerabilities. No package was changed.
+- Final gates passed: 29/29 Vitest files and 219/219 tests, TypeScript, lint with
+  zero warnings, Prisma validation, Neon migration status (2/2 applied), and
+  the optimized Next.js 16.3.2 Production build.
+- No schema, migration, seed, package, credential, or Production data change
+  was made. The Neon check was read-only.
+
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
 **Data driver: `DATA_DRIVER=prisma` backed by Neon PostgreSQL (cloud).**
@@ -709,6 +773,7 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Focused Production sign-in/environment tests: 2 files, 18/18 passed.
 - Focused functional public-demo/security tests: 5 files, 51/51 passed.
 - Complete Phase 15 regression suite: 29 files, 217/217 passed.
+- Final Phase 16 regression suite: 29 files, 219/219 passed.
 - Prisma validation: passed.
 - Migration status: 2/2 applied; database schema is up to date.
 - JSON source-ID preservation: passed; 275 checked, 0 missing.
@@ -732,8 +797,18 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   intentional environment preflight; GitHub `main` Production is Ready.
 
 ## Files Changed in Latest Phase
-- Phase 15 required no runtime or test change. Only this handoff file records
-  the completed regression evidence: `docs/IMPLEMENTATION_STATUS.md`.
+- Authentication/context hardening: `src/server/context.ts`.
+- Shared key validation on formerly context-only routes:
+  `src/app/api/v1/catalog/route.ts`, `src/app/api/v1/events/route.ts`,
+  `src/app/api/v1/intake/route.ts`, `src/app/api/v1/me/route.ts`, and
+  `src/app/api/v1/notifications/route.ts`.
+- Attachment storage cycle removal: new `src/server/storage/blobPort.ts`, plus
+  `src/server/storage/blobStore.ts` and `src/server/storage/azureBlob.ts`.
+- Shell cycle removal: new `src/components/ShellContext.tsx`, plus
+  `src/components/AppShell.tsx` and `src/components/TopBar.tsx`.
+- Dead code removed: `src/components/Icon.tsx`.
+- Focused regression coverage: `tests/externalIntegration.test.ts`.
+- Final authoritative handoff: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Post-Phase 14 Adjustment Files
 - Auth configuration and provider: `src/server/config.ts`, `src/auth.ts`,
@@ -747,16 +822,16 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   `tests/productionEnvironment.test.ts`, and `tests/openapi.test.ts`.
 
 ## Remaining Work
-- Phase 16 — Final CodeGraph audit
+- No implementation phases remain.
+- Optional future operations remain explicitly deferred: Microsoft Entra SSO,
+  Azure Blob attachments, GitHub billing recovery, and Vercel Preview secrets.
 
 ## Next Phase
-Phase 16 — Final CodeGraph audit. Await explicit approval.
-Do not begin Phase 16 until the user approves it.
+None. The approved Phase 0–16 implementation plan is complete.
 
 ## Instructions for Next Agent
-Read this file and the master prompt first. Phase 14 is complete at
-`https://netlink-support.vercel.app`; current runtime application code was
-finalized in GitHub commit `559c345`; Phase 15 found no runtime regression.
-Do not repeat integration writes, restore the soft-deleted Phase 13 test
-ticket, rotate secrets, or expose credentials. Continue only after explicit
-Phase 16 approval. Execute only Phase 16, update this handoff, report, and STOP.
+Read this file first. All approved phases are complete; do not rerun migrations,
+repeat integration writes, restore the soft-deleted Phase 13 test ticket,
+rotate secrets, expose credentials, or restart a completed phase. Treat any
+future request as new, explicitly scoped maintenance or feature work. Preserve
+the Production Prisma/API-key/RBAC/tenant boundaries documented above.

@@ -14,7 +14,7 @@ import {
   validateBlobKey,
   type BlobPutOptions,
   type BlobStore,
-} from "./blobStore";
+} from "./blobPort";
 
 const API_VERSION = "2021-08-06";
 
