@@ -8,7 +8,8 @@ Phase 14 — OpenAPI and integration documentation **COMPLETE (2026-08-24)**
 
 The verified release is live at https://netlink-support.vercel.app from GitHub
 `main`; Phase 14 API code was finalized in commit `3a6b602`, and the approved
-post-phase Production sign-in presentation adjustment is commit `0b68834`.
+post-phase functional public-demo authentication adjustment is commit
+`559c345`.
 The protected OpenAPI 3.1 contract and external developer guide now accurately
 cover the Production API's authentication, permissions, tickets, messages,
 pagination, errors, health, API-key administration, rate limits, and supported
@@ -585,9 +586,10 @@ real Neon database.
 
 ### Production integration notes
 
-- Production remains intentionally API-key-only while Microsoft Entra ID is
-  deferred, and attachment operations remain disabled until Azure Blob is
-  configured.
+- At the Phase 14 checkpoint Production was API-key-only while Microsoft Entra
+  ID was deferred. The approved post-phase adjustment now adds public-demo
+  browser sessions; external integrations remain API-key based, and attachment
+  operations remain disabled until Azure Blob is configured.
 - Browser-direct cross-origin integration is not supported. External systems
   should call the API backend-to-backend over HTTPS without an `Origin` header.
 - Rate limiting is currently per process/edge isolate: 200 requests/minute/IP
@@ -598,28 +600,47 @@ real Neon database.
   is Ready. GitHub Actions remains blocked by the repository owner's billing
   lock.
 
-## Post-Phase 14 Production Sign-in Presentation — COMPLETE (2026-08-24)
+## Post-Phase 14 Functional Public Demo Authentication — COMPLETE (2026-08-24)
 
-- Replaced the large API-only warning card with the same polished email and six
-  persona-card layout used by the local demo, matching the requested deployed
-  appearance.
-- Kept `DEMO_MODE=false` and did not register the passwordless credentials
-  provider in Production. When a preview control is used, the page stays on
-  `/signin` and explains inline that browser access activates when Microsoft
-  Entra ID is connected.
-- Added focused source-contract coverage proving that the Production preview is
-  present while the real demo provider remains gated by `config.demoMode`.
-- Focused sign-in/production-environment tests passed: 2 files, 18/18 tests.
-  TypeScript, zero-warning lint, the optimized Production build, diff checks,
-  and CodeGraph verification passed.
-- Local Production-mode browser verification matched the requested layout.
-  Live Production verification found six persona cards, no API-only warning,
-  safe inline preview behavior, health 200, and no recent error/warning logs.
-- Runtime commit `0b68834` was pushed to `production-showcase-login` and
-  GitHub `main`. Vercel deployment
-  `dpl_LWNhjn1Pkqh3RvKEs49DP3HxdxVB` reached Ready at the canonical URL.
-- No environment setting, provider credential, API authentication behavior,
-  package, schema, migration, database row, or secret was changed.
+- The owner explicitly approved the documented risk of functional public
+  passwordless demo identities. Added the non-secret
+  `PUBLIC_DEMO_AUTH=true` Production setting while retaining
+  `DEMO_MODE=false`.
+- Registered the Auth.js credentials provider only when local demo mode or the
+  explicit public-demo flag is enabled. Production accepts exactly the six
+  identities displayed on `/signin`; every other database email is rejected.
+- Centralized the six-email allowlist for the browser and server, normalized
+  email casing, required active users, and additionally required every
+  Production public-demo user to belong to the internal tenant.
+- Kept `x-actor`, `x-tenant`, anonymous API fallbacks, unsigned webhooks,
+  and all other demo-mode conveniences disabled. Unauthenticated `/api/v1`
+  requests still return 401.
+- Added a 30-attempt/minute/IP edge limit to the public credentials callback.
+  Existing API gateway, ticket-create, and API-key-create limits are unchanged.
+- Updated the health/OpenAPI authentication profile to `public-demo`, updated
+  the Production environment contract, README, and external API guide, and
+  retained Entra as the mutually exclusive future private SSO option.
+- Focused public-demo/environment/OpenAPI/security/gateway tests passed: 5
+  files, 51/51 tests. TypeScript, zero-warning lint, the optimized Next.js
+  Production build, diff checks, and CodeGraph verification passed.
+- Local end-to-end Auth.js verification authenticated
+  `dana.lee@netlink.com` as a tenant-bound requester and rejected the seeded
+  but non-allowlisted `admin@netlink.com` identity.
+- Live Production reports `authentication=public-demo`, exposes only the demo
+  credentials provider, and has no Entra provider. The same allowlisted login
+  succeeded live, the non-allowlisted login was denied, the sign-in page
+  displayed six functional cards, health returned 200, and unauthenticated API
+  access remained 401.
+- The deliberate invalid-credential test produced the expected Auth.js
+  `CredentialsSignin` error log; no unexpected error or warning was observed.
+  Successful verification sign-ins produced normal tamper-evident
+  `auth.signin` audit events.
+- Runtime commit `559c345` was pushed to
+  `functional-public-demo-auth` and GitHub `main`. Vercel deployment
+  `dpl_6DPTFaBkseJKxJxjNfyQBUXTS4Dd` reached Ready at the canonical URL.
+- No package, schema, migration, seed, user record, role, ticket, credential, or
+  secret was changed. The only database writes were the expected sign-in audit
+  events.
 
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
@@ -663,6 +684,7 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Focused Phase 14 OpenAPI/API-key/external-integration tests: 3 files, 16/16
   passed.
 - Focused Production sign-in/environment tests: 2 files, 18/18 passed.
+- Focused functional public-demo/security tests: 5 files, 51/51 passed.
 - Last complete regression baseline (Phase 13): 27 files, 207/207 passed.
 - Phase 15 full regression suite: not started; explicit approval is required.
 - Prisma validation: passed.
@@ -671,18 +693,18 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Production build: passed on Next.js 16.3.2 without warnings.
 - Lint: passed with zero warnings.
 - Production dependency audit: 0 vulnerabilities.
-- Hosted Vercel build: passed for Phase 14 runtime application commit
-  `3a6b602`.
+- Hosted Vercel build: passed for current runtime application commit
+  `559c345`.
 - Live Production API/database/UI external-integration workflow: passed.
 - Live Phase 14 health and protected-route authentication checks: passed.
 
 ## Known Issues
 - `admin@netlink.com` resolves as `agent` role, not `tenant_admin` (design-correct, not a bug)
 - Groq LLM model `llama-3.3-70b-versatile` deprecated/removed — AI falls back to offline template (pre-existing, not a regression)
-- Browser dashboard login remains intentionally unavailable until Microsoft
-  Entra ID is configured; Entra and Azure remain deferred optional capabilities.
-  Controlled UI verification uses local demo authentication against the same
-  Neon database.
+- Browser dashboard login is intentionally public and passwordless for the six
+  approved demo identities. This is an owner-approved showcase risk; disable
+  `PUBLIC_DEMO_AUTH` before configuring Entra for private organisational SSO.
+  Azure remains deferred, so attachments are still disabled.
 - GitHub Actions jobs are blocked by an account billing lock.
 - Vercel Preview builds lack the Production-only core secrets and fail the
   intentional environment preflight; GitHub `main` Production is Ready.
@@ -698,8 +720,15 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Handoff: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Post-Phase 14 Adjustment Files
-- Sign-in presentation: `src/app/signin/SignInClient.tsx`.
-- Focused security/presentation coverage: `tests/signin.test.ts`.
+- Auth configuration and provider: `src/server/config.ts`, `src/auth.ts`,
+  `src/proxy.ts`, and `src/shared/publicDemoUsers.ts`.
+- Sign-in UI: `src/app/signin/page.tsx` and
+  `src/app/signin/SignInClient.tsx`.
+- Production contract/docs: `scripts/check-production-environment.cjs`,
+  `.env.production.example`, `.env.example`, `README.md`,
+  `docs/EXTERNAL_API_GUIDE.md`, and the OpenAPI route.
+- Focused coverage: `tests/signin.test.ts`,
+  `tests/productionEnvironment.test.ts`, and `tests/openapi.test.ts`.
 
 ## Remaining Work
 - Phase 15 — Complete regression testing
@@ -711,8 +740,8 @@ Do not begin Phase 15 until the user approves it.
 
 ## Instructions for Next Agent
 Read this file and the master prompt first. Phase 14 is complete at
-`https://netlink-support.vercel.app`; runtime application code was finalized in
-GitHub commit `3a6b602`. Do not repeat integration writes, restore the
+`https://netlink-support.vercel.app`; current runtime application code was
+finalized in GitHub commit `559c345`. Do not repeat integration writes, restore the
 soft-deleted Phase 13 test ticket, rotate secrets, or expose credentials.
 Continue only after explicit Phase 15 approval. Execute only Phase 15, update
 this handoff, report, and STOP.
