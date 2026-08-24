@@ -4,16 +4,14 @@
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
 
 ## Current Phase
-Phase 12 — Production deployment **IN PROGRESS (2026-08-21)**
+Phase 12 — Production deployment **COMPLETE (2026-08-24)**
 
-Phase 12 approval was received. The production release candidate and all local
-release gates are complete, but the live deployment is held at the environment
-gate: the owner intentionally deferred Microsoft Entra ID and Azure Blob for
-future scaling. The resulting production profile is explicitly API-key-only
-with attachment operations disabled. Those optional providers are no longer
-deployment blockers; only the core Neon runtime URL, a new Auth.js secret, and
-authorization to upload them to Vercel remain. No application deployment or
-secret egress occurred.
+The verified release is live at https://netlink-support.vercel.app from GitHub
+`main`; its runtime application code was finalized in commit `b5e07a7`.
+Vercel Production uses Prisma with the approved pooled Neon runtime URL and a
+newly generated Auth.js secret. Microsoft Entra ID and Azure Blob remain
+intentionally deferred: the live profile is API-key-only and attachment binary
+operations fail safely with HTTP 503.
 
 ## Completed Phases
 - Phase 0 — Pre-flight verification
@@ -28,6 +26,7 @@ secret egress occurred.
 - Phase 9 — Attachment storage (implemented and verified)
 - Phase 10 — Production environment (implemented and verified)
 - Phase 11 — Production database migration (executed and verified)
+- Phase 12 — Production deployment (released and live-verified)
 
 Previously reported phases requiring remediation have now been re-verified.
 
@@ -340,7 +339,7 @@ Previously reported phases requiring remediation have now been re-verified.
 
 ## Verification Audit — 2026-08-21
 
-## Phase 12 Production Deployment Preparation - 2026-08-21
+## Phase 12 Production Deployment — COMPLETE (2026-08-24)
 
 ### Implemented
 
@@ -362,6 +361,12 @@ Previously reported phases requiring remediation have now been re-verified.
 - Added `vercel.json` to select the Next.js framework preset explicitly.
 - Added a Vercel build gate that runs the production environment validator
   before `next build`, matching the existing fail-closed Docker startup gate.
+- Explicitly selected `npm run vercel-build` in `vercel.json`, so the
+  hosted build cannot bypass the production environment preflight.
+- Remediated the open Next.js 16.3 standalone/adapter incompatibility by using
+  managed output on Vercel while retaining standalone output for Docker. The
+  initial hosted build reproduced the missing `next-server.js.nft.json` error;
+  the conditional output fix passed locally and in Vercel's build adapter.
 - Made Microsoft Entra ID and Azure Blob explicit optional production
   capabilities. With Entra absent, browser sign-in is disabled and API-key
   authentication remains active. With Azure absent, attachment reads/writes/
@@ -373,20 +378,16 @@ Previously reported phases requiring remediation have now been re-verified.
   to `prisma.config.ts`; clean install, generate, validate, and migration-status
   commands load it without the prior deprecation warning.
 - Added lint and production dependency audit jobs to GitHub CI.
-- Created the Vercel project `dhwaj-s-projects/netlink-support` and linked this
-  workspace to it. Its former Git connection to
-  `https://github.com/dhwajdhruvkar/helpdesk-ai` was verified, then temporarily
-  disconnected so publishing a release cannot create an environment-less
-  deployment. The owner selected
-  `https://github.com/dhwajdhruvkar/ticket-management-integration` as the new
-  production source repository; Vercel remains disconnected until the required
-  credentials are present.
+- Connected the Vercel project `dhwaj-s-projects/netlink-support` to
+  `https://github.com/dhwajdhruvkar/ticket-management-integration`. Production
+  now builds from the repository's `main` branch.
 - Aligned the Vercel project itself to the tested Node.js 22.x runtime and the
   explicit Next.js framework preset.
-- Published the code-only release branch `phase12-production-deployment` as
-  `main` in `dhwajdhruvkar/ticket-management-integration`; the initial remote
-  release head was verified at commit `1974d72`. No populated environment file
-  or credential is tracked.
+- Published the verified runtime application code at commit `b5e07a7` to both
+  `phase12-api-only-production` and `main` in
+  `dhwajdhruvkar/ticket-management-integration`; subsequent handoff-only
+  commits do not change that runtime code. No populated environment file or
+  credential is tracked.
 
 ### Verification
 
@@ -404,42 +405,45 @@ Previously reported phases requiring remediation have now been re-verified.
   values and no Entra/Azure values. It reported
   `authentication=api-key-only, attachments=disabled`.
 - `npm audit --omit=dev` reports 0 vulnerabilities.
-- Vercel project inspection confirms the project exists and has zero
-  deployments. Its Node.js 22.x runtime and Next.js framework preset match the
-  verified release candidate; committed `vercel.json` also fixes the framework
-  preset in source control.
+- Initial release deployment `dpl_AoasyRwyK2yFx9SxnFehyEqJpGS2` reached Ready from
+  GitHub `main` commit `b5e07a7`. Hosted logs show the preflight, Prisma
+  generation, TypeScript, Next.js build, Vercel adapter, and output deployment
+  all completed successfully.
 
-### Deployment gate - not yet released
+### Production deployment and live verification
 
-- No production deployment was executed, so no live health/frontend/login/
-  dashboard/tickets/API/database/authentication verification can be claimed.
-- Successful browser login and dashboard verification are intentionally out of
-  scope for this release profile because Entra is deferred. The live check will
-  instead verify the API-only sign-in notice, protected UI routes, API-key
-  access, health profile, tickets API, and PostgreSQL connectivity.
-- Vercel Production now contains only the non-secret safeguards
-  `DATA_DRIVER=prisma` and `DEMO_MODE=false`. Entra and Azure credentials are
-  intentionally absent and optional.
-- The local `.env` has a valid pooled Neon runtime URL, but its Auth.js secret
-  is a development placeholder and `DEMO_MODE=true`; those unsafe values were
-  not uploaded.
-- Uploading the validated Neon credential and a newly generated Auth.js secret
-  to Vercel requires explicit sensitive-egress approval. The attempted upload
-  was rejected before any value left the machine; no secret was printed.
-- The owner must authorize these remaining core Vercel Production values before
-  a release: the validated pooled `DATABASE_URL` and a newly generated strong
-  `AUTH_SECRET`. `DIRECT_URL` remains migration-job-only. Entra and Azure can be
-  configured later as complete optional capability sets.
-- GitHub Actions run `32483004426` in the new repository created a job with no
-  steps or runner. Its failure annotation states that the job was not started
-  because the account is locked due to a billing issue. Local gates are green,
-  but GitHub CI cannot provide independent evidence until that issue is
-  resolved.
-- The owner explicitly authorized publication to
-  `github.com/dhwajdhruvkar/ticket-management-integration`, and remote `main`
-  was verified after the push. A complete history scan found no configured
-  local secret value in the release commits; generic credential-pattern matches
-  are limited to placeholders and synthetic tests.
+- The owner explicitly authorized sensitive upload of the pooled Neon
+  `DATABASE_URL` and a newly generated `AUTH_SECRET`. Both were sent to the
+  linked Vercel Production secret store without being printed or written to a
+  tracked file. `DIRECT_URL` was not uploaded.
+- Vercel Production contains exactly the four core variables:
+  `DATA_DRIVER=prisma`, `DEMO_MODE=false`, sensitive `DATABASE_URL`, and
+  sensitive `AUTH_SECRET`. Entra and Azure variables remain absent by design.
+- The canonical release is live at `https://netlink-support.vercel.app`. The
+  health endpoint returned HTTP 200 with `dataDriver=prisma`,
+  `authentication=api-key-only`, `attachmentStorage=disabled`, PostgreSQL
+  enabled, and attachments disabled.
+- Unauthenticated `GET /api/v1/tickets` returned 401. `GET /tickets`
+  redirected to the sign-in page, which returned 200 and displayed the
+  intentional API-only notice. Auth.js exposed zero browser providers.
+- HSTS, CSP, frame protection, MIME sniffing protection, and referrer-policy
+  headers were present on the live service.
+- A short-lived Production API key was generated through the application
+  service and never printed. It authenticated against the live Vercel runtime:
+  the tickets endpoint returned HTTP 200 and 17 tenant-scoped records, and the
+  protected OpenAPI endpoint returned HTTP 200 with the Netlink Support API
+  specification.
+- The same authenticated key exercised the attachment route, which returned
+  the expected HTTP 503 while Azure is deferred. The key was revoked in a
+  `finally` path; a subsequent live request was denied with the intentional
+  presented-but-invalid 403 response. Neon contains the inactive smoke-key row
+  plus both `auth.key_created` and `auth.key_revoked` audit events.
+- Recent Production error and warning log queries returned no records after the
+  live checks.
+- GitHub Actions run `32694671039` for the deployed commit created a failed
+  job with zero steps. Its annotation states that the account is locked due to
+  a billing issue; this is an external CI-account condition, not a release or
+  Vercel failure.
 
 ### Confirmed
 
@@ -454,31 +458,35 @@ Previously reported phases requiring remediation have now been re-verified.
   settings before serving traffic. Optional provider settings fail closed when
   partial or malformed; absent Azure disables attachments safely.
 
-### Remaining blocking discrepancies
+### Remaining external issue and next-phase discrepancy
 
-1. Phase 12 cannot deploy until sensitive Vercel upload of the pooled Neon
-   `DATABASE_URL` and a newly generated `AUTH_SECRET` is explicitly authorized.
-2. GitHub Actions cannot start while the repository owner's billing lock is
-   active.
+1. GitHub Actions cannot start while the repository owner's billing lock is
+   active. Local and Vercel release gates are green.
+2. The Phase 13 plan expects an invalid API key to return 401, while the current
+   intentional inert-actor/RBAC path returns 403 for a presented invalid or
+   revoked `nlk_` key. Phase 13 must reconcile the implementation and contract.
 
 ### Phase 12 release status
 
-Phase 12 is approved and its code-only release candidate is published.
-Typecheck, lint, tests, Prisma generation, dependency audit, and the production
-build all pass for the API-key-only/attachments-disabled profile. Live
-deployment and endpoint verification remain gated only on the two core Vercel
-values and explicit authorization for their sensitive upload.
+Phase 12 is COMPLETE. The GitHub-backed Vercel Production deployment is Ready,
+the canonical URL is live, all local and hosted release gates pass, and the
+API-only/attachments-disabled production profile has been verified against the
+real Neon database.
 
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
 **Data driver: `DATA_DRIVER=prisma` backed by Neon PostgreSQL (cloud).**
 **API is fully externally consumable and validated via M2M workflows.**
+**Production: https://netlink-support.vercel.app (Vercel, GitHub main).**
 
 ## API Key / External Integration Status
 - **Authentication**: M2M authentication successfully resolves via `Authorization: Bearer nlk_...` header.
 - **RBAC Identity Mapping**: API keys act with their assigned role (`agent`, `requester`, etc.) rather than a specific user, enabling robust integration boundaries.
 - **Intake Webhook (`/api/v1/intake`)**: External monitoring tools can file P1 incidents. Successfully mapped a critical `alert` payload to `impact: high` / `urgency: high` and linked it directly to a CMDB CI (`PROD-01 App Server`).
 - **REST Surface**: General endpoints (e.g. `GET /api/v1/tickets`, `POST /api/v1/tickets`) successfully authorize via API key and return correct datasets constrained by the key's tenant.
+- **Live verification**: A temporary key authenticated against Production,
+  listed 17 tickets, retrieved the protected OpenAPI document, was revoked, and
+  was then denied; its create/revoke audit events remain in PostgreSQL.
 - **Standard Envelope**: All API endpoints use the `ok(data)` / `fail(error)` uniform envelope from `src/server/http.ts`, assuring the third-party Support Management System of consistent shape.
 - **Origin policy**: The supported third-party integration is backend-to-backend and uses no browser CORS policy. API-key requests work without an Origin header; same-origin UI requests continue to use their session.
 - **Production security**: Startup refuses demo mode or a weak Auth.js secret; request bodies are stream-bounded and operational logs redact credential-shaped data.
@@ -505,12 +513,16 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Production build: passed on Next.js 16.3.2 without warnings.
 - Lint: passed with zero warnings.
 - Production dependency audit: 0 vulnerabilities.
+- Hosted Vercel build: passed for runtime application commit `b5e07a7`.
+- Live Production API/database/security smoke test: passed.
 
 ## Known Issues
 - `admin@netlink.com` resolves as `agent` role, not `tenant_admin` (design-correct, not a bug)
 - Groq LLM model `llama-3.3-70b-versatile` deprecated/removed — AI falls back to offline template (pre-existing, not a regression)
-- Phase 12 core production secrets are not yet authorized in Vercel; Entra and
-  Azure are intentionally deferred optional capabilities.
+- Browser dashboard login remains intentionally unavailable until Microsoft
+  Entra ID is configured; Entra and Azure remain deferred optional capabilities.
+- Presented invalid/revoked API keys currently return 403; Phase 13's approved
+  contract expects 401 and must resolve that discrepancy.
 - GitHub Actions jobs are blocked by an account billing lock.
 
 ## Files Changed in Latest Phase
@@ -523,25 +535,23 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Handoff: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Remaining Work
-- Phase 12 — Deployment
 - Phase 13 — External integration testing
 - Phase 14 — OpenAPI + integration documentation
 - Phase 15 — Complete regression testing
 - Phase 16 — Final CodeGraph audit
 
 ## Next Phase
-Phase 12 — Production deployment. Only after explicit approval, run typecheck,
-lint, tests, Prisma generation, and the production build; deploy through the
-approved GitHub to Vercel/Docker target; verify `/api/v1/health`, the API-only
-sign-in state, protected UI behavior, tickets/API-key access, database, and
-authentication; update this handoff and stop.
+Phase 13 — External integration testing. Await explicit approval. Use the real
+Production URL and a controlled API key to test valid/no/invalid/insufficient
+permission behavior plus ticket create/get/update/message/list/pagination flows.
+Reconcile the invalid-key status contract, verify PostgreSQL persistence and UI
+visibility within the intentionally API-only deployment constraints, update
+this handoff, and stop.
 
 ## Instructions for Next Agent
-Read this file and the master prompt first. Phase 12 release preparation is
-complete and published at
-`github.com/dhwajdhruvkar/ticket-management-integration`, but live deployment
-is not. Continue only after the owner authorizes sensitive upload to
-`dhwaj-s-projects/netlink-support` of the pooled Neon `DATABASE_URL` and a newly
-generated strong `AUTH_SECRET`. Entra and Azure are intentionally deferred and
-must not be treated as blockers. Complete only Phase 12, update this handoff,
-report, and STOP.
+Read this file and the master prompt first. Phase 12 is complete at
+`https://netlink-support.vercel.app`; runtime application code was finalized in
+GitHub commit `b5e07a7`. Do not repeat deployment or rotate secrets. Continue
+only after explicit Phase 13 approval. Execute only Phase 13, including the
+invalid-key status discrepancy and external-to-PostgreSQL-to-UI evidence, then
+update this handoff, report, and STOP.
