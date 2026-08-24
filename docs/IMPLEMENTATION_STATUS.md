@@ -728,6 +728,14 @@ real Neon database.
   the optimized Next.js 16.3.2 Production build.
 - No schema, migration, seed, package, credential, or Production data change
   was made. The Neon check was read-only.
+- Runtime commit `266616e` was pushed to the Phase 16 branch and GitHub `main`.
+  Vercel deployment `dpl_9yhhkUq6v5McAJ76QyhPAnHpQMbW` reached Ready after
+  cloning that exact commit and passing the Production environment preflight
+  (`authentication=public-demo`, `attachments=disabled`).
+- Live checks on `https://netlink-support.vercel.app` confirmed health 200 with
+  Prisma/PostgreSQL active, the demo authentication provider, sign-in 200,
+  unauthenticated tickets 401, and invalid-key 401 responses from catalog,
+  events, intake, profile, and notifications.
 
 ## Current Architecture
 Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1/*`), NextAuth for UI authentication, API-key authentication (`nlk_*`) for M2M, Hexagonal DataStore abstraction.
