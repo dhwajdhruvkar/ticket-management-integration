@@ -760,6 +760,33 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - **Production security**: Startup refuses demo mode or a weak Auth.js secret; request bodies are stream-bounded and operational logs redact credential-shaped data.
 - **Attachments**: API-key clients can upload, list, download, and delete ticket attachments through tenant-scoped routes when private Azure Blob storage is configured. Until then, binary operations return 503 and never use Vercel's ephemeral disk; multipart bodies and individual files are bounded.
 
+## API-Key Integration Completion Audit ? COMPLETE (2026-08-24)
+
+- Re-traced the current key lifecycle through Settings, the `/api/v1/api-keys`
+  handlers, shared guards, cryptographic key service, `DataStore`,
+  `PrismaStore`, and PostgreSQL. Tenant administrators and super administrators
+  can create/revoke keys; lower roles cannot manage credentials.
+- Confirmed secrets use 32 cryptographically random bytes with the `nlk_`
+  prefix. The full value is returned once, only its unique SHA-256 hash is
+  persisted, list responses omit both the hash and secret, verification uses a
+  timing-safe comparison, and expired/revoked keys are rejected.
+- Added `tests/apiKeyRoutes.test.ts`, which invokes the real route handlers and
+  proves administrator-only creation, one-time secret redaction, API-key
+  bootstrapping, least-privileged agent keys, ticket creation through the
+  external API, revocation, and immediate HTTP 401 rejection after revocation.
+- Focused API-key/external-integration verification passed 3 files and 20/20
+  tests. The complete suite passed 30 files and 225/225 tests; TypeScript, lint,
+  and the optimized Next.js 16.3.2 build also passed.
+- CodeGraph is current at 224 indexed files, 3,041 nodes, and 10,063 edges.
+- Verification commit `15f6195` was pushed to the audit branch and GitHub
+  `main`. Vercel deployment `dpl_5TFB7rVMwHpqY8xLggMScAn862HT` built that exact
+  commit, passed the Production environment preflight, and reached Ready.
+- Non-mutating live checks confirmed health HTTP 200 with Prisma/PostgreSQL,
+  sign-in HTTP 200, and HTTP 401 for unauthenticated key listing plus invalid
+  key attempts against key creation, OpenAPI, and tickets. The prior Phase 13
+  Production create/use/revoke proof remains recorded above; this audit did not
+  create another live credential or ticket.
+
 ## Database Status
 - **Provider**: Neon PostgreSQL (free tier, ap-southeast-1)
 - **Live**: Application reads/writes PostgreSQL for all operations
@@ -782,6 +809,7 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
 - Focused functional public-demo/security tests: 5 files, 51/51 passed.
 - Complete Phase 15 regression suite: 29 files, 217/217 passed.
 - Final Phase 16 regression suite: 29 files, 219/219 passed.
+- API-key integration completion suite: 30 files, 225/225 passed.
 - Prisma validation: passed.
 - Migration status: 2/2 applied; database schema is up to date.
 - JSON source-ID preservation: passed; 275 checked, 0 missing.
@@ -828,6 +856,10 @@ Next.js 16 App Router, React 19 SPA frontend, fully versioned REST API (`/api/v1
   `docs/EXTERNAL_API_GUIDE.md`, and the OpenAPI route.
 - Focused coverage: `tests/signin.test.ts`,
   `tests/productionEnvironment.test.ts`, and `tests/openapi.test.ts`.
+
+## API-Key Integration Completion Files
+- Route-level create/list/use/revoke coverage: `tests/apiKeyRoutes.test.ts`.
+- Final evidence and handoff: `docs/IMPLEMENTATION_STATUS.md`.
 
 ## Remaining Work
 - No implementation phases remain.
