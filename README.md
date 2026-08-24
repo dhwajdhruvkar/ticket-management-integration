@@ -164,7 +164,9 @@ rejected.
 
 `GET /api/v1/health` reports the active driver and feature flags;
 `GET /api/v1/openapi.json` serves the OpenAPI 3.1 spec (import into
-Swagger/Postman). Full surface under `/api/v1`: `tickets`, `tickets/:id`
+Swagger/Postman). Backend integrators should start with the
+[external API integration guide](docs/EXTERNAL_API_GUIDE.md). Full surface
+under `/api/v1`: `tickets`, `tickets/:id`
 (+`/messages`, `/actions`, `/approvals`, `/summary`, `/attachments`), `kb`
 (+`/search`), `problems`, `changes` (+`/approvals`), `assets`, `cis`
 (+`/:id/impact`), `groups`, `sla-policies`, `calendars`, `automations`,

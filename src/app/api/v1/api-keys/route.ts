@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { currentActor, currentTenantId } from "@/server/context";
 import {
   fail,
   listOptionsFromPagination,
@@ -9,7 +8,7 @@ import {
   parseBody,
   parsePagination,
 } from "@/server/http";
-import { can } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
 import { createApiKey, listApiKeys } from "@/server/auth/apiKeys";
 import { clientKey, rateLimit } from "@/server/rateLimit";
 import type { ApiKeyRow, Role } from "@/server/domain/models";
@@ -42,8 +41,9 @@ const CreateKeySchema = z.object({
 });
 
 export async function GET(req: Request) {
-  const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
-  if (!can(actor.role as Role, "admin")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "admin");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId } = ctx;
   const parsed = parsePagination(req, {
     defaultSortBy: "createdAt",
     defaultSortDir: "desc",
@@ -73,8 +73,9 @@ export async function POST(req: Request) {
   if (!rateLimit(clientKey(req, "api-keys"), 10, 60_000)) {
     return fail("Rate limit exceeded. Try again shortly.", 429);
   }
-  const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
-  if (!can(actor.role as Role, "admin")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "admin");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId, actor } = ctx;
 
   const body = await parseBody(req, CreateKeySchema);
   if (body instanceof NextResponse) return body;

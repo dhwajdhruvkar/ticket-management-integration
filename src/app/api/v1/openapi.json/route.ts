@@ -41,7 +41,7 @@ const PAGINATION = [
   },
 ] as const;
 
-const SPEC = {
+const BASE_SPEC = {
   openapi: "3.1.0",
   info: {
     title: "Netlink Support API",
@@ -245,6 +245,820 @@ const SPEC = {
     "/organizations": { get: { summary: "List organizations (admin)", parameters: PAGINATION, responses: { "200": { description: "Paginated organizations" } } }, post: { summary: "Create an organization (super admin)", responses: { "201": { description: "Created" } } } },
     "/me": { get: { summary: "Current user profile", responses: { "200": { description: "Profile" } } }, patch: { summary: "Update profile/preferences", responses: { "200": { description: "Updated" } } } },
     "/catalog": { get: { summary: "Service request catalog", parameters: PAGINATION, responses: { "200": { description: "Paginated items" } } } },
+  },
+} as const;
+
+const ref = (name: string): Record<string, unknown> => ({
+  $ref: "#/components/schemas/" + name,
+});
+
+const jsonContent = (schema: Record<string, unknown>) => ({
+  "application/json": { schema },
+});
+
+const jsonResponse = (
+  description: string,
+  schema: Record<string, unknown>
+) => ({
+  description,
+  content: jsonContent(schema),
+});
+
+const errorResponse = (description: string, error: string) => ({
+  description,
+  content: {
+    "application/json": {
+      schema: ref("ErrorResponse"),
+      example: { ok: false, error },
+    },
+  },
+});
+
+const TICKET_STATUS = [
+  "new",
+  "open",
+  "in_progress",
+  "pending",
+  "auto_resolved",
+  "pending_agent",
+  "escalated",
+  "resolved",
+  "reopened",
+  "closed",
+  "cancelled",
+] as const;
+
+const TICKET_TYPE = [
+  "incident",
+  "service_request",
+  "problem",
+  "change",
+] as const;
+
+const TICKET_PRIORITY = [
+  "critical",
+  "high",
+  "medium",
+  "low",
+  "very_low",
+] as const;
+
+const IMPACT = ["low", "medium", "high"] as const;
+const CATEGORY = [
+  "IT",
+  "HR",
+  "Access",
+  "Software",
+  "Hardware",
+  "Network",
+  "Billing",
+  "Other",
+] as const;
+
+const TICKET_PAGINATION = [
+  PAGINATION[0],
+  PAGINATION[1],
+  PAGINATION[2],
+  {
+    name: "sortBy",
+    in: "query",
+    schema: {
+      type: "string",
+      enum: [
+        "createdAt",
+        "updatedAt",
+        "reference",
+        "priority",
+        "status",
+        "subject",
+      ],
+      default: "createdAt",
+    },
+  },
+  {
+    ...PAGINATION[4],
+    schema: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  },
+] as const;
+
+const API_KEY_PAGINATION = [
+  PAGINATION[0],
+  PAGINATION[1],
+  PAGINATION[2],
+  {
+    name: "sortBy",
+    in: "query",
+    schema: {
+      type: "string",
+      enum: ["createdAt", "updatedAt", "name", "active", "role"],
+      default: "createdAt",
+    },
+  },
+  {
+    ...PAGINATION[4],
+    schema: { type: "string", enum: ["asc", "desc"], default: "desc" },
+  },
+] as const;
+
+const CORE_SCHEMAS = {
+  ErrorResponse: {
+    type: "object",
+    required: ["ok", "error"],
+    properties: {
+      ok: { type: "boolean", const: false },
+      error: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+  HealthResponse: {
+    type: "object",
+    required: [
+      "ok",
+      "service",
+      "version",
+      "dataDriver",
+      "productionProfile",
+      "features",
+      "time",
+    ],
+    properties: {
+      ok: { type: "boolean", const: true },
+      service: { type: "string", example: "netlink-support" },
+      version: { type: "string", example: "2.0.0" },
+      dataDriver: { type: "string", enum: ["memory", "prisma"] },
+      productionProfile: {
+        type: "object",
+        required: ["authentication", "attachmentStorage"],
+        properties: {
+          authentication: {
+            type: "string",
+            enum: ["demo", "entra", "api-key-only"],
+          },
+          attachmentStorage: {
+            type: "string",
+            enum: ["local", "azure", "disabled"],
+          },
+        },
+      },
+      features: {
+        type: "object",
+        additionalProperties: { type: "boolean" },
+      },
+      time: { type: "string", format: "date-time" },
+    },
+  },
+  Ticket: {
+    type: "object",
+    required: [
+      "id",
+      "reference",
+      "tenantId",
+      "type",
+      "subject",
+      "body",
+      "status",
+      "priority",
+      "category",
+      "channel",
+      "tags",
+      "requesterEmail",
+      "ciIds",
+      "linkedTicketIds",
+      "slaPausedMins",
+      "createdAt",
+      "updatedAt",
+      "deletedAt",
+    ],
+    properties: {
+      id: { type: "string", example: "tkt_example" },
+      reference: { type: "string", example: "INC-8F3K2A" },
+      tenantId: { type: "string" },
+      type: { type: "string", enum: TICKET_TYPE },
+      subject: { type: "string" },
+      body: { type: "string" },
+      status: { type: "string", enum: TICKET_STATUS },
+      priority: { type: "string", enum: TICKET_PRIORITY },
+      impact: { type: ["string", "null"], enum: [...IMPACT, null] },
+      urgency: { type: ["string", "null"], enum: [...IMPACT, null] },
+      category: { type: "string", enum: CATEGORY },
+      subcategory: { type: ["string", "null"] },
+      channel: {
+        type: "string",
+        enum: ["email", "portal", "chat", "api", "phone", "teams"],
+      },
+      source: { type: ["string", "null"] },
+      tags: { type: "array", items: { type: "string" } },
+      customFields: { type: ["object", "null"], additionalProperties: true },
+      requesterEmail: { type: "string", format: "email" },
+      requesterId: { type: ["string", "null"] },
+      assigneeId: { type: ["string", "null"] },
+      assignmentGroupId: { type: ["string", "null"] },
+      problemId: { type: ["string", "null"] },
+      changeId: { type: ["string", "null"] },
+      catalogItemId: { type: ["string", "null"] },
+      ciIds: { type: "array", items: { type: "string" } },
+      linkedTicketIds: { type: "array", items: { type: "string" } },
+      mergedIntoId: { type: ["string", "null"] },
+      satisfaction: { type: ["string", "null"] },
+      resolutionNotes: { type: ["string", "null"] },
+      escalationReason: { type: ["string", "null"] },
+      escalatedById: { type: ["string", "null"] },
+      escalatedAt: { type: ["string", "null"], format: "date-time" },
+      firstRespondedAt: { type: ["string", "null"], format: "date-time" },
+      resolvedAt: { type: ["string", "null"], format: "date-time" },
+      closedAt: { type: ["string", "null"], format: "date-time" },
+      dueResponseAt: { type: ["string", "null"], format: "date-time" },
+      dueResolveAt: { type: ["string", "null"], format: "date-time" },
+      slaPolicyId: { type: ["string", "null"] },
+      slaPausedAt: { type: ["string", "null"], format: "date-time" },
+      slaPausedMins: { type: "integer", minimum: 0 },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+      deletedAt: { type: ["string", "null"], format: "date-time" },
+    },
+  },
+  TicketMessage: {
+    type: "object",
+    required: [
+      "id",
+      "ticketId",
+      "authorKind",
+      "authorName",
+      "visibility",
+      "body",
+      "createdAt",
+    ],
+    properties: {
+      id: { type: "string" },
+      ticketId: { type: "string" },
+      authorKind: {
+        type: "string",
+        enum: ["requester", "agent", "assistant", "system"],
+      },
+      authorName: { type: "string" },
+      visibility: { type: "string", enum: ["public", "internal"] },
+      body: { type: "string" },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  TicketView: {
+    allOf: [
+      ref("Ticket"),
+      {
+        type: "object",
+        required: [
+          "messages",
+          "events",
+          "resolution",
+          "assignee",
+          "assignmentGroup",
+          "linkedCIs",
+          "approvals",
+          "sla",
+        ],
+        properties: {
+          messages: {
+            type: "array",
+            items: ref("TicketMessage"),
+            description:
+              "Internal messages are included only for agent-or-higher callers.",
+          },
+          events: { type: "array", items: { type: "object" } },
+          resolution: { type: ["object", "null"] },
+          assignee: { type: ["object", "null"] },
+          assignmentGroup: { type: ["object", "null"] },
+          linkedCIs: { type: "array", items: { type: "object" } },
+          approvals: { type: "array", items: { type: "object" } },
+          sla: { type: "object" },
+        },
+      },
+    ],
+  },
+  CreateTicketRequest: {
+    type: "object",
+    required: ["subject", "body"],
+    properties: {
+      subject: { type: "string", minLength: 1, maxLength: 300 },
+      body: { type: "string", minLength: 1, maxLength: 50000 },
+      requesterEmail: {
+        type: "string",
+        format: "email",
+        description:
+          "Required for agent-or-higher keys. Requester keys always file as their own identity.",
+      },
+      type: { type: "string", enum: TICKET_TYPE, default: "incident" },
+      channel: {
+        type: "string",
+        enum: ["email", "portal", "chat", "api", "phone", "teams"],
+        default: "api",
+      },
+      category: { type: "string", enum: CATEGORY },
+      subcategory: { type: "string" },
+      impact: { type: "string", enum: IMPACT },
+      urgency: { type: "string", enum: IMPACT },
+      priority: { type: "string", enum: TICKET_PRIORITY },
+      tags: { type: "array", items: { type: "string" } },
+      source: { type: "string" },
+      catalogItemId: { type: "string" },
+      ciIds: { type: "array", items: { type: "string" } },
+      autoResolve: { type: "boolean", default: false },
+    },
+    example: {
+      subject: "VPN access fails after client update",
+      body: "The VPN client reports an authentication error.",
+      requesterEmail: "requester@example.com",
+      type: "incident",
+      channel: "api",
+      category: "Network",
+      impact: "medium",
+      urgency: "high",
+      tags: ["external-integration"],
+      autoResolve: false,
+    },
+  },
+  UpdateTicketRequest: {
+    type: "object",
+    minProperties: 1,
+    properties: {
+      priority: { type: "string", enum: TICKET_PRIORITY },
+      priorityJustification: {
+        type: "string",
+        description:
+          "Supply when manually overriding the impact-by-urgency derived priority.",
+      },
+      impact: { type: "string", enum: IMPACT },
+      urgency: { type: "string", enum: IMPACT },
+      category: { type: "string", enum: CATEGORY },
+      subcategory: { type: ["string", "null"] },
+      tags: { type: "array", items: { type: "string" } },
+      status: { type: "string", enum: TICKET_STATUS },
+      assignmentGroupId: { type: ["string", "null"] },
+      resolutionNotes: { type: ["string", "null"] },
+      ciIds: { type: "array", items: { type: "string" } },
+      customFields: { type: "object", additionalProperties: true },
+    },
+  },
+  AddMessageRequest: {
+    type: "object",
+    required: ["body"],
+    properties: {
+      body: { type: "string", minLength: 1 },
+      visibility: {
+        type: "string",
+        enum: ["public", "internal"],
+        default: "public",
+        description:
+          "Internal notes require ticket.write and are never returned to requesters.",
+      },
+      asRequester: {
+        type: "boolean",
+        default: false,
+        description:
+          "Requester-role keys always post publicly as the requester regardless of this value.",
+      },
+    },
+  },
+  ApiKey: {
+    type: "object",
+    required: [
+      "id",
+      "tenantId",
+      "name",
+      "prefix",
+      "role",
+      "active",
+      "createdAt",
+      "updatedAt",
+    ],
+    properties: {
+      id: { type: "string", example: "key_example" },
+      tenantId: { type: "string" },
+      name: { type: "string" },
+      prefix: {
+        type: "string",
+        description: "Non-secret prefix used to identify the key.",
+      },
+      role: {
+        type: "string",
+        enum: ["requester", "agent", "manager", "tenant_admin", "super_admin"],
+      },
+      agentIds: { type: "array", items: { type: "string" } },
+      description: { type: ["string", "null"] },
+      active: { type: "boolean" },
+      lastUsedAt: { type: ["string", "null"], format: "date-time" },
+      expiresAt: { type: ["string", "null"], format: "date-time" },
+      createdBy: { type: ["string", "null"] },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  CreatedApiKey: {
+    allOf: [
+      ref("ApiKey"),
+      {
+        type: "object",
+        required: ["key"],
+        properties: {
+          key: {
+            type: "string",
+            readOnly: true,
+            description:
+              "Full secret returned exactly once. Store it in a secret manager.",
+          },
+        },
+      },
+    ],
+  },
+  CreateApiKeyRequest: {
+    type: "object",
+    required: ["name"],
+    properties: {
+      name: { type: "string", minLength: 1, maxLength: 80 },
+      role: {
+        type: "string",
+        enum: ["requester", "agent", "manager", "tenant_admin"],
+        default: "agent",
+      },
+      description: { type: ["string", "null"], maxLength: 300 },
+      agentIds: { type: "array", items: { type: "string" } },
+      expiresAt: { type: ["string", "null"], format: "date-time" },
+    },
+  },
+  TicketResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: ref("Ticket"),
+    },
+  },
+  TicketViewResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: ref("TicketView"),
+    },
+  },
+  TicketListResponse: {
+    type: "object",
+    required: ["ok", "data", "meta"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: { type: "array", items: ref("Ticket") },
+      meta: ref("PageMeta"),
+    },
+  },
+  ApiKeyListResponse: {
+    type: "object",
+    required: ["ok", "data", "meta"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: { type: "array", items: ref("ApiKey") },
+      meta: ref("PageMeta"),
+    },
+  },
+  CreateApiKeyResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: ref("CreatedApiKey"),
+    },
+  },
+  DeleteTicketResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: {
+        type: "object",
+        required: ["deleted"],
+        properties: { deleted: { type: "boolean", const: true } },
+      },
+    },
+  },
+  RevokeApiKeyResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: {
+        type: "object",
+        required: ["revoked"],
+        properties: { revoked: { type: "boolean", const: true } },
+      },
+    },
+  },
+} as const;
+
+const SPEC = {
+  ...BASE_SPEC,
+  info: {
+    ...BASE_SPEC.info,
+    version: "2.0.0",
+    description:
+      "Production ITSM REST API. External systems authenticate with a tenant-scoped API key using Authorization: Bearer or x-api-key. Responses use the documented success/error envelopes; the health probe is intentionally flat and unauthenticated.",
+  },
+  servers: [
+    {
+      url: "https://netlink-support.vercel.app/api/v1",
+      description: "Production",
+    },
+    {
+      url: "/api/v1",
+      description: "Current origin (local development or first-party UI)",
+    },
+  ],
+  externalDocs: {
+    description: "External integration guide",
+    url: "https://github.com/dhwajdhruvkar/ticket-management-integration/blob/main/docs/EXTERNAL_API_GUIDE.md",
+  },
+  tags: [
+    { name: "Health", description: "Unauthenticated service capability probe." },
+    { name: "OpenAPI", description: "Machine-readable API contract." },
+    { name: "Tickets", description: "Ticket intake, retrieval, updates, and soft deletion." },
+    { name: "Messages", description: "Public replies and agent-only internal notes." },
+    { name: "API Keys", description: "Tenant-admin credential lifecycle." },
+  ],
+  components: {
+    ...BASE_SPEC.components,
+    securitySchemes: {
+      bearerApiKey: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "nlk_...",
+        description:
+          "Recommended external-system authentication. Send the full key as Authorization: Bearer <key>.",
+      },
+      headerApiKey: {
+        type: "apiKey",
+        in: "header",
+        name: "x-api-key",
+        description:
+          "Alternative API-key header. Do not send both API-key forms in one request.",
+      },
+      sessionCookie: {
+        type: "apiKey",
+        in: "cookie",
+        name: "authjs.session-token",
+        description:
+          "First-party browser session only. External integrations should use an API key.",
+      },
+    },
+    schemas: {
+      ...BASE_SPEC.components.schemas,
+      ...CORE_SCHEMAS,
+    },
+    responses: {
+      BadRequest: errorResponse(
+        "Malformed JSON, validation failure, or invalid pagination.",
+        "Validation failed."
+      ),
+      Unauthorized: errorResponse(
+        "Credentials are missing, invalid, expired, or revoked.",
+        "Invalid, expired, or revoked API key."
+      ),
+      Forbidden: errorResponse(
+        "The authenticated role lacks the required permission.",
+        "Forbidden."
+      ),
+      NotFound: errorResponse(
+        "The resource is absent or outside the caller's tenant/record scope.",
+        "Ticket not found."
+      ),
+      BodyTooLarge: errorResponse(
+        "The request body exceeds the one-megabyte JSON/text limit.",
+        "Request body too large."
+      ),
+      RateLimited: errorResponse(
+        "A fixed-window per-client limit was exceeded.",
+        "Rate limit exceeded. Try again shortly."
+      ),
+    },
+  },
+  security: [
+    { bearerApiKey: [] },
+    { headerApiKey: [] },
+    { sessionCookie: [] },
+  ],
+  paths: {
+    ...BASE_SPEC.paths,
+    "/openapi.json": {
+      get: {
+        tags: ["OpenAPI"],
+        operationId: "getOpenApiDocument",
+        summary: "Download the OpenAPI 3.1 document",
+        responses: {
+          "200": jsonResponse("OpenAPI document", { type: "object" }),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/health": {
+      get: {
+        tags: ["Health"],
+        operationId: "getHealth",
+        summary: "Read service health and enabled capabilities",
+        security: [],
+        responses: {
+          "200": jsonResponse("Service is healthy", ref("HealthResponse")),
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/tickets": {
+      get: {
+        tags: ["Tickets"],
+        operationId: "listTickets",
+        summary: "List visible active tickets",
+        description:
+          "Requires ticket.read. Requester keys receive only tickets filed by their own requester identity.",
+        "x-required-permission": "ticket.read",
+        parameters: [
+          ...TICKET_PAGINATION,
+          {
+            name: "status",
+            in: "query",
+            schema: { type: "string", enum: TICKET_STATUS },
+          },
+          {
+            name: "type",
+            in: "query",
+            schema: { type: "string", enum: TICKET_TYPE },
+          },
+          {
+            name: "assigneeId",
+            in: "query",
+            description:
+              "User id, or unassigned for tickets without an assignee.",
+            schema: { type: "string" },
+          },
+          { name: "groupId", in: "query", schema: { type: "string" } },
+        ],
+        responses: {
+          "200": jsonResponse("Paginated ticket list", ref("TicketListResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+      post: {
+        tags: ["Tickets"],
+        operationId: "createTicket",
+        summary: "Create a ticket through the full intake pipeline",
+        description:
+          "Requires ticket.create. The intake pipeline applies classification, SLA, routing, automations, and optional AI handling.",
+        "x-required-permission": "ticket.create",
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreateTicketRequest")),
+        },
+        responses: {
+          "201": jsonResponse("Ticket created", ref("TicketResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/tickets/{id}": {
+      get: {
+        tags: ["Tickets"],
+        operationId: "getTicket",
+        summary: "Get a ticket and its conversation",
+        description:
+          "Requires ticket.read. Agent-or-higher roles receive internal notes; requesters receive only their own ticket and public conversation.",
+        "x-required-permission": "ticket.read",
+        parameters: [ID],
+        responses: {
+          "200": jsonResponse("Ticket detail", ref("TicketViewResponse")),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+      patch: {
+        tags: ["Tickets"],
+        operationId: "updateTicket",
+        summary: "Update ticket fields",
+        description:
+          "Requires ticket.write (agent or higher). Impact/urgency changes recalculate priority unless an explicit priority override wins.",
+        "x-required-permission": "ticket.write",
+        parameters: [ID],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("UpdateTicketRequest")),
+        },
+        responses: {
+          "200": jsonResponse("Ticket updated", ref("TicketResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+      delete: {
+        tags: ["Tickets"],
+        operationId: "softDeleteTicket",
+        summary: "Soft-delete a ticket",
+        description:
+          "Requires ticket.delete (manager or higher). The ticket row, conversation, audit history, and reporting history are preserved.",
+        "x-required-permission": "ticket.delete",
+        parameters: [ID],
+        responses: {
+          "200": jsonResponse("Ticket soft-deleted", ref("DeleteTicketResponse")),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/tickets/{id}/messages": {
+      post: {
+        tags: ["Messages"],
+        operationId: "addTicketMessage",
+        summary: "Add a public reply or internal note",
+        description:
+          "Requires ticket.read on the visible ticket. Public requester replies are allowed for the owning requester; agent/internal replies additionally require ticket.write. Retrieve messages through GET /tickets/{id}.",
+        "x-required-permission": "ticket.read",
+        parameters: [ID],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("AddMessageRequest")),
+        },
+        responses: {
+          "200": jsonResponse("Message added and ticket returned", ref("TicketResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/api-keys": {
+      get: {
+        tags: ["API Keys"],
+        operationId: "listApiKeys",
+        summary: "List API-key metadata",
+        description:
+          "Requires admin (tenant_admin or super_admin). Full secrets and hashes are never returned.",
+        "x-required-permission": "admin",
+        parameters: API_KEY_PAGINATION,
+        responses: {
+          "200": jsonResponse("Paginated API-key metadata", ref("ApiKeyListResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+      post: {
+        tags: ["API Keys"],
+        operationId: "createApiKey",
+        summary: "Create an API key",
+        description:
+          "Requires admin (tenant_admin or super_admin). The full secret is returned exactly once.",
+        "x-required-permission": "admin",
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreateApiKeyRequest")),
+        },
+        responses: {
+          "201": jsonResponse("API key created", ref("CreateApiKeyResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "413": { $ref: "#/components/responses/BodyTooLarge" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/api-keys/{id}": {
+      delete: {
+        tags: ["API Keys"],
+        operationId: "revokeApiKey",
+        summary: "Revoke an API key",
+        description:
+          "Requires admin (tenant_admin or super_admin). Revocation is immediate and audited.",
+        "x-required-permission": "admin",
+        parameters: [ID],
+        responses: {
+          "200": jsonResponse("API key revoked", ref("RevokeApiKeyResponse")),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
   },
 } as const;
 
