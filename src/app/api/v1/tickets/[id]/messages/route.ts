@@ -1,5 +1,5 @@
 import { fail, ok, readJson } from "@/server/http";
-import { actorContext, isResponse, loadTicket } from "@/server/guards";
+import { isResponse, loadTicket, requirePermission } from "@/server/guards";
 import { can, isAgentRole } from "@/server/auth/rbac";
 import { agentReply, requesterReply } from "@/server/services/agentActions";
 import type { MessageVisibility } from "@/server/domain/models";
@@ -23,9 +23,11 @@ interface MessageBody {
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+
   const payload = await readJson<MessageBody>(req);
   if (!payload?.body?.trim()) return fail("Message body is required.");
-  const ctx = await actorContext(req);
 
   // Tenant scope for everyone; requesters additionally only see their own.
   const ticket = await loadTicket(ctx, id);

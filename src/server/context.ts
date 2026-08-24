@@ -9,8 +9,9 @@
 // The fallbacks in (3) exist so the zero-infra demo and local tests stay
 // frictionless; they are DISABLED when config.demoMode is false (production).
 // In production an unauthenticated API request resolves to an inert "anonymous"
-// actor whose role holds no RBAC permissions, so every guarded route returns
-// 403 (the middleware already returns 401 for /api/v1 without credentials).
+// actor whose role holds no RBAC permissions. The request guard distinguishes a
+// presented-but-invalid API key (401) from an authenticated actor who lacks a
+// permission (403); the proxy rejects credential-less /api/v1 traffic first.
 // =============================================================================
 
 import { auth } from "@/auth";

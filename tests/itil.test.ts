@@ -289,8 +289,9 @@ describe("TC7 — service-request approvals", () => {
 });
 
 describe("TC9 — RBAC matrix", () => {
-  it("keeps requesters read-only and reserves approvals for managers+", () => {
+  it("limits requesters to ticket creation/read and reserves approvals for managers+", () => {
     expect(can("requester", "ticket.read")).toBe(true);
+    expect(can("requester", "ticket.create")).toBe(true);
     expect(can("requester", "ticket.write")).toBe(false);
     expect(can("requester", "audit.read")).toBe(false);
     expect(can("agent", "ticket.write")).toBe(true);

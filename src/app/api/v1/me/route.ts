@@ -18,7 +18,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ALL_PERMISSIONS: Permission[] = [
-  "ticket.read", "ticket.write", "ticket.assign", "ticket.resolve",
+  "ticket.read", "ticket.create", "ticket.write", "ticket.assign", "ticket.resolve",
   "kb.read", "kb.write", "problem.write", "change.write", "change.approve",
   "asset.write", "automation.write", "report.read", "audit.read", "admin",
 ];

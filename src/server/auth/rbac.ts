@@ -11,6 +11,7 @@ export { DISPATCH_ROLES } from "../../shared/rbac";
 
 export type Permission =
   | "ticket.read"
+  | "ticket.create"
   | "ticket.write"
   | "ticket.delete"
   | "ticket.assign"
@@ -31,7 +32,7 @@ export type Permission =
   | "audit.read"
   | "admin";
 
-const REQUESTER: Permission[] = ["ticket.read", "kb.read"];
+const REQUESTER: Permission[] = ["ticket.read", "ticket.create", "kb.read"];
 const AGENT: Permission[] = [
   ...REQUESTER,
   "ticket.write",

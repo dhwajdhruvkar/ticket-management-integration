@@ -12,6 +12,7 @@
 
 import type { NextResponse } from "next/server";
 import { currentActor, currentTenantId, type ActingUser } from "./context";
+import { extractApiKey } from "./auth/apiKeys";
 import { assertTenant, fail } from "./http";
 import { can, isAgentRole, type Permission } from "./auth/rbac";
 import { getStore } from "./data";
@@ -31,15 +32,21 @@ export async function actorContext(req: Request): Promise<ActorContext> {
 }
 
 /**
- * Resolve the actor and check a permission. Returns a 403 response instead of
- * the context when the actor lacks the permission.
+ * Resolve the actor and check a permission. A presented API-key candidate that
+ * fails verification is an authentication failure (401); a verified actor who
+ * lacks the requested permission is an authorization failure (403).
  */
 export async function requirePermission(
   req: Request,
   permission: Permission
 ): Promise<ActorContext | NextResponse> {
   const ctx = await actorContext(req);
-  if (!can(ctx.role, permission)) return fail("Forbidden.", 403);
+  if (!can(ctx.role, permission)) {
+    if (ctx.actor.role === "none" && extractApiKey(req)) {
+      return fail("Invalid, expired, or revoked API key.", 401);
+    }
+    return fail("Forbidden.", 403);
+  }
   return ctx;
 }
 

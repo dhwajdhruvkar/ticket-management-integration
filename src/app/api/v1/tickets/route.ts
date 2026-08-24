@@ -1,4 +1,3 @@
-import { currentActor, currentTenantId } from "@/server/context";
 import {
   fail,
   listOptionsFromPagination,
@@ -7,7 +6,8 @@ import {
   parsePagination,
   readJson,
 } from "@/server/http";
-import { can, isAgentRole } from "@/server/auth/rbac";
+import { isResponse, requirePermission } from "@/server/guards";
+import { isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
 import { listTickets, type NewTicketInput } from "@/server/services/ticketService";
 import { intakeTicket } from "@/server/services/intake";
@@ -28,9 +28,9 @@ export const dynamic = "force-dynamic";
 
 // GET: return tickets the actor may see (requesters -> own only).
 export async function GET(req: Request) {
-  const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
-  const role = actor.role as Role;
-  if (!can(role, "ticket.read")) return fail("Forbidden.", 403);
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId, actor, role } = ctx;
   const parsed = parsePagination(req, {
     defaultSortBy: "createdAt",
     defaultSortDir: "desc",
@@ -78,7 +78,9 @@ export async function POST(req: Request) {
   if (!rateLimit(clientKey(req, "tickets"), 60, 60_000)) {
     return fail("Rate limit exceeded. Try again shortly.", 429);
   }
-  const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
+  const ctx = await requirePermission(req, "ticket.create");
+  if (isResponse(ctx)) return ctx;
+  const { tenantId, actor } = ctx;
   const body = await readJson<NewTicketInput & { autoResolve?: boolean }>(req);
   if (!body?.subject || !body?.body) {
     return fail("subject and body are required.");
