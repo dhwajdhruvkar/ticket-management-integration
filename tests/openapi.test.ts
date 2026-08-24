@@ -15,6 +15,12 @@ function object(value: unknown): JsonObject {
   return value as JsonObject;
 }
 
+function openApiRequest(
+  headers: HeadersInit = { "x-actor": "dana.lee@netlink.com" }
+): Request {
+  return new Request("http://phase14.test/api/v1/openapi.json", { headers });
+}
+
 function operation(
   paths: JsonObject,
   route: string,
@@ -25,7 +31,7 @@ function operation(
 
 describe("Phase 14 OpenAPI and external documentation contract", () => {
   it("publishes an OpenAPI 3.1 production contract for the verified integration surface", async () => {
-    const response = await getOpenApi();
+    const response = await getOpenApi(openApiRequest());
     expect(response.status).toBe(200);
 
     const spec = object(await response.json());
@@ -92,7 +98,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
   });
 
   it("documents pagination, messages, and the 401/403 error boundary precisely", async () => {
-    const spec = object(await (await getOpenApi()).json());
+    const spec = object(await (await getOpenApi(openApiRequest())).json());
     const paths = object(spec.paths);
 
     const listTickets = operation(paths, "/tickets", "get");
@@ -172,10 +178,18 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(guide).not.toMatch(/nlk_[A-Za-z0-9_-]{32,}/);
   });
 
-  it("returns 401 rather than 403 for an invalid key on API-key administration routes", async () => {
+  it("returns 401 rather than 403 for invalid keys on protected documentation and administration routes", async () => {
+    const invalidHeaders = { authorization: "Bearer nlk_invalid" };
+    const openApiResponse = await getOpenApi(openApiRequest(invalidHeaders));
+    expect(openApiResponse.status).toBe(401);
+    await expect(openApiResponse.json()).resolves.toEqual({
+      ok: false,
+      error: "Invalid, expired, or revoked API key.",
+    });
+
     const response = await listApiKeys(
       new Request("http://phase14.test/api/v1/api-keys", {
-        headers: { authorization: "Bearer nlk_invalid" },
+        headers: invalidHeaders,
       })
     );
 

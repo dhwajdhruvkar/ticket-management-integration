@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isResponse, requirePermission } from "@/server/guards";
 
 // =============================================================================
 // GET /api/v1/openapi.json — hand-maintained OpenAPI 3.1 description of the
@@ -7,7 +8,7 @@ import { NextResponse } from "next/server";
 // =============================================================================
 
 export const runtime = "nodejs";
-export const dynamic = "force-static";
+export const dynamic = "force-dynamic";
 
 const envelope = (dataSchema: Record<string, unknown>) => ({
   type: "object",
@@ -849,6 +850,8 @@ const SPEC = {
         tags: ["OpenAPI"],
         operationId: "getOpenApiDocument",
         summary: "Download the OpenAPI 3.1 document",
+        description: "Requires ticket.read and a fully validated session or API key.",
+        "x-required-permission": "ticket.read",
         responses: {
           "200": jsonResponse("OpenAPI document", { type: "object" }),
           "401": { $ref: "#/components/responses/Unauthorized" },
@@ -1062,6 +1065,8 @@ const SPEC = {
   },
 } as const;
 
-export async function GET() {
+export async function GET(req: Request) {
+  const ctx = await requirePermission(req, "ticket.read");
+  if (isResponse(ctx)) return ctx;
   return NextResponse.json(SPEC);
 }
