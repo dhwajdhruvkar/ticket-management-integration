@@ -42,6 +42,7 @@ import type {
   TicketMessageRow,
   TicketRow,
   UserRow,
+  UserInvitationRow,
 } from "../domain/models";
 
 // Bump when the row shapes change incompatibly (e.g. the P1-P5 priority
@@ -56,13 +57,14 @@ import type {
 // v9: admin-authored help text on custom field definitions.
 // v10: SLA deadlines recomputed with the fixed business-hours walker, so seeded
 //      due dates from v9 are wrong for business-hours policies.
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 interface MemDb {
   version?: number;
   tenants: TenantRow[];
   departments: DepartmentRow[];
   users: UserRow[];
+  invitations: UserInvitationRow[];
   groups: AssignmentGroupRow[];
   tickets: TicketRow[];
   messages: TicketMessageRow[];
@@ -92,7 +94,7 @@ interface MemDb {
 function emptyDb(): MemDb {
   return {
     version: SCHEMA_VERSION,
-    tenants: [], departments: [], users: [], groups: [], tickets: [], messages: [], events: [],
+    tenants: [], departments: [], users: [], invitations: [], groups: [], tickets: [], messages: [], events: [],
     resolutions: [], citations: [], articles: [], problems: [], changes: [],
     approvals: [], assets: [], cis: [], ciRelationships: [], catalogItems: [],
     slaPolicies: [], automations: [], macros: [], customFieldDefs: [], attachments: [], notifications: [], audit: [],
@@ -190,6 +192,7 @@ export class MemoryStore implements DataStore {
 
   private db: MemDb = emptyDb();
   private initPromise: Promise<void> | null = null;
+  private transactionDepth = 0;
   private readonly filePath = path.join(process.cwd(), config.dataDir, "store.json");
 
   tenants = new MemoryCollection<TenantRow>(() => this.db.tenants, () => this.persist(), (id) =>
@@ -197,6 +200,12 @@ export class MemoryStore implements DataStore {
   );
   departments = new MemoryCollection<DepartmentRow>(() => this.db.departments, () => this.persist());
   users = new MemoryCollection<UserRow>(() => this.db.users, () => this.persist());
+  invitations = new MemoryCollection<UserInvitationRow>(
+    () => this.db.invitations,
+    () => this.persist(),
+    undefined,
+    "tokenHash"
+  );
   groups = new MemoryCollection<AssignmentGroupRow>(() => this.db.groups, () => this.persist());
   tickets = new MemoryCollection<TicketRow>(() => this.db.tickets, () => this.persist(), (id) =>
     this.cascadeTicket(id)
@@ -246,6 +255,22 @@ export class MemoryStore implements DataStore {
     return this.initPromise;
   }
 
+  async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
+    const snapshot = clone(this.db);
+    this.transactionDepth += 1;
+    try {
+      const result = await work(this);
+      this.transactionDepth -= 1;
+      if (this.transactionDepth === 0) this.persist();
+      return result;
+    } catch (error) {
+      this.db = snapshot;
+      this.transactionDepth -= 1;
+      if (this.transactionDepth === 0) this.persist();
+      throw error;
+    }
+  }
+
   /** Children of a ticket, matching the ticket relations marked Cascade. */
   private cascadeTicket(ticketId: string): void {
     const resolutionIds = new Set(
@@ -286,6 +311,7 @@ export class MemoryStore implements DataStore {
     this.db.tickets = owned(this.db.tickets);
     this.db.departments = owned(this.db.departments);
     this.db.users = owned(this.db.users);
+    this.db.invitations = owned(this.db.invitations);
     this.db.groups = owned(this.db.groups);
     this.db.articles = owned(this.db.articles);
     this.db.problems = owned(this.db.problems);
@@ -340,6 +366,7 @@ export class MemoryStore implements DataStore {
   // Flush the entire DB to store.json. Best-effort: a read-only FS (e.g.
   // serverless) is tolerated and the app keeps running in memory only.
   private persist(): void {
+    if (this.transactionDepth > 0) return;
     try {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
       fs.writeFileSync(this.filePath, JSON.stringify(this.db, null, 2), "utf8");

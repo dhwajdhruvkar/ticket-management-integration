@@ -102,6 +102,36 @@ export async function notify(input: NotifyInput): Promise<NotificationRow> {
   return created;
 }
 
+/**
+ * Deliver a credential-bearing account email without persisting its body.
+ * Setup/reset tokens must never land in Notification rows, audit payloads, or
+ * logs. Callers receive false when no provider exists or delivery fails and can
+ * show the one-time copy link to the authorized administrator instead.
+ */
+export async function sendSensitiveEmail(
+  to: string,
+  subject: string,
+  body: string
+): Promise<boolean> {
+  try {
+    if (config.emailProvider === "brevo" && config.features.brevoOutbound) {
+      const { sendBrevoMail } = await import("../channels/brevoEmail");
+      await sendBrevoMail(to, subject, body);
+      return true;
+    }
+    if (config.emailProvider === "graph" && config.features.graph) {
+      await sendGraphMail(to, subject, body);
+      return true;
+    }
+  } catch (error) {
+    logger.error("sensitive email delivery failed", {
+      to,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return false;
+}
+
 async function graphToken(): Promise<string> {
   const { tenantId, clientId, clientSecret } = config.graph;
   const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {

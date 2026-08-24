@@ -8,6 +8,7 @@ import {
   readJson,
 } from "@/server/http";
 import { can } from "@/server/auth/rbac";
+import { getStore } from "@/server/data";
 import {
   createDepartment,
   listDepartments,
@@ -22,6 +23,16 @@ export async function GET(req: Request) {
   const [tenantId, actor] = await Promise.all([currentTenantId(req), currentActor(req)]);
   // Agent+ may read departments (pickers); requesters cannot.
   if (!can(actor.role as Role, "report.read")) return fail("Forbidden.", 403);
+  const requestedOrganizationId = new URL(req.url).searchParams.get("organizationId")?.trim();
+  let targetTenant = tenantId;
+  if (requestedOrganizationId && requestedOrganizationId !== tenantId) {
+    if (actor.role !== "super_admin") return fail("Forbidden.", 403);
+    const store = await getStore();
+    if (!(await store.tenants.get(requestedOrganizationId))) {
+      return fail("Organization not found.", 404);
+    }
+    targetTenant = requestedOrganizationId;
+  }
   const parsed = parsePagination(req, {
     defaultSortBy: "name",
     defaultSortDir: "asc",
@@ -30,7 +41,7 @@ export async function GET(req: Request) {
   if (!parsed.ok) return parsed.response;
   const pagination = parsed.value;
   const result = await listDepartments(
-    tenantId,
+    targetTenant,
     listOptionsFromPagination<DepartmentRow>(pagination)
   );
   return paginated(result.data, result.total, pagination);

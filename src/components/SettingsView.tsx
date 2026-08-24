@@ -46,6 +46,39 @@ interface Health {
 
 type ApiKeyView = Omit<ApiKeyRow, "keyHash">;
 
+type UserAccessStatus = "invited" | "active" | "locked" | "disabled";
+
+interface UserAccessView
+  extends Omit<UserRow, "passwordHash" | "failedLoginAttempts" | "lockedUntil"> {
+  accessStatus: UserAccessStatus;
+  pendingInvitationExpiresAt: string | null;
+  hasLocalPassword: boolean;
+}
+
+interface AccessLinkView {
+  status: "pending";
+  purpose: "activate" | "reset";
+  expiresAt: string;
+  delivery: "email_sent" | "copy_required";
+  setupUrl: string;
+}
+
+interface InvitedUserResult {
+  user: UserAccessView;
+  invitation: AccessLinkView;
+}
+
+interface OrganizationView extends TenantRow {
+  onboardingStatus: "pending" | "active" | "locked";
+  admin: UserAccessView | null;
+}
+
+interface ProvisionOrganizationResult {
+  organization: TenantRow;
+  admin: UserAccessView;
+  invitation: AccessLinkView;
+}
+
 export default function SettingsView() {
   const router = useRouter();
   const { persona, ready } = usePersona();
@@ -1389,27 +1422,36 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
 
 const ROLE_OPTIONS_BY_ADMIN: Record<string, string[]> = {
   super_admin: ["requester", "agent", "manager", "tenant_admin", "super_admin"],
-  tenant_admin: ["requester", "agent", "manager"],
+  tenant_admin: ["requester", "agent", "manager", "tenant_admin"],
 };
 
 function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   const toast = useToast();
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const [users, setUsers] = useState<UserAccessView[]>([]);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
-  const [orgs, setOrgs] = useState<TenantRow[]>([]);
+  const [orgs, setOrgs] = useState<OrganizationView[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
+  const [accessLink, setAccessLink] = useState<{ email: string; link: AccessLinkView } | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", role: "agent", departmentId: "", organizationId: "" });
+  const [form, setForm] = useState({ name: "", email: "", role: "agent", departmentId: "" });
 
   const roleOptions = isSuperAdmin
     ? ROLE_OPTIONS_BY_ADMIN.super_admin
     : ROLE_OPTIONS_BY_ADMIN.tenant_admin;
 
+  const organizationQuery = isSuperAdmin && selectedOrganizationId
+    ? "?organizationId=" + encodeURIComponent(selectedOrganizationId)
+    : "";
+
   const load = useCallback(() => {
-    apiGetAll<UserRow>("/users").then(setUsers).catch(() => setUsers([]));
-    apiGetAll<DepartmentRow>("/departments").then(setDepartments).catch(() => setDepartments([]));
-    if (isSuperAdmin) apiGetAll<TenantRow>("/organizations").then(setOrgs).catch(() => setOrgs([]));
-  }, [isSuperAdmin]);
+    const query = isSuperAdmin && selectedOrganizationId
+      ? "?organizationId=" + encodeURIComponent(selectedOrganizationId)
+      : "";
+    apiGetAll<UserAccessView>("/users" + query).then(setUsers).catch(() => setUsers([]));
+    apiGetAll<DepartmentRow>("/departments" + query).then(setDepartments).catch(() => setDepartments([]));
+    if (isSuperAdmin) apiGetAll<OrganizationView>("/organizations").then(setOrgs).catch(() => setOrgs([]));
+  }, [isSuperAdmin, selectedOrganizationId]);
   useEffect(() => {
     load();
   }, [load]);
@@ -1420,15 +1462,16 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     if (!form.name.trim() || !form.email.trim()) return;
     setBusy(true);
     try {
-      await apiSend("/users", "POST", {
+      const result = await apiSend<InvitedUserResult>("/users", "POST", {
         name: form.name.trim(),
         email: form.email.trim(),
         role: form.role,
         departmentId: form.departmentId || null,
-        ...(form.organizationId ? { organizationId: form.organizationId } : {}),
+        ...(selectedOrganizationId ? { organizationId: selectedOrganizationId } : {}),
       });
-      toast.success({ title: "User created", description: form.email.trim() });
-      setForm({ name: "", email: "", role: "agent", departmentId: "", organizationId: "" });
+      setAccessLink({ email: result.user.email, link: result.invitation });
+      toast.success({ title: "Invitation created", description: form.email.trim() });
+      setForm({ name: "", email: "", role: "agent", departmentId: "" });
       setOpen(false);
       load();
     } catch (err) {
@@ -1438,10 +1481,10 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     }
   }
 
-  async function changeRole(u: UserRow, role: string) {
+  async function changeRole(u: UserAccessView, role: string) {
     if (role === u.role) return;
     try {
-      await apiSend(`/users/${u.id}`, "PATCH", { role });
+      await apiSend("/users/" + u.id + organizationQuery, "PATCH", { role });
       toast.success({ title: "Role updated", description: `${u.name} → ${role.replace("_", " ")}` });
       load();
     } catch (err) {
@@ -1449,18 +1492,48 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     }
   }
 
-  async function toggleActive(u: UserRow) {
+  async function toggleActive(u: UserAccessView) {
     try {
       if (u.active) {
-        await apiSend(`/users/${u.id}`, "DELETE");
+        await apiSend("/users/" + u.id + organizationQuery, "DELETE");
         toast.info({ title: "User deactivated", description: u.name });
       } else {
-        await apiSend(`/users/${u.id}`, "PATCH", { active: true });
+        await apiSend("/users/" + u.id + organizationQuery, "PATCH", { active: true });
         toast.success({ title: "User reactivated", description: u.name });
       }
       load();
     } catch (err) {
       toast.error({ title: "Could not update user", description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function issueAccessLink(user: UserAccessView) {
+    setBusy(true);
+    try {
+      const result = await apiSend<InvitedUserResult>(
+        "/users/" + user.id + "/access-link" + organizationQuery,
+        "POST"
+      );
+      setAccessLink({ email: result.user.email, link: result.invitation });
+      toast.success({
+        title: result.invitation.purpose === "reset" ? "Reset link created" : "Setup link regenerated",
+        description: user.email,
+      });
+      load();
+    } catch (err) {
+      toast.error({ title: "Could not create access link", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyAccessLink() {
+    if (!accessLink) return;
+    try {
+      await navigator.clipboard.writeText(accessLink.link.setupUrl);
+      toast.success({ title: "Setup link copied", description: accessLink.email });
+    } catch {
+      toast.error({ title: "Copy failed", description: "Select and copy the link manually." });
     }
   }
 
@@ -1472,6 +1545,44 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           {open ? "Close" : "+ New user"}
         </button>
       </div>
+
+      {isSuperAdmin ? (
+        <label className="label" style={{ display: "grid", gap: 6, maxWidth: 420, marginBottom: 12 }}>
+          Organization
+          <select
+            className="select"
+            value={selectedOrganizationId}
+            onChange={(event) => {
+              setSelectedOrganizationId(event.target.value);
+              setForm((current) => ({ ...current, departmentId: "" }));
+              setAccessLink(null);
+            }}
+          >
+            <option value="">Current organization</option>
+            {orgs.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.name} ({organization.slug})
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {accessLink ? (
+        <div className="panel-2 anim-fade-up" style={{ padding: "0.85rem", marginBottom: 12, borderColor: "var(--brand-300)" }}>
+          <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: 4 }}>
+            One-time {accessLink.link.purpose === "reset" ? "reset" : "setup"} link for {accessLink.email}
+          </div>
+          <div className="muted" style={{ fontSize: "0.72rem", marginBottom: 7 }}>
+            Expires {new Date(accessLink.link.expiresAt).toLocaleString()} · {accessLink.link.delivery === "email_sent" ? "Email sent" : "Copy and share securely"}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input className="input mono" readOnly value={accessLink.link.setupUrl} onFocus={(event) => event.currentTarget.select()} />
+            <button type="button" className="btn btn-primary" onClick={() => void copyAccessLink()}>Copy</button>
+            <button type="button" className="btn btn-ghost" onClick={() => setAccessLink(null)}>Hide</button>
+          </div>
+        </div>
+      ) : null}
 
       {open ? (
         <div
@@ -1501,19 +1612,9 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
               </option>
             ))}
           </select>
-          {isSuperAdmin ? (
-            <select className="select" value={form.organizationId} onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value }))}>
-              <option value="">Current organization</option>
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
           <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 6 }}>
             <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !form.name.trim() || !form.email.trim()}>
-              {busy ? "Creating…" : "Create user"}
+              {busy ? "Creating…" : "Create invitation"}
             </button>
           </div>
         </div>
@@ -1523,14 +1624,15 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         <p className="muted" style={{ fontSize: "0.84rem", margin: 0 }}>No users yet.</p>
       ) : (
         <div className="table-scroll" style={{ margin: "0 -1.25rem" }}>
-          <table className="data-table" style={{ minWidth: 640 }}>
+          <table className="data-table" style={{ minWidth: 850 }}>
             <thead>
               <tr>
                 <th style={{ paddingLeft: "1.25rem" }}>Name</th>
                 <th>Email</th>
                 <th>Department</th>
                 <th>Role</th>
-                <th style={{ textAlign: "right", paddingRight: "1.25rem" }}>Status</th>
+                <th>Access</th>
+                <th style={{ textAlign: "right", paddingRight: "1.25rem" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1538,7 +1640,7 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                 const canManage = roleOptions.includes(u.role);
                 const opts = canManage ? roleOptions : [u.role, ...roleOptions];
                 return (
-                  <tr key={u.id} className="row-hover" style={{ opacity: u.active ? 1 : 0.55 }}>
+                  <tr key={u.id} className="row-hover" style={{ opacity: u.accessStatus === "disabled" ? 0.62 : 1 }}>
                     <td style={{ paddingLeft: "1.25rem", fontWeight: 600 }}>{u.name}</td>
                     <td className="muted">{u.email}</td>
                     <td className="muted">{deptName(u.departmentId)}</td>
@@ -1557,14 +1659,32 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                         ))}
                       </select>
                     </td>
-                    <td style={{ textAlign: "right", paddingRight: "1.25rem" }}>
+                    <td>
+                      <span className="badge" style={{ fontSize: "0.65rem" }}>
+                        {u.accessStatus === "invited" ? "Pending setup" : u.accessStatus[0].toUpperCase() + u.accessStatus.slice(1)}
+                      </span>
+                      {u.pendingInvitationExpiresAt ? (
+                        <div className="muted" style={{ fontSize: "0.64rem", marginTop: 3 }}>
+                          Expires {new Date(u.pendingInvitationExpiresAt).toLocaleString()}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={{ textAlign: "right", paddingRight: "1.25rem", whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem", marginRight: 5 }}
+                        disabled={!canManage || busy}
+                        onClick={() => void issueAccessLink(u)}
+                      >
+                        {u.accessStatus === "active" || u.accessStatus === "locked" ? "Reset access" : "Setup link"}
+                      </button>
                       <button
                         className={u.active ? "btn btn-danger" : "btn btn-ghost"}
                         style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
-                        disabled={!canManage}
+                        disabled={!canManage || (!u.active && !u.hasLocalPassword)}
                         onClick={() => void toggleActive(u)}
                       >
-                        {u.active ? "Deactivate" : "Reactivate"}
+                        {u.active ? "Deactivate" : u.hasLocalPassword ? "Reactivate" : "Awaiting setup"}
                       </button>
                     </td>
                   </tr>
@@ -1702,20 +1822,30 @@ type OrganizationDraft = {
   name: string;
   brand: string;
   isInternal: boolean;
+  adminName: string;
+  adminEmail: string;
 };
 
-const EMPTY_ORGANIZATION: OrganizationDraft = { name: "", brand: "", isInternal: false };
+const EMPTY_ORGANIZATION: OrganizationDraft = {
+  name: "",
+  brand: "",
+  isInternal: false,
+  adminName: "",
+  adminEmail: "",
+};
 
 function OrganizationsSection() {
   const toast = useToast();
-  const [orgs, setOrgs] = useState<TenantRow[]>([]);
-  const [editing, setEditing] = useState<TenantRow | "new" | null>(null);
+  const [orgs, setOrgs] = useState<OrganizationView[]>([]);
+  const [editing, setEditing] = useState<OrganizationView | "new" | null>(null);
   const [draft, setDraft] = useState<OrganizationDraft>(EMPTY_ORGANIZATION);
-  const [discarding, setDiscarding] = useState<TenantRow | null>(null);
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [provisioned, setProvisioned] = useState<ProvisionOrganizationResult | null>(null);
+  const [discarding, setDiscarding] = useState<OrganizationView | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGetAll<TenantRow>("/organizations").then(setOrgs).catch(() => setOrgs([]));
+    apiGetAll<OrganizationView>("/organizations").then(setOrgs).catch(() => setOrgs([]));
   }, []);
   useEffect(() => {
     load();
@@ -1723,14 +1853,18 @@ function OrganizationsSection() {
 
   function startCreate() {
     setDraft(EMPTY_ORGANIZATION);
+    setWizardStep(1);
+    setProvisioned(null);
     setEditing("new");
   }
 
-  function startEdit(organization: TenantRow) {
+  function startEdit(organization: OrganizationView) {
     setDraft({
       name: organization.name,
       brand: organization.brand ?? "",
       isInternal: organization.isInternal,
+      adminName: "",
+      adminEmail: "",
     });
     setEditing(organization);
   }
@@ -1752,7 +1886,11 @@ function OrganizationsSection() {
         isInternal: draft.isInternal,
       };
       if (editing === "new") {
-        await apiSend("/organizations", "POST", payload);
+        const result = await apiSend<ProvisionOrganizationResult>("/organizations", "POST", {
+          ...payload,
+          admin: { name: draft.adminName.trim(), email: draft.adminEmail.trim() },
+        });
+        setProvisioned(result);
         toast.success({ title: "Organization created", description: name });
       } else {
         await apiSend(`/organizations/${editing.id}`, "PATCH", payload);
@@ -1768,6 +1906,41 @@ function OrganizationsSection() {
       });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function resetAdminAccess(organization: OrganizationView) {
+    if (!organization.admin) return;
+    setBusy(true);
+    try {
+      const result = await apiSend<InvitedUserResult>(
+        "/users/" + organization.admin.id + "/access-link?organizationId=" + encodeURIComponent(organization.id),
+        "POST"
+      );
+      setProvisioned({
+        organization,
+        admin: result.user,
+        invitation: result.invitation,
+      });
+      toast.success({
+        title: result.invitation.purpose === "reset" ? "Admin reset link created" : "Admin setup link regenerated",
+        description: organization.admin.email,
+      });
+      load();
+    } catch (err) {
+      toast.error({ title: "Could not create admin access link", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyProvisionedLink() {
+    if (!provisioned) return;
+    try {
+      await navigator.clipboard.writeText(provisioned.invitation.setupUrl);
+      toast.success({ title: "Setup link copied", description: provisioned.admin.email });
+    } catch {
+      toast.error({ title: "Copy failed", description: "Select and copy the link manually." });
     }
   }
 
@@ -1809,71 +1982,114 @@ function OrganizationsSection() {
         </button>
       </div>
 
+      {provisioned ? (
+        <div className="panel-2 anim-fade-up" style={{ padding: "1rem", marginBottom: 12, borderColor: "var(--brand-300)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9 }}>
+            <div>
+              <div style={{ fontSize: "0.9rem", fontWeight: 750 }}>Organization access is ready</div>
+              <div className="muted" style={{ fontSize: "0.74rem", marginTop: 3 }}>
+                Share this one-time link securely. It is not stored in notifications or audit records.
+              </div>
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => setProvisioned(null)}>Hide</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 9 }}>
+            <div><span className="label">Organization code</span><div className="mono" style={{ marginTop: 3 }}>{provisioned.organization.slug}</div></div>
+            <div><span className="label">Initial admin</span><div style={{ marginTop: 3 }}>{provisioned.admin.email}</div></div>
+            <div><span className="label">Expires</span><div style={{ marginTop: 3 }}>{new Date(provisioned.invitation.expiresAt).toLocaleString()}</div></div>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input className="input mono" readOnly value={provisioned.invitation.setupUrl} onFocus={(event) => event.currentTarget.select()} />
+            <button type="button" className="btn btn-primary" onClick={() => void copyProvisionedLink()}>Copy link</button>
+          </div>
+        </div>
+      ) : null}
+
       {editing ? (
         <form
           className="panel-2 anim-fade-up"
           style={{ padding: "1rem", marginBottom: 12 }}
           onSubmit={(event) => {
             event.preventDefault();
-            void save();
+            if (editing !== "new" || wizardStep === 3) void save();
+            else setWizardStep((current) => (current + 1) as 2 | 3);
           }}
         >
           <div style={{ fontSize: "0.88rem", fontWeight: 750, marginBottom: 10 }}>
             {editing === "new" ? "Create organization" : `Edit ${editing.name}`}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-            <label className="label" style={{ display: "grid", gap: 6 }}>
-              Organization name
-              <input
-                className="input"
-                autoFocus
-                required
-                maxLength={120}
-                placeholder="e.g. Acme Support"
-                value={draft.name}
-                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-              />
-            </label>
-            <label className="label" style={{ display: "grid", gap: 6 }}>
-              Display brand <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
-              <input
-                className="input"
-                maxLength={120}
-                placeholder="Defaults to the organization name"
-                value={draft.brand}
-                onChange={(event) => setDraft((current) => ({ ...current, brand: event.target.value }))}
-              />
-            </label>
-          </div>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 9,
-              marginTop: 12,
-              cursor: "pointer",
-              fontSize: "0.8rem",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={draft.isInternal}
-              onChange={(event) => setDraft((current) => ({ ...current, isInternal: event.target.checked }))}
-              style={{ marginTop: 2 }}
-            />
-            <span>
-              <strong>Internal organization</strong>
-              <span className="muted" style={{ display: "block", marginTop: 2 }}>
-                Protected platform tenants cannot be discarded.
-              </span>
-            </span>
-          </label>
+          {editing === "new" ? (
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {["Organization", "Initial admin", "Review"].map((label, index) => (
+                <span key={label} className="badge" style={{ opacity: wizardStep === index + 1 ? 1 : 0.55 }}>
+                  {index + 1}. {label}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {editing !== "new" || wizardStep === 1 ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                <label className="label" style={{ display: "grid", gap: 6 }}>
+                  Organization name
+                  <input className="input" autoFocus required maxLength={120} placeholder="e.g. Acme Support" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+                </label>
+                <label className="label" style={{ display: "grid", gap: 6 }}>
+                  Display brand <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+                  <input className="input" maxLength={120} placeholder="Defaults to the organization name" value={draft.brand} onChange={(event) => setDraft((current) => ({ ...current, brand: event.target.value }))} />
+                </label>
+              </div>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginTop: 12, cursor: "pointer", fontSize: "0.8rem" }}>
+                <input type="checkbox" checked={draft.isInternal} onChange={(event) => setDraft((current) => ({ ...current, isInternal: event.target.checked }))} style={{ marginTop: 2 }} />
+                <span><strong>Internal organization</strong><span className="muted" style={{ display: "block", marginTop: 2 }}>Protected platform tenants cannot be discarded.</span></span>
+              </label>
+            </>
+          ) : null}
+
+          {editing === "new" && wizardStep === 2 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+              <label className="label" style={{ display: "grid", gap: 6 }}>
+                Admin full name
+                <input className="input" autoFocus required maxLength={120} placeholder="e.g. Asha Sharma" value={draft.adminName} onChange={(event) => setDraft((current) => ({ ...current, adminName: event.target.value }))} />
+              </label>
+              <label className="label" style={{ display: "grid", gap: 6 }}>
+                Admin work email
+                <input className="input" type="email" required maxLength={254} placeholder="admin@company.com" value={draft.adminEmail} onChange={(event) => setDraft((current) => ({ ...current, adminEmail: event.target.value }))} />
+              </label>
+              <p className="muted" style={{ gridColumn: "1 / -1", fontSize: "0.76rem", margin: 0 }}>
+                The admin is created inactive and becomes active only after using the one-time setup link.
+              </p>
+            </div>
+          ) : null}
+
+          {editing === "new" && wizardStep === 3 ? (
+            <div className="panel" style={{ padding: "0.85rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                <div><span className="label">Organization</span><div style={{ marginTop: 3 }}>{draft.name.trim()}</div></div>
+                <div><span className="label">Brand</span><div style={{ marginTop: 3 }}>{draft.brand.trim() || draft.name.trim()}</div></div>
+                <div><span className="label">Initial admin</span><div style={{ marginTop: 3 }}>{draft.adminName.trim()} · {draft.adminEmail.trim()}</div></div>
+              </div>
+              <p className="muted" style={{ fontSize: "0.76rem", margin: "10px 0 0" }}>
+                This creates only the fresh tenant, pending admin invitation, and audit records. No tickets, users, catalogs, automations, or settings are copied.
+              </p>
+            </div>
+          ) : null}
           <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 14 }}>
             <button type="button" className="btn btn-ghost" onClick={closeEditor} disabled={busy}>
               {editing === "new" ? "Discard draft" : "Cancel edit"}
             </button>
-            <button type="submit" className="btn btn-primary" disabled={busy || !draft.name.trim()}>
-              {busy ? "Saving…" : editing === "new" ? "Create organization" : "Save changes"}
+            {editing === "new" && wizardStep > 1 ? (
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setWizardStep((current) => (current - 1) as 1 | 2)}>
+                Back
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy || !draft.name.trim() || (editing === "new" && wizardStep >= 2 && (!draft.adminName.trim() || !draft.adminEmail.trim()))}
+            >
+              {busy ? "Saving…" : editing !== "new" ? "Save changes" : wizardStep < 3 ? "Continue" : "Create organization"}
             </button>
           </div>
         </form>
@@ -1914,14 +2130,31 @@ function OrganizationsSection() {
                         Internal
                       </span>
                     ) : null}
+                    <span className="badge" style={{ fontSize: "0.64rem" }}>
+                      {organization.onboardingStatus === "pending" ? "Pending setup" : organization.onboardingStatus === "locked" ? "Locked" : "Active"}
+                    </span>
                   </div>
                   <div className="muted" style={{ fontSize: "0.71rem", marginTop: 2 }}>
                     {organization.brand && organization.brand !== organization.name ? `${organization.brand} · ` : ""}
                     Tenant ID: <span className="mono">{organization.slug}</span>
                   </div>
+                  {organization.admin ? (
+                    <div className="muted" style={{ fontSize: "0.69rem", marginTop: 2 }}>Admin: {organization.admin.email}</div>
+                  ) : null}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                {organization.admin ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
+                    onClick={() => void resetAdminAccess(organization)}
+                    disabled={busy}
+                  >
+                    {organization.onboardingStatus === "pending" ? "Regenerate setup" : "Reset admin"}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn-ghost"
@@ -1962,7 +2195,7 @@ function OrganizationsSection() {
           </div>
           <p className="muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, margin: "0 0 8px" }}>
             <strong style={{ color: "var(--text)" }}>{discarding?.name}</strong> will be removed permanently.
-            Only empty organizations can be discarded; organizations containing users, tickets, or settings are protected.
+            Pending, unaccepted users and their invitations will also be removed. Accepted users, tickets, or business data protect the organization from discard.
           </p>
           <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 16 }}>
             <button type="button" className="btn btn-ghost" onClick={() => setDiscarding(null)} disabled={busy}>

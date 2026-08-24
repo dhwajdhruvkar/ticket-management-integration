@@ -36,7 +36,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
 
     const spec = object(await response.json());
     expect(spec.openapi).toBe("3.1.0");
-    expect(object(spec.info).version).toBe("2.0.0");
+    expect(object(spec.info).version).toBe("2.1.0");
 
     const servers = spec.servers as Array<JsonObject>;
     expect(servers[0]).toMatchObject({
@@ -65,6 +65,12 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
       "AddMessageRequest",
       "ApiKey",
       "CreatedApiKey",
+      "AccessLink",
+      "UserAccessView",
+      "CreateOrganizationRequest",
+      "CreateUserInvitationRequest",
+      "SetupAccountRequest",
+      "ChangePasswordRequest",
       "PageMeta",
     ]) {
       expect(schemas).toHaveProperty(name);
@@ -77,6 +83,9 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(
       object(profileProperties.authentication).enum as Array<string>
     ).toContain("public-demo");
+    expect(
+      object(profileProperties.authentication).enum as Array<string>
+    ).toContain("public-demo+organization");
 
     const apiKeySchema = object(schemas.ApiKey);
     expect(object(apiKeySchema.properties)).not.toHaveProperty("keyHash");
@@ -89,6 +98,11 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(paths).toHaveProperty("/tickets/{id}/messages");
     expect(paths).toHaveProperty("/api-keys");
     expect(paths).toHaveProperty("/api-keys/{id}");
+    expect(paths).toHaveProperty("/organizations");
+    expect(paths).toHaveProperty("/users");
+    expect(paths).toHaveProperty("/users/{id}/access-link");
+    expect(paths).toHaveProperty("/account/setup");
+    expect(paths).toHaveProperty("/account/password");
 
     expect(operation(paths, "/health", "get").security).toEqual([]);
     expect(operation(paths, "/tickets", "post")["x-required-permission"]).toBe(
@@ -103,6 +117,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(
       operation(paths, "/api-keys", "post")["x-required-permission"]
     ).toBe("admin");
+    expect(operation(paths, "/account/setup", "post").security).toEqual([]);
   });
 
   it("documents pagination, messages, and the 401/403 error boundary precisely", async () => {

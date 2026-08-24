@@ -14,6 +14,7 @@ export default function SignInPage() {
       ssoEnabled={config.features.entraId}
       demoMode={config.demoMode}
       publicDemoAuth={config.publicDemoAuth}
+      localAccountAuth={config.localAccountAuth}
     />
   );
 }

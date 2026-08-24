@@ -180,68 +180,99 @@ enum NotificationChannel {
 // ---------------------------------------------------------------------------
 
 model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  brand     String?
-  isInternal Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  name       String
+  slug       String   @unique
+  brand      String?
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  users        User[]
-  departments  Department[]
-  tickets      Ticket[]
-  articles     KBArticle[]
-  problems     Problem[]
-  changes      Change[]
-  assets       Asset[]
-  cis          ConfigurationItem[]
-  catalogItems ServiceRequestCatalogItem[]
-  slaPolicies  SlaPolicy[]
-  automations  AutomationRule[]
-  macros       Macro[]
+  users           User[]
+  departments     Department[]
+  tickets         Ticket[]
+  articles        KBArticle[]
+  problems        Problem[]
+  changes         Change[]
+  assets          Asset[]
+  cis             ConfigurationItem[]
+  catalogItems    ServiceRequestCatalogItem[]
+  slaPolicies     SlaPolicy[]
+  automations     AutomationRule[]
+  macros          Macro[]
   customFieldDefs CustomFieldDef[]
-  audit        AuditRecord[]
-  groups       AssignmentGroup[]
+  audit           AuditRecord[]
+  groups          AssignmentGroup[]
+  invitations     UserInvitation[]
 
   @@index([slug])
 }
 
 model User {
-  id         String   @id @default(cuid())
-  tenantId   String
-  email      String
-  name       String
-  role       Role     @default(requester)
-  title      String?
-  department String?
-  departmentId String?
-  initials   String?
-  active     Boolean  @default(true)
+  id                  String    @id @default(cuid())
+  tenantId            String
+  email               String
+  name                String
+  role                Role      @default(requester)
+  title               String?
+  department          String?
+  departmentId        String?
+  initials            String?
+  active              Boolean   @default(true)
   // External identity (Entra ID object id) for SSO linkage.
-  externalId String?
+  externalId          String?
+  // Local organization-account authentication. Passwords are scrypt hashes;
+  // reset/setup secrets live in UserInvitation and are never stored raw.
+  passwordHash        String?
+  passwordChangedAt   DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
   // Self-service profile fields (account page).
-  phone      String?
-  location   String?
-  timezone   String?
-  bio        String?
+  phone               String?
+  location            String?
+  timezone            String?
+  bio                 String?
   // Notification preference toggles ({ emailNotifications, ... }).
-  preferences Json?
+  preferences         Json?
   /// VIP requesters get an urgency floor + "vip" tag on intake.
-  vip        Boolean  @default(false)
+  vip                 Boolean   @default(false)
   /// Agent availability for dispatch: false = "Away", not accepting new tickets.
-  available  Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  available           Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  departmentRef    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  requestedTickets Ticket[] @relation("Requester")
-  assignedTickets  Ticket[] @relation("Assignee")
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentRef    Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  requestedTickets Ticket[]         @relation("Requester")
+  assignedTickets  Ticket[]         @relation("Assignee")
   approvals        Approval[]
+  invitations      UserInvitation[]
 
   @@unique([tenantId, email])
   @@index([tenantId, role])
+}
+
+/// One-time account activation or password-reset grant. tokenHash is the
+/// SHA-256 digest of a 32-byte random token; the plaintext exists only in the
+/// creation response/email and can never be recovered from the database.
+model UserInvitation {
+  id         String    @id @default(cuid())
+  tenantId   String
+  userId     String
+  tokenHash  String    @unique
+  purpose    String
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+  createdBy  String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@index([expiresAt])
 }
 
 model Department {
@@ -263,20 +294,20 @@ model Department {
 // ---------------------------------------------------------------------------
 
 model AssignmentGroup {
-  id          String           @id @default(cuid())
-  tenantId    String
-  name        String
-  description String?
+  id                String           @id @default(cuid())
+  tenantId          String
+  name              String
+  description       String?
   // Member users by id and the categories this group is auto-routed.
-  memberIds   String[]         @default([])
-  categories  TicketCategory[] @default([])
-  leadId      String?
+  memberIds         String[]         @default([])
+  categories        TicketCategory[] @default([])
+  leadId            String?
   /// Auto-assignment strategy: manual | round_robin | least_loaded.
-  strategy    String           @default("manual")
+  strategy          String           @default("manual")
   /// Round-robin cursor (index of the last assigned member).
-  lastAssignedIndex Int        @default(0)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  lastAssignedIndex Int              @default(0)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tickets Ticket[]
@@ -289,38 +320,38 @@ model AssignmentGroup {
 // ---------------------------------------------------------------------------
 
 model Ticket {
-  id        String         @id @default(cuid())
-  reference String         @unique
-  tenantId  String
-  type      TicketType     @default(incident)
-  subject   String
-  body      String
-  status    TicketStatus   @default(open)
-  priority  TicketPriority @default(medium)
-  impact    ImpactLevel?
-  urgency   ImpactLevel?
-  category  TicketCategory @default(Other)
-  subcategory String?
-  channel   TicketChannel  @default(portal)
-  source    String?
-  tags      String[]       @default([])
+  id           String         @id @default(cuid())
+  reference    String         @unique
+  tenantId     String
+  type         TicketType     @default(incident)
+  subject      String
+  body         String
+  status       TicketStatus   @default(open)
+  priority     TicketPriority @default(medium)
+  impact       ImpactLevel?
+  urgency      ImpactLevel?
+  category     TicketCategory @default(Other)
+  subcategory  String?
+  channel      TicketChannel  @default(portal)
+  source       String?
+  tags         String[]       @default([])
   customFields Json?
 
-  requesterEmail String
-  requesterId    String?
-  assigneeId     String?
+  requesterEmail    String
+  requesterId       String?
+  assigneeId        String?
   assignmentGroupId String?
 
-  problemId String?
-  changeId  String?
-  catalogItemId String?
+  problemId       String?
+  changeId        String?
+  catalogItemId   String?
   // Linked CMDB CIs by id (flat scalar list so both data drivers share shape).
-  ciIds     String[] @default([])
+  ciIds           String[] @default([])
   // Related tickets (symmetric) + merge target, flat scalar for driver parity.
   linkedTicketIds String[] @default([])
-  mergedIntoId String?
+  mergedIntoId    String?
 
-  satisfaction String?
+  satisfaction     String?
   resolutionNotes  String?
   // Why the assigned agent could not resolve it, captured on manual escalation.
   escalationReason String?
@@ -336,18 +367,18 @@ model Ticket {
   slaPausedAt      DateTime?
   slaPausedMins    Int       @default(0)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  requester   User?            @relation("Requester", fields: [requesterId], references: [id])
-  assignee    User?            @relation("Assignee", fields: [assigneeId], references: [id])
-  assignmentGroup AssignmentGroup? @relation(fields: [assignmentGroupId], references: [id])
-  problem     Problem?         @relation(fields: [problemId], references: [id])
-  change      Change?          @relation(fields: [changeId], references: [id])
-  catalogItem ServiceRequestCatalogItem? @relation(fields: [catalogItemId], references: [id])
-  slaPolicy   SlaPolicy?       @relation(fields: [slaPolicyId], references: [id])
+  tenant          Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester       User?                      @relation("Requester", fields: [requesterId], references: [id])
+  assignee        User?                      @relation("Assignee", fields: [assigneeId], references: [id])
+  assignmentGroup AssignmentGroup?           @relation(fields: [assignmentGroupId], references: [id])
+  problem         Problem?                   @relation(fields: [problemId], references: [id])
+  change          Change?                    @relation(fields: [changeId], references: [id])
+  catalogItem     ServiceRequestCatalogItem? @relation(fields: [catalogItemId], references: [id])
+  slaPolicy       SlaPolicy?                 @relation(fields: [slaPolicyId], references: [id])
 
   messages    TicketMessage[]
   events      TicketEvent[]
@@ -363,13 +394,13 @@ model Ticket {
 }
 
 model TicketMessage {
-  id          String            @id @default(cuid())
-  ticketId    String
-  authorKind  MessageAuthorKind
-  authorName  String
-  visibility  MessageVisibility @default(public)
-  body        String
-  createdAt   DateTime          @default(now())
+  id         String            @id @default(cuid())
+  ticketId   String
+  authorKind MessageAuthorKind
+  authorName String
+  visibility MessageVisibility @default(public)
+  body       String
+  createdAt  DateTime          @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
@@ -448,30 +479,30 @@ model KBArticle {
 // ---------------------------------------------------------------------------
 
 model Problem {
-  id          String        @id @default(cuid())
-  reference   String        @unique
-  tenantId    String
-  title       String
-  description String
-  status      ProblemStatus @default(open)
-  priority    TicketPriority @default(medium)
-  impact      String?       // low | medium | high
-  urgency     String?       // low | medium | high
-  category    TicketCategory @default(Other)
-  rootCause   String?
-  rcaMethod   String?       // five_whys | ishikawa | timeline | other
-  workaround  String?
-  knownError  Boolean       @default(false)
+  id                 String         @id @default(cuid())
+  reference          String         @unique
+  tenantId           String
+  title              String
+  description        String
+  status             ProblemStatus  @default(open)
+  priority           TicketPriority @default(medium)
+  impact             String? // low | medium | high
+  urgency            String? // low | medium | high
+  category           TicketCategory @default(Other)
+  rootCause          String?
+  rcaMethod          String? // five_whys | ishikawa | timeline | other
+  workaround         String?
+  knownError         Boolean        @default(false)
   publishedArticleId String?
-  changeId    String?       // permanent-fix change raised from this problem
-  reviewNotes String?       // major-problem review
-  notes       Json?         // [{ id, author, body, at }]
-  assigneeId  String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  changeId           String? // permanent-fix change raised from this problem
+  reviewNotes        String? // major-problem review
+  notes              Json? // [{ id, author, body, at }]
+  assigneeId         String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  linkedTickets  Ticket[]
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  linkedTickets Ticket[]
 
   @@index([tenantId, status])
   @@index([tenantId, knownError])
@@ -497,7 +528,7 @@ model Change {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
-  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   approvals     Approval[]
   linkedTickets Ticket[]
 
@@ -505,15 +536,15 @@ model Change {
 }
 
 model Approval {
-  id         String        @id @default(cuid())
-  changeId   String?
-  ticketId   String?
-  approverId String?
+  id           String        @id @default(cuid())
+  changeId     String?
+  ticketId     String?
+  approverId   String?
   approverName String
-  state      ApprovalState @default(pending)
-  comment    String?
-  decidedAt  DateTime?
-  createdAt  DateTime      @default(now())
+  state        ApprovalState @default(pending)
+  comment      String?
+  decidedAt    DateTime?
+  createdAt    DateTime      @default(now())
 
   change   Change? @relation(fields: [changeId], references: [id], onDelete: Cascade)
   ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -528,17 +559,17 @@ model Approval {
 // ---------------------------------------------------------------------------
 
 model Asset {
-  id        String      @id @default(cuid())
-  tenantId  String
-  tag       String
-  name      String
-  type      String
-  status    AssetStatus @default(in_stock)
-  owner     String?
+  id          String      @id @default(cuid())
+  tenantId    String
+  tag         String
+  name        String
+  type        String
+  status      AssetStatus @default(in_stock)
+  owner       String?
   purchasedAt DateTime?
   warrantyEnd DateTime?
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   ci     ConfigurationItem?
@@ -547,15 +578,15 @@ model Asset {
 }
 
 model ConfigurationItem {
-  id        String   @id @default(cuid())
-  tenantId  String
-  name      String
-  type      CIType   @default(other)
-  status    String   @default("operational")
-  assetId   String?  @unique
+  id         String   @id @default(cuid())
+  tenantId   String
+  name       String
+  type       CIType   @default(other)
+  status     String   @default("operational")
+  assetId    String?  @unique
   attributes Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   asset  Asset? @relation(fields: [assetId], references: [id])
@@ -586,16 +617,16 @@ model CIRelationship {
 // ---------------------------------------------------------------------------
 
 model ServiceRequestCatalogItem {
-  id              String         @id @default(cuid())
-  tenantId        String
-  name            String
-  description     String
-  category        TicketCategory @default(Other)
-  requiresApproval Boolean       @default(false)
-  formSchema      Json?
-  active          Boolean        @default(true)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id               String         @id @default(cuid())
+  tenantId         String
+  name             String
+  description      String
+  category         TicketCategory @default(Other)
+  requiresApproval Boolean        @default(false)
+  formSchema       Json?
+  active           Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tickets Ticket[]
@@ -608,18 +639,18 @@ model ServiceRequestCatalogItem {
 // ---------------------------------------------------------------------------
 
 model SlaPolicy {
-  id           String   @id @default(cuid())
-  tenantId     String
-  name         String
-  priority     TicketPriority
-  responseMins Int
-  resolveMins  Int
-  businessHoursOnly Boolean @default(false)
+  id                String         @id @default(cuid())
+  tenantId          String
+  name              String
+  priority          TicketPriority
+  responseMins      Int
+  resolveMins       Int
+  businessHoursOnly Boolean        @default(false)
   /// Optional business calendar (holidays, timezone, work window). When unset
   /// and businessHoursOnly=true, the built-in Mon-Fri 9-18 window applies.
-  calendarId   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  calendarId        String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   calendar BusinessCalendar? @relation(fields: [calendarId], references: [id])
@@ -686,18 +717,18 @@ model Macro {
 }
 
 model CustomFieldDef {
-  id        String   @id @default(cuid())
-  tenantId  String
-  key       String
-  label     String
+  id          String   @id @default(cuid())
+  tenantId    String
+  key         String
+  label       String
   // Admin-authored help text surfaced as the field's "i" tooltip.
   description String?
-  type      String   @default("text")
-  options   String[] @default([])
-  required  Boolean  @default(false)
-  order     Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  type        String   @default("text")
+  options     String[] @default([])
+  required    Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -748,25 +779,25 @@ model Notification {
 /// Server-to-server credential ("Authorization: Bearer nlk_..."). Only the
 /// SHA-256 hash is stored; the full key is shown once at creation.
 model ApiKey {
-  id         String    @id @default(cuid())
-  tenantId   String
-  name       String
+  id          String    @id @default(cuid())
+  tenantId    String
+  name        String
   /// First characters of the key for display ("nlk_ab12...").
-  prefix     String
+  prefix      String
   /// SHA-256 hex of the full key.
-  keyHash    String    @unique
+  keyHash     String    @unique
   /// Acting role for requests authenticated with this key.
-  role       Role      @default(agent)
+  role        Role      @default(agent)
   /// Agents this integration acts on behalf of.
-  agentIds   String[]
+  agentIds    String[]
   /// Optional description of the integration/application.
   description String?
-  active     Boolean   @default(true)
-  lastUsedAt DateTime?
-  expiresAt  DateTime?
-  createdBy  String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  active      Boolean   @default(true)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([tenantId, active])
 }

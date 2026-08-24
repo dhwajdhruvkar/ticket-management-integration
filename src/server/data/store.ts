@@ -40,6 +40,7 @@ import type {
   TicketMessageRow,
   TicketRow,
   UserRow,
+  UserInvitationRow,
 } from "../domain/models";
 
 export interface ListOptions<T> {
@@ -83,10 +84,12 @@ export async function pageCollection<T extends Entity>(
 export interface DataStore {
   readonly driver: "memory" | "prisma";
   ready(): Promise<void>;
+  transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T>;
 
   tenants: Collection<TenantRow>;
   departments: Collection<DepartmentRow>;
   users: Collection<UserRow>;
+  invitations: Collection<UserInvitationRow>;
   groups: Collection<AssignmentGroupRow>;
   tickets: Collection<TicketRow>;
   messages: Collection<TicketMessageRow>;

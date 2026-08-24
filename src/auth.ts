@@ -7,6 +7,7 @@ import { config } from "@/server/config";
 import { getStore } from "@/server/data";
 import { logger } from "@/server/observability/logger";
 import { canUsePasswordlessCredential } from "@/shared/publicDemoUsers";
+import { authenticateOrganizationUser } from "@/server/services/accountAccessService";
 
 // =============================================================================
 // Full (Node) auth.
@@ -74,6 +75,38 @@ if (config.demoMode || config.publicDemoAuth) {
         }
 
         return { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId };
+      },
+    })
+  );
+}
+
+if (config.localAccountAuth) {
+  providers.push(
+    Credentials({
+      id: "organization",
+      name: "Organization account",
+      credentials: {
+        organizationCode: { label: "Organization code", type: "text" },
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(creds) {
+        try {
+          const user = await authenticateOrganizationUser(
+            String(creds?.organizationCode ?? ""),
+            String(creds?.email ?? ""),
+            String(creds?.password ?? "")
+          );
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            tenantId: user.tenantId,
+          };
+        } catch {
+          return null;
+        }
       },
     })
   );
@@ -155,7 +188,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const store = await getStore();
           const fresh = await store.users.get(token.userId as string);
           if (fresh) {
-            token.role = fresh.role;
+            token.role = fresh.active ? fresh.role : "none";
             token.tenantId = fresh.tenantId;
           }
         } catch {

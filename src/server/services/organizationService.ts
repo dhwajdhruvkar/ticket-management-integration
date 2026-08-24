@@ -8,9 +8,22 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
-import { pageCollection, type ListOptions, type PageResult } from "../data/store";
+import {
+  pageCollection,
+  type DataStore,
+  type ListOptions,
+  type PageResult,
+} from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { TenantRow } from "../domain/models";
+import {
+  deliverAccessLink,
+  issueUserAccessLinkInStore,
+  toUserAccessView,
+  type AccessLinkView,
+  type UserAccessView,
+} from "./accountAccessService";
+import { createUser } from "./userService";
 
 export class OrganizationServiceError extends Error {
   constructor(message: string, readonly status = 400) {
@@ -48,15 +61,71 @@ export interface OrganizationInput {
   isInternal?: boolean;
 }
 
+export interface OrganizationAdminInput {
+  name: string;
+  email: string;
+}
+
+export interface ProvisionOrganizationInput extends OrganizationInput {
+  admin: OrganizationAdminInput;
+}
+
+export interface ProvisionOrganizationResult {
+  organization: TenantRow;
+  admin: UserAccessView;
+  invitation: AccessLinkView;
+}
+
+export interface OrganizationView extends TenantRow {
+  onboardingStatus: "pending" | "active" | "locked";
+  admin: UserAccessView | null;
+}
+
+export async function organizationViews(
+  organizations: TenantRow[]
+): Promise<OrganizationView[]> {
+  const store = await getStore();
+  const ids = new Set(organizations.map((organization) => organization.id));
+  const users = (await store.users.list()).filter((user) => ids.has(user.tenantId));
+  const invitations = (await store.invitations.list()).filter((invitation) =>
+    ids.has(invitation.tenantId)
+  );
+  return organizations.map((organization) => {
+    const firstAdmin = users
+      .filter(
+        (user) =>
+          user.tenantId === organization.id && user.role === "tenant_admin"
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      )[0];
+    const admin = firstAdmin
+      ? toUserAccessView(firstAdmin, invitations)
+      : null;
+    return {
+      ...organization,
+      admin,
+      onboardingStatus:
+        admin?.accessStatus === "locked"
+          ? "locked"
+          : admin?.accessStatus === "active"
+            ? "active"
+            : "pending",
+    };
+  });
+}
+
 export type OrganizationPatch = Partial<OrganizationInput>;
 
 export async function createOrganization(
   input: OrganizationInput,
-  actor = "system"
+  actor = "system",
+  storeOverride?: DataStore
 ): Promise<TenantRow> {
   const name = input.name?.trim();
   if (!name) throw new OrganizationServiceError("Name is required.");
-  const store = await getStore();
+  const store = storeOverride ?? (await getStore());
 
   const duplicate = (await store.tenants.list()).find(
     (tenant) => tenant.name.toLowerCase() === name.toLowerCase()
@@ -79,13 +148,56 @@ export async function createOrganization(
     updatedAt: now(),
   };
   await store.tenants.create(tenant);
-  await appendAudit({
-    tenantId: tenant.id,
-    actor,
-    action: "organization.created",
-    payload: { name, slug },
-  });
+  await appendAudit(
+    {
+      tenantId: tenant.id,
+      actor,
+      action: "organization.created",
+      payload: { name, slug },
+    },
+    store
+  );
   return tenant;
+}
+
+export async function provisionOrganization(
+  input: ProvisionOrganizationInput,
+  actor: string,
+  baseUrl: string
+): Promise<ProvisionOrganizationResult> {
+  const store = await getStore();
+  const result = await store.transaction(async (tx) => {
+    const organization = await createOrganization(input, actor, tx);
+    const admin = await createUser(
+      organization.id,
+      {
+        name: input.admin.name,
+        email: input.admin.email,
+        role: "tenant_admin",
+      },
+      "super_admin",
+      actor,
+      { store: tx, active: false }
+    );
+    const issued = await issueUserAccessLinkInStore(
+      tx,
+      organization,
+      admin,
+      "activate",
+      actor,
+      baseUrl
+    );
+    return { organization, admin, issued };
+  });
+  return {
+    organization: result.organization,
+    admin: toUserAccessView(result.admin, [result.issued.invitation]),
+    invitation: await deliverAccessLink(
+      result.organization,
+      result.admin,
+      result.issued
+    ),
+  };
 }
 
 export async function updateOrganization(
@@ -158,7 +270,6 @@ export async function deleteOrganization(
 
   const ownedCollections = [
     store.departments,
-    store.users,
     store.groups,
     store.tickets,
     store.articles,
@@ -182,6 +293,17 @@ export async function deleteOrganization(
   if (counts.some((count) => count > 0)) {
     throw new OrganizationServiceError(
       'This organization contains users, tickets, or settings and cannot be discarded.',
+      409
+    );
+  }
+  const users = await store.users.list({ tenantId: id });
+  if (
+    users.some(
+      (user) => user.active || !!user.passwordHash || !!user.externalId
+    )
+  ) {
+    throw new OrganizationServiceError(
+      'This organization contains active users or credentials and cannot be discarded.',
       409
     );
   }

@@ -10,9 +10,10 @@ import {
 } from "@/server/http";
 import { actorContext, isResponse, requirePermission } from "@/server/guards";
 import {
-  createOrganization,
   listOrganizations,
+  organizationViews,
   OrganizationServiceError,
+  provisionOrganization,
 } from "@/server/services/organizationService";
 import type { TenantRow } from "@/server/domain/models";
 
@@ -23,6 +24,10 @@ const CreateOrganizationSchema = z.object({
   name: z.string().trim().min(1, 'name is required').max(120),
   brand: z.string().trim().max(120).nullish(),
   isInternal: z.boolean().optional(),
+  admin: z.object({
+    name: z.string().trim().min(1, "admin.name is required").max(120),
+    email: z.string().trim().email().max(254),
+  }),
 });
 
 export async function GET(req: Request) {
@@ -42,7 +47,11 @@ export async function GET(req: Request) {
     scope,
     listOptionsFromPagination<TenantRow>(pagination)
   );
-  return paginated(result.data, result.total, pagination);
+  return paginated(
+    await organizationViews(result.data),
+    result.total,
+    pagination
+  );
 }
 
 export async function POST(req: Request) {
@@ -56,7 +65,10 @@ export async function POST(req: Request) {
   if (body instanceof NextResponse) return body;
   if (!body?.name?.trim()) return fail("name is required.");
   try {
-    return ok(await createOrganization(body, actor.name), { status: 201 });
+    return ok(
+      await provisionOrganization(body, actor.name, new URL(req.url).origin),
+      { status: 201, headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e) {
     if (e instanceof OrganizationServiceError) return fail(e.message, e.status);
     throw e;

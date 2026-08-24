@@ -111,6 +111,11 @@ export interface UserRow extends Entity {
   initials?: string | null;
   active: boolean;
   externalId?: string | null;
+  /** Encoded scrypt hash. Server-only: never include in an API response. */
+  passwordHash?: string | null;
+  passwordChangedAt?: string | null;
+  failedLoginAttempts?: number;
+  lockedUntil?: string | null;
   phone?: string | null;
   location?: string | null;
   timezone?: string | null;
@@ -120,6 +125,21 @@ export interface UserRow extends Entity {
   vip?: boolean;
   /** Agent availability for dispatch: false = "Away", not accepting new tickets. */
   available?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type UserInvitationPurpose = "activate" | "reset";
+
+export interface UserInvitationRow extends Entity {
+  tenantId: string;
+  userId: string;
+  tokenHash: string;
+  purpose: UserInvitationPurpose;
+  expiresAt: string;
+  acceptedAt?: string | null;
+  revokedAt?: string | null;
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
 }

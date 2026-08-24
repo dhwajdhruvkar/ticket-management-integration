@@ -42,6 +42,14 @@ const PAGINATION = [
   },
 ] as const;
 
+const ref = (name: string): Record<string, unknown> => ({
+  $ref: "#/components/schemas/" + name,
+});
+
+const jsonContent = (schema: Record<string, unknown>) => ({
+  "application/json": { schema },
+});
+
 const BASE_SPEC = {
   openapi: "3.1.0",
   info: {
@@ -241,22 +249,55 @@ const BASE_SPEC = {
     "/notifications": { get: { summary: "Current user's paginated notification feed + total unread count", parameters: PAGINATION, responses: { "200": { description: "Paginated feed" } } }, post: { summary: "Mark notifications read", responses: { "200": { description: "Marked" } } } },
     "/events": { get: { summary: "Server-Sent Events stream (notifications + ticket updates)", responses: { "200": { description: "text/event-stream" } } } },
     "/audit": { get: { summary: "Audit chain (?verify=1 returns a non-list integrity result)", parameters: PAGINATION, responses: { "200": { description: "Paginated records or verification result" } } } },
-    "/users": { get: { summary: "List users", parameters: PAGINATION, responses: { "200": { description: "Paginated users" } } } },
-    "/departments": { get: { summary: "List departments", parameters: PAGINATION, responses: { "200": { description: "Paginated departments" } } }, post: { summary: "Create a department (admin)", responses: { "201": { description: "Created" } } } },
-    "/organizations": { get: { summary: "List organizations (admin)", parameters: PAGINATION, responses: { "200": { description: "Paginated organizations" } } }, post: { summary: "Create an organization (super admin)", responses: { "201": { description: "Created" }, "409": { description: "Organization name already exists" } } } },
+    "/users": {
+      get: {
+        summary: "List tenant users with derived access status",
+        parameters: [...PAGINATION, { name: "organizationId", in: "query", description: "Cross-tenant selection is super-admin only.", schema: { type: "string" } }],
+        responses: { "200": { description: "Paginated safe user views" } },
+      },
+      post: {
+        summary: "Create an inactive tenant user and one-time invitation atomically",
+        requestBody: { required: true, content: jsonContent(ref("CreateUserInvitationRequest")) },
+        responses: { "201": { description: "Safe user and one-time invitation delivery result" } },
+      },
+    },
+    "/users/{id}/access-link": {
+      post: {
+        summary: "Revoke pending links and issue a one-time activation/reset link",
+        parameters: [ID, { name: "organizationId", in: "query", description: "Cross-tenant selection is super-admin only.", schema: { type: "string" } }],
+        responses: { "201": { description: "Safe user and one-time access link" } },
+      },
+    },
+    "/account/password": {
+      post: {
+        summary: "Change the current local account password",
+        requestBody: { required: true, content: jsonContent(ref("ChangePasswordRequest")) },
+        responses: { "200": { description: "Password changed" }, "401": { description: "Current password is invalid" } },
+      },
+    },
+    "/account/setup": {
+      servers: [{ url: "/api", description: "Current origin public account API" }],
+      post: {
+        summary: "Accept a one-time activation/reset link",
+        security: [],
+        requestBody: { required: true, content: jsonContent(ref("SetupAccountRequest")) },
+        responses: { "200": { description: "Account activated; returns organizationCode and email" }, "400": { description: "Invalid, expired, revoked, reused, or weak-password request" }, "429": { description: "Rate limited" } },
+      },
+    },
+    "/departments": { get: { summary: "List departments", parameters: [...PAGINATION, { name: "organizationId", in: "query", description: "Cross-tenant selection is super-admin only.", schema: { type: "string" } }], responses: { "200": { description: "Paginated departments" } } }, post: { summary: "Create a department (admin)", responses: { "201": { description: "Created" } } } },
+    "/organizations": {
+      get: { summary: "List organizations and onboarding state (super admin)", parameters: PAGINATION, responses: { "200": { description: "Paginated organization views" } } },
+      post: {
+        summary: "Atomically create a fresh organization, initial tenant admin, invitation and audit chain",
+        requestBody: { required: true, content: jsonContent(ref("CreateOrganizationRequest")) },
+        responses: { "201": { description: "Organization, safe admin and one-time invitation" }, "409": { description: "Organization name already exists" } },
+      },
+    },
     "/organizations/{id}": { patch: { summary: "Edit an organization (super admin)", parameters: [ID], responses: { "200": { description: "Updated" }, "409": { description: "Organization name already exists" } } }, delete: { summary: "Discard an empty organization (super admin)", parameters: [ID], responses: { "200": { description: "Discarded" }, "409": { description: "Protected, current, or non-empty organization" } } } },
     "/me": { get: { summary: "Current user profile", responses: { "200": { description: "Profile" } } }, patch: { summary: "Update profile/preferences", responses: { "200": { description: "Updated" } } } },
     "/catalog": { get: { summary: "Service request catalog", parameters: PAGINATION, responses: { "200": { description: "Paginated items" } } } },
   },
 } as const;
-
-const ref = (name: string): Record<string, unknown> => ({
-  $ref: "#/components/schemas/" + name,
-});
-
-const jsonContent = (schema: Record<string, unknown>) => ({
-  "application/json": { schema },
-});
 
 const jsonResponse = (
   description: string,
@@ -394,7 +435,15 @@ const CORE_SCHEMAS = {
         properties: {
           authentication: {
             type: "string",
-            enum: ["demo", "public-demo", "entra", "api-key-only"],
+            enum: [
+              "demo",
+              "public-demo",
+              "organization",
+              "public-demo+organization",
+              "entra",
+              "entra+organization",
+              "api-key-only",
+            ],
           },
           attachmentStorage: {
             type: "string",
@@ -752,15 +801,98 @@ const CORE_SCHEMAS = {
       },
     },
   },
+  AccessLink: {
+    type: "object",
+    required: ["status", "purpose", "expiresAt", "delivery", "setupUrl"],
+    properties: {
+      status: { type: "string", const: "pending" },
+      purpose: { type: "string", enum: ["activate", "reset"] },
+      expiresAt: { type: "string", format: "date-time" },
+      delivery: { type: "string", enum: ["email_sent", "copy_required"] },
+      setupUrl: {
+        type: "string",
+        format: "uri",
+        description: "One-time secret URL returned only when issued; never persisted in notifications or audit records.",
+        example: "https://netlink-support.vercel.app/setup-account#token=<one-time-secret>",
+      },
+    },
+  },
+  UserAccessView: {
+    type: "object",
+    required: ["id", "tenantId", "name", "email", "role", "active", "accessStatus", "hasLocalPassword"],
+    properties: {
+      id: { type: "string" },
+      tenantId: { type: "string" },
+      name: { type: "string" },
+      email: { type: "string", format: "email" },
+      role: { type: "string", enum: ["requester", "agent", "manager", "tenant_admin", "super_admin"] },
+      active: { type: "boolean" },
+      accessStatus: { type: "string", enum: ["invited", "active", "locked", "disabled"] },
+      pendingInvitationExpiresAt: { type: ["string", "null"], format: "date-time" },
+      hasLocalPassword: { type: "boolean" },
+    },
+    description: "Safe user view. Password hashes, token hashes, failed-attempt counters and lock timestamps are never exposed.",
+  },
+  CreateOrganizationRequest: {
+    type: "object",
+    required: ["name", "admin"],
+    properties: {
+      name: { type: "string", minLength: 1, maxLength: 120 },
+      brand: { type: ["string", "null"], maxLength: 120 },
+      isInternal: { type: "boolean", default: false },
+      admin: {
+        type: "object",
+        required: ["name", "email"],
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 120 },
+          email: { type: "string", format: "email", maxLength: 254 },
+        },
+      },
+    },
+    example: { name: "Acme Support", brand: "Acme", isInternal: false, admin: { name: "Asha Sharma", email: "admin@acme.example" } },
+  },
+  CreateUserInvitationRequest: {
+    type: "object",
+    required: ["name", "email", "role"],
+    properties: {
+      name: { type: "string", minLength: 1, maxLength: 120 },
+      email: { type: "string", format: "email", maxLength: 254 },
+      role: { type: "string", enum: ["requester", "agent", "manager", "tenant_admin"] },
+      departmentId: { type: ["string", "null"] },
+      organizationId: { type: "string", description: "Super-admin only. Tenant admins are always bound to their session tenant." },
+    },
+  },
+  SetupAccountRequest: {
+    type: "object",
+    required: ["token", "password"],
+    properties: {
+      token: { type: "string", description: "Secret read from the setup URL fragment by the browser." },
+      password: { type: "string", format: "password", minLength: 12, maxLength: 128 },
+    },
+  },
+  ChangePasswordRequest: {
+    type: "object",
+    required: ["currentPassword", "newPassword"],
+    properties: {
+      currentPassword: { type: "string", format: "password" },
+      newPassword: { type: "string", format: "password", minLength: 12, maxLength: 128 },
+    },
+  },
 } as const;
 
 const SPEC = {
   ...BASE_SPEC,
   info: {
     ...BASE_SPEC.info,
-    version: "2.0.0",
+    version: "2.1.0",
     description:
-      "Production ITSM REST API. External systems authenticate with a tenant-scoped API key using Authorization: Bearer or x-api-key. Responses use the documented success/error envelopes; the health probe is intentionally flat and unauthenticated.",
+      "Production ITSM REST API. External systems authenticate with a tenant-scoped API key using Authorization: Bearer or x-api-key. Browser users may sign in with organization code + email + password when LOCAL_ACCOUNT_AUTH is enabled; the same email may belong to multiple organizations because the organization code selects the tenant. Responses use the documented success/error envelopes; the health probe and account setup operation are intentionally unauthenticated.",
+    "x-browser-local-login-example": {
+      organizationCode: "acme-support",
+      email: "admin@acme.example",
+      password: "<user-chosen-password>",
+      note: "Submit through the first-party Organization account form. Invalid organization, email, and password combinations return the same generic error.",
+    },
   },
   servers: [
     {
@@ -782,6 +914,9 @@ const SPEC = {
     { name: "Tickets", description: "Ticket intake, retrieval, updates, and soft deletion." },
     { name: "Messages", description: "Public replies and agent-only internal notes." },
     { name: "API Keys", description: "Tenant-admin credential lifecycle." },
+    { name: "Organizations", description: "Fresh tenant onboarding and lifecycle." },
+    { name: "Users", description: "Tenant-bound invitations, roles, and access links." },
+    { name: "Accounts", description: "One-time setup and authenticated password changes." },
   ],
   components: {
     ...BASE_SPEC.components,

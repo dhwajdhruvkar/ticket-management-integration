@@ -94,37 +94,78 @@ function prismaClient(): PrismaClient {
 
 export class PrismaStore implements DataStore {
   readonly driver = "prisma" as const;
-  private readonly p = prismaClient();
 
-  tenants = new PrismaCollection<any>(this.p.tenant);
-  departments = new PrismaCollection<any>(this.p.department);
-  users = new PrismaCollection<any>(this.p.user);
-  groups = new PrismaCollection<any>(this.p.assignmentGroup);
-  tickets = new PrismaCollection<any>(this.p.ticket);
-  messages = new PrismaCollection<any>(this.p.ticketMessage);
-  events = new PrismaCollection<any>(this.p.ticketEvent);
-  resolutions = new PrismaCollection<any>(this.p.resolution);
-  citations = new PrismaCollection<any>(this.p.citation);
-  articles = new PrismaCollection<any>(this.p.kBArticle);
-  problems = new PrismaCollection<any>(this.p.problem);
-  changes = new PrismaCollection<any>(this.p.change);
-  approvals = new PrismaCollection<any>(this.p.approval);
-  assets = new PrismaCollection<any>(this.p.asset);
-  cis = new PrismaCollection<any>(this.p.configurationItem);
-  ciRelationships = new PrismaCollection<any>(this.p.cIRelationship);
-  catalogItems = new PrismaCollection<any>(this.p.serviceRequestCatalogItem);
-  slaPolicies = new PrismaCollection<any>(this.p.slaPolicy);
-  automations = new PrismaCollection<any>(this.p.automationRule);
-  macros = new PrismaCollection<any>(this.p.macro);
-  customFieldDefs = new PrismaCollection<any>(this.p.customFieldDef);
-  attachments = new PrismaCollection<any>(this.p.attachment);
-  notifications = new PrismaCollection<any>(this.p.notification);
-  audit = new PrismaCollection<any>(this.p.auditRecord);
-  apiKeys = new PrismaCollection<any>(this.p.apiKey);
-  emails = new PrismaCollection<any>(this.p.emailMessage);
-  calendars = new PrismaCollection<any>(this.p.businessCalendar);
+  readonly tenants: PrismaCollection<any>;
+  readonly departments: PrismaCollection<any>;
+  readonly users: PrismaCollection<any>;
+  readonly invitations: PrismaCollection<any>;
+  readonly groups: PrismaCollection<any>;
+  readonly tickets: PrismaCollection<any>;
+  readonly messages: PrismaCollection<any>;
+  readonly events: PrismaCollection<any>;
+  readonly resolutions: PrismaCollection<any>;
+  readonly citations: PrismaCollection<any>;
+  readonly articles: PrismaCollection<any>;
+  readonly problems: PrismaCollection<any>;
+  readonly changes: PrismaCollection<any>;
+  readonly approvals: PrismaCollection<any>;
+  readonly assets: PrismaCollection<any>;
+  readonly cis: PrismaCollection<any>;
+  readonly ciRelationships: PrismaCollection<any>;
+  readonly catalogItems: PrismaCollection<any>;
+  readonly slaPolicies: PrismaCollection<any>;
+  readonly automations: PrismaCollection<any>;
+  readonly macros: PrismaCollection<any>;
+  readonly customFieldDefs: PrismaCollection<any>;
+  readonly attachments: PrismaCollection<any>;
+  readonly notifications: PrismaCollection<any>;
+  readonly audit: PrismaCollection<any>;
+  readonly apiKeys: PrismaCollection<any>;
+  readonly emails: PrismaCollection<any>;
+  readonly calendars: PrismaCollection<any>;
+
+  constructor(
+    private readonly p: any = prismaClient(),
+    private readonly transactionScoped = false
+  ) {
+    this.tenants = new PrismaCollection<any>(p.tenant);
+    this.departments = new PrismaCollection<any>(p.department);
+    this.users = new PrismaCollection<any>(p.user);
+    this.invitations = new PrismaCollection<any>(p.userInvitation);
+    this.groups = new PrismaCollection<any>(p.assignmentGroup);
+    this.tickets = new PrismaCollection<any>(p.ticket);
+    this.messages = new PrismaCollection<any>(p.ticketMessage);
+    this.events = new PrismaCollection<any>(p.ticketEvent);
+    this.resolutions = new PrismaCollection<any>(p.resolution);
+    this.citations = new PrismaCollection<any>(p.citation);
+    this.articles = new PrismaCollection<any>(p.kBArticle);
+    this.problems = new PrismaCollection<any>(p.problem);
+    this.changes = new PrismaCollection<any>(p.change);
+    this.approvals = new PrismaCollection<any>(p.approval);
+    this.assets = new PrismaCollection<any>(p.asset);
+    this.cis = new PrismaCollection<any>(p.configurationItem);
+    this.ciRelationships = new PrismaCollection<any>(p.cIRelationship);
+    this.catalogItems = new PrismaCollection<any>(p.serviceRequestCatalogItem);
+    this.slaPolicies = new PrismaCollection<any>(p.slaPolicy);
+    this.automations = new PrismaCollection<any>(p.automationRule);
+    this.macros = new PrismaCollection<any>(p.macro);
+    this.customFieldDefs = new PrismaCollection<any>(p.customFieldDef);
+    this.attachments = new PrismaCollection<any>(p.attachment);
+    this.notifications = new PrismaCollection<any>(p.notification);
+    this.audit = new PrismaCollection<any>(p.auditRecord);
+    this.apiKeys = new PrismaCollection<any>(p.apiKey);
+    this.emails = new PrismaCollection<any>(p.emailMessage);
+    this.calendars = new PrismaCollection<any>(p.businessCalendar);
+  }
 
   async ready(): Promise<void> {
     // Connection is lazy; seeding for Postgres is handled by prisma/seed.ts.
+  }
+
+  async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
+    if (this.transactionScoped) return work(this);
+    return this.p.$transaction((tx: any) =>
+      work(new PrismaStore(tx, true))
+    );
   }
 }

@@ -35,6 +35,17 @@ function params(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
+function organizationBody(
+  name: string,
+  overrides: { brand?: string; isInternal?: boolean } = {}
+) {
+  return {
+    name,
+    ...overrides,
+    admin: { name: 'Initial Admin', email: 'shared-admin@example.com' },
+  };
+}
+
 beforeAll(async () => {
   const file = path.join(process.cwd(), '.data-test', 'store.json');
   fs.rmSync(file, { force: true });
@@ -52,36 +63,43 @@ describe('organization tenant management', () => {
     const createdResponse = await POST(
       request('/organizations', {
         method: 'POST',
-        body: { name: 'Acme Support', brand: 'Acme Service Desk', isInternal: false },
+        body: organizationBody('Acme Support', { brand: 'Acme Service Desk', isInternal: false }),
       })
     );
     expect(createdResponse.status).toBe(201);
     const created = (await createdResponse.json()) as Envelope<{
-      id: string;
-      name: string;
-      brand: string;
-      slug: string;
-      isInternal: boolean;
+      organization: {
+        id: string;
+        name: string;
+        brand: string;
+        slug: string;
+        isInternal: boolean;
+      };
+      admin: { email: string; accessStatus: string; passwordHash?: string };
+      invitation: { setupUrl: string; expiresAt: string };
     }>;
-    createdIds.add(created.data.id);
-    expect(created.data).toMatchObject({
+    createdIds.add(created.data.organization.id);
+    expect(created.data.organization).toMatchObject({
       name: 'Acme Support',
       brand: 'Acme Service Desk',
       slug: 'acme-support',
       isInternal: false,
     });
+    expect(created.data.admin).toMatchObject({ email: 'shared-admin@example.com', accessStatus: 'invited' });
+    expect(created.data.admin).not.toHaveProperty('passwordHash');
+    expect(created.data.invitation.setupUrl).toContain('/setup-account#token=');
 
     const listedResponse = await GET(request('/organizations?page=1&pageSize=100'));
     const listed = (await listedResponse.json()) as Envelope<Array<{ id: string }>>;
     expect(listedResponse.status).toBe(200);
-    expect(listed.data).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.data.id })]));
+    expect(listed.data).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.data.organization.id, onboardingStatus: 'pending' })]));
 
     const updatedResponse = await PATCH_ORGANIZATION(
-      request(`/organizations/${created.data.id}`, {
+      request(`/organizations/${created.data.organization.id}`, {
         method: 'PATCH',
         body: { name: 'Acme Enterprise', brand: '', isInternal: false },
       }),
-      params(created.data.id)
+      params(created.data.organization.id)
     );
     expect(updatedResponse.status).toBe(200);
     await expect(updatedResponse.json()).resolves.toMatchObject({
@@ -90,19 +108,19 @@ describe('organization tenant management', () => {
     });
 
     const deletedResponse = await DELETE_ORGANIZATION(
-      request(`/organizations/${created.data.id}`, { method: 'DELETE' }),
-      params(created.data.id)
+      request(`/organizations/${created.data.organization.id}`, { method: 'DELETE' }),
+      params(created.data.organization.id)
     );
     expect(deletedResponse.status).toBe(200);
     await expect(deletedResponse.json()).resolves.toMatchObject({ ok: true, data: { deleted: true } });
-    expect(await (await getStore()).tenants.get(created.data.id)).toBeNull();
+    expect(await (await getStore()).tenants.get(created.data.organization.id)).toBeNull();
 
     const audit = await (await getStore()).audit.list({ tenantId: TENANT_ID });
     expect(audit).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           action: 'organization.deleted',
-          payload: expect.objectContaining({ organizationId: created.data.id, name: 'Acme Enterprise' }),
+          payload: expect.objectContaining({ organizationId: created.data.organization.id, name: 'Acme Enterprise' }),
         }),
       ])
     );
@@ -110,13 +128,13 @@ describe('organization tenant management', () => {
 
   it('rejects duplicate names and tenant-admin lifecycle changes', async () => {
     const firstResponse = await POST(
-      request('/organizations', { method: 'POST', body: { name: 'Unique Tenant' } })
+      request('/organizations', { method: 'POST', body: organizationBody('Unique Tenant') })
     );
-    const first = (await firstResponse.json()) as Envelope<{ id: string }>;
-    createdIds.add(first.data.id);
+    const first = (await firstResponse.json()) as Envelope<{ organization: { id: string } }>;
+    createdIds.add(first.data.organization.id);
 
     const duplicate = await POST(
-      request('/organizations', { method: 'POST', body: { name: ' unique tenant ' } })
+      request('/organizations', { method: 'POST', body: organizationBody(' unique tenant ') })
     );
     expect(duplicate.status).toBe(409);
 
@@ -124,24 +142,24 @@ describe('organization tenant management', () => {
       request('/organizations', {
         method: 'POST',
         actor: TENANT_ADMIN,
-        body: { name: 'Not Allowed' },
+        body: organizationBody('Not Allowed'),
       })
     );
     expect(forbiddenCreate.status).toBe(403);
 
     const forbiddenEdit = await PATCH_ORGANIZATION(
-      request(`/organizations/${first.data.id}`, {
+      request(`/organizations/${first.data.organization.id}`, {
         method: 'PATCH',
         actor: TENANT_ADMIN,
         body: { name: 'Not Allowed Either' },
       }),
-      params(first.data.id)
+      params(first.data.organization.id)
     );
     expect(forbiddenEdit.status).toBe(403);
 
     const forbiddenDelete = await DELETE_ORGANIZATION(
-      request(`/organizations/${first.data.id}`, { method: 'DELETE', actor: TENANT_ADMIN }),
-      params(first.data.id)
+      request(`/organizations/${first.data.organization.id}`, { method: 'DELETE', actor: TENANT_ADMIN }),
+      params(first.data.organization.id)
     );
     expect(forbiddenDelete.status).toBe(403);
   });
@@ -156,26 +174,26 @@ describe('organization tenant management', () => {
     const internalResponse = await POST(
       request('/organizations', {
         method: 'POST',
-        body: { name: 'Protected Internal', isInternal: true },
+        body: organizationBody('Protected Internal', { isInternal: true }),
       })
     );
-    const internal = (await internalResponse.json()) as Envelope<{ id: string }>;
-    createdIds.add(internal.data.id);
+    const internal = (await internalResponse.json()) as Envelope<{ organization: { id: string } }>;
+    createdIds.add(internal.data.organization.id);
     const internalDelete = await DELETE_ORGANIZATION(
-      request(`/organizations/${internal.data.id}`, { method: 'DELETE' }),
-      params(internal.data.id)
+      request(`/organizations/${internal.data.organization.id}`, { method: 'DELETE' }),
+      params(internal.data.organization.id)
     );
     expect(internalDelete.status).toBe(409);
 
     const usedResponse = await POST(
-      request('/organizations', { method: 'POST', body: { name: 'Tenant With Data' } })
+      request('/organizations', { method: 'POST', body: organizationBody('Tenant With Data') })
     );
-    const used = (await usedResponse.json()) as Envelope<{ id: string }>;
-    createdIds.add(used.data.id);
+    const used = (await usedResponse.json()) as Envelope<{ organization: { id: string } }>;
+    createdIds.add(used.data.organization.id);
     const timestamp = new Date().toISOString();
     await (await getStore()).departments.create({
       id: 'dept_organization_guard',
-      tenantId: used.data.id,
+      tenantId: used.data.organization.id,
       name: 'Operations',
       description: null,
       createdAt: timestamp,
@@ -183,8 +201,8 @@ describe('organization tenant management', () => {
     });
 
     const usedDelete = await DELETE_ORGANIZATION(
-      request(`/organizations/${used.data.id}`, { method: 'DELETE' }),
-      params(used.data.id)
+      request(`/organizations/${used.data.organization.id}`, { method: 'DELETE' }),
+      params(used.data.organization.id)
     );
     expect(usedDelete.status).toBe(409);
     await expect(usedDelete.json()).resolves.toMatchObject({

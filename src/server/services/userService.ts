@@ -9,7 +9,12 @@
 
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
-import { pageCollection, type ListOptions, type PageResult } from "../data/store";
+import {
+  pageCollection,
+  type DataStore,
+  type ListOptions,
+  type PageResult,
+} from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { Role, UserRow } from "../domain/models";
 
@@ -20,12 +25,11 @@ export class UserServiceError extends Error {
   }
 }
 
-// Which roles each actor role is allowed to grant / manage. tenant_admin can
-// manage the workforce but never mint or edit other admins; only super_admin
-// can create/modify tenant_admin and super_admin accounts.
+// Tenant admins may appoint another tenant admin inside their own tenant. The
+// last-admin guard below prevents lockout. super_admin remains platform-only.
 const ASSIGNABLE_BY: Record<string, Role[]> = {
   super_admin: ["requester", "agent", "manager", "tenant_admin", "super_admin"],
-  tenant_admin: ["requester", "agent", "manager"],
+  tenant_admin: ["requester", "agent", "manager", "tenant_admin"],
 };
 
 /** Roles the given actor role is permitted to grant/manage (drives the UI too). */
@@ -49,11 +53,11 @@ function initialsFrom(name: string): string {
 
 // Validate a department belongs to the tenant and return its display name.
 async function resolveDepartmentName(
+  store: DataStore,
   tenantId: string,
   departmentId?: string | null
 ): Promise<string | null> {
   if (!departmentId) return null;
-  const store = await getStore();
   const dept = await store.departments.get(departmentId);
   if (!dept || dept.tenantId !== tenantId) throw new UserServiceError("Department not found.");
   return dept.name;
@@ -80,6 +84,11 @@ export interface CreateUserInput {
   timezone?: string | null;
 }
 
+interface CreateUserOptions {
+  store?: DataStore;
+  active?: boolean;
+}
+
 /**
  * Create a user: validates name/email, enforces the role-escalation guard and
  * tenant-scoped email uniqueness, links the department, seeds default
@@ -89,7 +98,8 @@ export async function createUser(
   tenantId: string,
   input: CreateUserInput,
   actorRole: string,
-  actor = "system"
+  actor = "system",
+  options: CreateUserOptions = {}
 ): Promise<UserRow> {
   const name = input.name?.trim();
   const email = input.email?.trim().toLowerCase();
@@ -97,13 +107,13 @@ export async function createUser(
   if (!email || !email.includes("@")) throw new UserServiceError("A valid email is required.");
   assertCanManageRole(actorRole, input.role);
 
-  const store = await getStore();
+  const store = options.store ?? (await getStore());
   const existing = (await store.users.list({ tenantId })).find(
     (u) => u.email.toLowerCase() === email
   );
   if (existing) throw new UserServiceError("A user with that email already exists.", 409);
 
-  const departmentName = await resolveDepartmentName(tenantId, input.departmentId);
+  const departmentName = await resolveDepartmentName(store, tenantId, input.departmentId);
   const user: UserRow = {
     id: newId("user"),
     tenantId,
@@ -114,8 +124,12 @@ export async function createUser(
     department: departmentName,
     departmentId: input.departmentId ?? null,
     initials: initialsFrom(name),
-    active: true,
+    active: options.active ?? true,
     externalId: null,
+    passwordHash: null,
+    passwordChangedAt: null,
+    failedLoginAttempts: 0,
+    lockedUntil: null,
     phone: input.phone?.trim() || null,
     location: input.location?.trim() || null,
     timezone: input.timezone?.trim() || null,
@@ -131,12 +145,15 @@ export async function createUser(
     updatedAt: now(),
   };
   await store.users.create(user);
-  await appendAudit({
-    tenantId,
-    actor,
-    action: "user.created",
-    payload: { email: user.email, name: user.name, role: user.role },
-  });
+  await appendAudit(
+    {
+      tenantId,
+      actor,
+      action: "user.created",
+      payload: { email: user.email, name: user.name, role: user.role },
+    },
+    store
+  );
   return user;
 }
 
@@ -189,9 +206,29 @@ export async function updateUser(
     assertCanManageRole(actorRole, input.role!);
     patch.role = input.role;
   }
+  const removesTenantAdmin =
+    before.role === "tenant_admin" &&
+    ((roleChanged && patch.role !== "tenant_admin") || input.active === false);
+  if (removesTenantAdmin) {
+    const otherActiveAdmins = (await store.users.list({ tenantId })).filter(
+      (user) => user.id !== id && user.role === "tenant_admin" && user.active
+    );
+    if (otherActiveAdmins.length === 0) {
+      throw new UserServiceError(
+        "Assign another active tenant admin before removing the last administrator.",
+        409
+      );
+    }
+  }
+  if (input.active === true && !before.active && !before.passwordHash && !before.externalId) {
+    throw new UserServiceError(
+      "Generate a new setup link instead of activating an account without credentials.",
+      409
+    );
+  }
   if (input.departmentId !== undefined) {
     patch.departmentId = input.departmentId ?? null;
-    patch.department = await resolveDepartmentName(tenantId, input.departmentId);
+    patch.department = await resolveDepartmentName(store, tenantId, input.departmentId);
   }
 
   const updated = await store.users.update(id, patch);
@@ -220,6 +257,17 @@ export async function deactivateUser(
   const before = await store.users.get(id);
   if (!before || before.tenantId !== tenantId) throw new UserServiceError("User not found.", 404);
   assertCanManageRole(actorRole, before.role);
+  if (before.role === "tenant_admin" && before.active) {
+    const otherActiveAdmins = (await store.users.list({ tenantId })).filter(
+      (user) => user.id !== id && user.role === "tenant_admin" && user.active
+    );
+    if (otherActiveAdmins.length === 0) {
+      throw new UserServiceError(
+        "Assign another active tenant admin before removing the last administrator.",
+        409
+      );
+    }
+  }
 
   const updated = await store.users.update(id, { active: false, updatedAt: now() });
   if (!updated) throw new UserServiceError("User not found.", 404);
