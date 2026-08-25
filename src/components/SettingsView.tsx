@@ -1184,14 +1184,14 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
     }
   }
 
-  async function revoke(k: ApiKeyView) {
-    if (!confirm(`Revoke "${k.name}"? Integrations using it will stop working immediately.`)) return;
+  async function remove(k: ApiKeyView) {
+    if (!confirm(`Delete "${k.name}" permanently? Integrations using it will stop working immediately. The audit history will be retained.`)) return;
     try {
       await apiSend(`/api-keys/${k.id}`, "DELETE");
       onChanged();
-      toast.info({ title: "API key revoked", description: k.prefix + "…" });
+      toast.info({ title: "API integration deleted", description: k.prefix + "…" });
     } catch (err) {
-      toast.error({ title: "Could not revoke key", description: err instanceof Error ? err.message : String(err) });
+      toast.error({ title: "Could not delete integration", description: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -1376,7 +1376,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
 
       {activeKeys.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.82rem", margin: 0 }}>
-          No active API integrations. Create one for each integration so access can be revoked independently.
+          No active API integrations. Create one for each integration so credentials can be deleted independently.
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1384,18 +1384,13 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             <div
               key={k.id}
               className="panel-2 flex items-center justify-between"
-              style={{ padding: "0.6rem 0.8rem", gap: 10, opacity: k.active ? 1 : 0.55 }}
+              style={{ padding: "0.6rem 0.8rem", gap: 10 }}
             >
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>{k.name}</span>
                   <code className="mono muted" style={{ fontSize: "0.7rem" }}>{k.prefix}…</code>
                   <span className="badge" style={{ fontSize: "0.64rem", textTransform: "capitalize" }}>{String(k.role).replace("_", " ")}</span>
-                  {!k.active ? (
-                    <span className="badge" style={{ fontSize: "0.64rem", background: "var(--danger-bg)", color: "var(--danger-fg)", borderColor: "var(--danger-border)" }}>
-                      revoked
-                    </span>
-                  ) : null}
                 </div>
                 {k.description ? (
                   <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{k.description}</div>
@@ -1408,11 +1403,9 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                   {k.lastUsedAt ? ` · last used ${timeAgo(k.lastUsedAt)}` : " · never used"}
                 </div>
               </div>
-              {k.active ? (
-                <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void revoke(k)}>
-                  Revoke
-                </button>
-              ) : null}
+              <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void remove(k)}>
+                Delete
+              </button>
             </div>
           ))}
         </div>

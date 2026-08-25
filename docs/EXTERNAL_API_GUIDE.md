@@ -45,7 +45,7 @@ A tenant administrator or platform administrator creates the first integration k
 2. Use POST /api-keys with an existing tenant_admin or super_admin session/key.
 3. If the deployment has no initial administrator credential, ask the platform owner to bootstrap one through the controlled application-operator process.
 
-Do not insert a key hash directly into PostgreSQL. The application generates a cryptographically random secret, stores only its SHA-256 hash, returns the full key once, and records creation/revocation in the audit chain.
+Do not insert a key hash directly into PostgreSQL. The application generates a cryptographically random secret, stores only its SHA-256 hash, returns the full key once, and records creation/deletion in the audit chain.
 
 Create a key with an existing administrator credential:
 
@@ -63,7 +63,7 @@ curl --request POST \
 
 The response data contains the full key exactly once. Store it immediately in a secret manager. Later list calls return only non-secret metadata and the identifying prefix.
 
-Revoke a key immediately when it is replaced, exposed, or no longer required:
+Delete a key immediately when it is replaced, exposed, or no longer required. This permanently removes the credential row while retaining its non-secret audit history:
 
 ~~~bash
 curl --request DELETE \
@@ -71,7 +71,7 @@ curl --request DELETE \
   --header "Authorization: Bearer $NETLINK_ADMIN_API_KEY"
 ~~~
 
-Revoked and expired keys return HTTP 401 on permission-guarded endpoints.
+Deleted and expired keys return HTTP 401 on permission-guarded endpoints.
 
 ## Roles and permissions
 
@@ -404,7 +404,7 @@ Do not log full response headers or request configuration if they include Author
 | 200 | Successful read/update/message/delete | Process data |
 | 201 | Ticket or API key created | Persist returned identifiers; store a newly returned key once |
 | 400 | Malformed JSON, missing/invalid values, or invalid pagination | Fix the request; do not retry unchanged |
-| 401 | No credentials, or key is invalid, expired, or revoked | Stop and rotate/reconfigure credentials |
+| 401 | No credentials, or key is invalid, expired, or deleted | Stop and rotate/reconfigure credentials |
 | 403 | Key is valid but its role lacks the required permission | Use an appropriately scoped key or change the workflow |
 | 404 | Resource is absent or outside tenant/requester scope | Reconcile the stored id; do not infer cross-tenant existence |
 | 413 | A selected validated-body endpoint rejected a body above 1 MiB | Reduce the payload |

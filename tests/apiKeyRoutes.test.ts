@@ -8,7 +8,7 @@ import {
   GET as listApiKeysRoute,
   POST as createApiKeyRoute,
 } from "@/app/api/v1/api-keys/route";
-import { DELETE as revokeApiKeyRoute } from "@/app/api/v1/api-keys/[id]/route";
+import { DELETE as deleteApiKeyRoute } from "@/app/api/v1/api-keys/[id]/route";
 import {
   GET as listTicketsRoute,
   POST as createTicketRoute,
@@ -194,13 +194,14 @@ describe.sequential("API-key management routes and external integration lifecycl
     await expect(response.json()).resolves.toMatchObject({ ok: false, error: "Forbidden." });
   });
 
-  it("revokes both credentials and immediately rejects their future use", async () => {
+  it("deletes both credentials and immediately rejects their future use", async () => {
     mockAuth.mockResolvedValue(null);
-    const revokedIntegration = await revokeApiKeyRoute(
+    const deletedIntegration = await deleteApiKeyRoute(
       request(`/api-keys/${integrationKeyId}`, { method: "DELETE", key: adminKey }),
       params(integrationKeyId)
     );
-    expect(revokedIntegration.status).toBe(200);
+    expect(deletedIntegration.status).toBe(200);
+    await expect(deletedIntegration.json()).resolves.toMatchObject({ ok: true, data: { deleted: true } });
 
     const rejectedIntegration = await listTicketsRoute(
       request("/tickets", { key: integrationKey })
@@ -208,11 +209,12 @@ describe.sequential("API-key management routes and external integration lifecycl
     expect(rejectedIntegration.status).toBe(401);
 
     mockAuth.mockResolvedValue(adminSession);
-    const revokedAdmin = await revokeApiKeyRoute(
+    const deletedAdmin = await deleteApiKeyRoute(
       request(`/api-keys/${adminKeyId}`, { method: "DELETE" }),
       params(adminKeyId)
     );
-    expect(revokedAdmin.status).toBe(200);
+    expect(deletedAdmin.status).toBe(200);
+    await expect(deletedAdmin.json()).resolves.toMatchObject({ ok: true, data: { deleted: true } });
 
     mockAuth.mockResolvedValue(null);
     const rejectedAdmin = await listApiKeysRoute(request("/api-keys", { key: adminKey }));

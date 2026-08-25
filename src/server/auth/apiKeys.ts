@@ -4,7 +4,7 @@
 // Keys look like "nlk_<43 chars base64url>" and are shown ONCE at creation;
 // only the SHA-256 hash is persisted. Requests authenticate with
 // "Authorization: Bearer nlk_..." or "x-api-key: nlk_...", and act with the
-// key's configured role inside the key's tenant. Creation/revocation are
+// key's configured role inside the key's tenant. Creation/deletion are
 // audited; verification is constant-time on the hash comparison.
 // =============================================================================
 
@@ -96,15 +96,16 @@ export async function listApiKeys(
   return pageCollection(store.apiKeys, { tenantId }, options);
 }
 
-export async function revokeApiKey(tenantId: string, id: string, actor = "system"): Promise<boolean> {
+export async function deleteApiKey(tenantId: string, id: string, actor = "system"): Promise<boolean> {
   const store = await getStore();
   const existing = await store.apiKeys.get(id);
   if (!existing || existing.tenantId !== tenantId) return false;
-  await store.apiKeys.update(id, { active: false, updatedAt: now() });
+  const deleted = await store.apiKeys.remove(id);
+  if (!deleted) return false;
   await appendAudit({
     tenantId,
     actor,
-    action: "auth.key_revoked",
+    action: "auth.key_deleted",
     payload: { name: existing.name, prefix: existing.prefix },
   });
   return true;

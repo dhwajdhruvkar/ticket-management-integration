@@ -234,7 +234,7 @@ const BASE_SPEC = {
     "/custom-fields": { get: { summary: "List custom field definitions (agent+)", parameters: PAGINATION, responses: { "200": { description: "Paginated definitions" } } }, post: { summary: "Create a custom field (admin)", responses: { "201": { description: "Created" } } } },
     "/custom-fields/{id}": { patch: { summary: "Update a custom field (admin)", parameters: [ID], responses: { "200": { description: "Updated" } } }, delete: { summary: "Delete a custom field (admin)", parameters: [ID], responses: { "200": { description: "Deleted" } } } },
     "/api-keys": { get: { summary: "List API keys (admin; hashes never returned)", parameters: PAGINATION, responses: { "200": { description: "Paginated keys" } } }, post: { summary: "Create a key (admin) — full secret returned once", responses: { "201": { description: "Created" } } } },
-    "/api-keys/{id}": { delete: { summary: "Revoke a key (admin)", parameters: [ID], responses: { "200": { description: "Revoked" } } } },
+    "/api-keys/{id}": { delete: { summary: "Delete a key permanently (admin)", parameters: [ID], responses: { "200": { description: "Deleted" } } } },
     "/triage": { get: { summary: "Dispatcher board: unassigned queue, escalations, and per-agent open-load, availability and group memberships (manager+)", responses: { "200": { description: "Triage board" }, "403": { description: "Lacks ticket.dispatch" } } } },
     "/triage/assign": { post: { summary: "Bulk assign tickets (manager+); omit assigneeId to send each to its best fit", responses: { "200": { description: "Assigned + skipped ids" }, "403": { description: "Lacks ticket.dispatch" } } } },
     "/metrics": { get: { summary: "Workspace KPIs (deflection, MTTR, SLA compliance, backlog...)", responses: { "200": { description: "Metrics" } } } },
@@ -789,15 +789,15 @@ const CORE_SCHEMAS = {
       },
     },
   },
-  RevokeApiKeyResponse: {
+  DeleteApiKeyResponse: {
     type: "object",
     required: ["ok", "data"],
     properties: {
       ok: { type: "boolean", const: true },
       data: {
         type: "object",
-        required: ["revoked"],
-        properties: { revoked: { type: "boolean", const: true } },
+        required: ["deleted"],
+        properties: { deleted: { type: "boolean", const: true } },
       },
     },
   },
@@ -953,8 +953,8 @@ const SPEC = {
         "Validation failed."
       ),
       Unauthorized: errorResponse(
-        "Credentials are missing, invalid, expired, or revoked.",
-        "Invalid, expired, or revoked API key."
+        "Credentials are missing, invalid, expired, or deleted.",
+        "Invalid, expired, or deleted API key."
       ),
       Forbidden: errorResponse(
         "The authenticated role lacks the required permission.",
@@ -1183,14 +1183,14 @@ const SPEC = {
     "/api-keys/{id}": {
       delete: {
         tags: ["API Keys"],
-        operationId: "revokeApiKey",
-        summary: "Revoke an API key",
+        operationId: "deleteApiKey",
+        summary: "Delete an API key permanently",
         description:
-          "Requires admin (tenant_admin or super_admin). Revocation is immediate and audited.",
+          "Requires admin (tenant_admin or super_admin). Deletion is immediate and permanent; non-secret audit history is retained.",
         "x-required-permission": "admin",
         parameters: [ID],
         responses: {
-          "200": jsonResponse("API key revoked", ref("RevokeApiKeyResponse")),
+          "200": jsonResponse("API key deleted", ref("DeleteApiKeyResponse")),
           "401": { $ref: "#/components/responses/Unauthorized" },
           "403": { $ref: "#/components/responses/Forbidden" },
           "404": { $ref: "#/components/responses/NotFound" },

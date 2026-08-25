@@ -207,7 +207,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(openApiResponse.status).toBe(401);
     await expect(openApiResponse.json()).resolves.toEqual({
       ok: false,
-      error: "Invalid, expired, or revoked API key.",
+      error: "Invalid, expired, or deleted API key.",
     });
 
     const response = await listApiKeys(
@@ -219,7 +219,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      error: "Invalid, expired, or revoked API key.",
+      error: "Invalid, expired, or deleted API key.",
     });
   });
 });

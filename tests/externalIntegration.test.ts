@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // Vitest does not load Auth.js's Next.js runtime adapter.
 vi.mock("@/auth", () => ({ auth: vi.fn().mockResolvedValue(null) }));
 import { decideApiV1Access } from "@/server/auth/apiGateway";
-import { createApiKey, revokeApiKey } from "@/server/auth/apiKeys";
+import { createApiKey, deleteApiKey } from "@/server/auth/apiKeys";
 import { currentActor } from "@/server/context";
 import { getStore } from "@/server/data";
 import {
@@ -90,8 +90,8 @@ describe.sequential("Phase 13 external ticket integration contract", () => {
   });
 
   afterAll(async () => {
-    if (managerKeyId) await revokeApiKey(TENANT, managerKeyId, "phase13-test-cleanup");
-    if (requesterKeyId) await revokeApiKey(TENANT, requesterKeyId, "phase13-test-cleanup");
+    if (managerKeyId) await deleteApiKey(TENANT, managerKeyId, "phase13-test-cleanup");
+    if (requesterKeyId) await deleteApiKey(TENANT, requesterKeyId, "phase13-test-cleanup");
   });
 
   it("returns 200 for a valid key, 401 for no key at the production gateway, and 401 for an invalid key", async () => {
@@ -113,7 +113,7 @@ describe.sequential("Phase 13 external ticket integration contract", () => {
     expect(invalid.status).toBe(401);
     await expect(invalid.json()).resolves.toMatchObject({
       ok: false,
-      error: "Invalid, expired, or revoked API key.",
+      error: "Invalid, expired, or deleted API key.",
     });
   });
 
@@ -131,7 +131,7 @@ describe.sequential("Phase 13 external ticket integration contract", () => {
     for (const response of responses) {
       await expect(response.json()).resolves.toMatchObject({
         ok: false,
-        error: "Invalid, expired, or revoked API key.",
+        error: "Invalid, expired, or deleted API key.",
       });
     }
   });
