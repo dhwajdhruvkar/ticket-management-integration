@@ -1127,6 +1127,7 @@ function FieldIcon() {
 
 function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: () => void }) {
   const toast = useToast();
+  const activeKeys = keys.filter((key) => key.active);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"details" | "agents">("details");
   const [name, setName] = useState("");
@@ -1373,13 +1374,13 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
         </div>
       ) : null}
 
-      {keys.length === 0 ? (
+      {activeKeys.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.82rem", margin: 0 }}>
-          No API keys yet. Create one for each integration so access can be revoked independently.
+          No active API integrations. Create one for each integration so access can be revoked independently.
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {keys.map((k) => (
+          {activeKeys.map((k) => (
             <div
               key={k.id}
               className="panel-2 flex items-center justify-between"
