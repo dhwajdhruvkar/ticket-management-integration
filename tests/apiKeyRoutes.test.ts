@@ -9,6 +9,8 @@ import {
   POST as createApiKeyRoute,
 } from "@/app/api/v1/api-keys/route";
 import { DELETE as deleteApiKeyRoute } from "@/app/api/v1/api-keys/[id]/route";
+import { POST as rotateApiKeyRoute } from "@/app/api/v1/api-keys/[id]/rotate/route";
+import { PATCH as configureWebhookRoute } from "@/app/api/v1/api-keys/[id]/webhook/route";
 import {
   GET as listTicketsRoute,
   POST as createTicketRoute,
@@ -117,6 +119,7 @@ describe.sequential("API-key management routes and external integration lifecycl
     expect(body.data.key).toMatch(/^nlk_[A-Za-z0-9_-]{43}$/);
     expect(body.data.prefix).toBe(body.data.key.slice(0, 10));
     expect(body.data).not.toHaveProperty("keyHash");
+    expect(body.data).not.toHaveProperty("webhookSecretSalt");
     adminKeyId = body.data.id;
     adminKey = body.data.key;
   });
@@ -136,15 +139,20 @@ describe.sequential("API-key management routes and external integration lifecycl
     expect(raw).not.toContain(adminKey);
   });
 
-  it("uses an administrator key to mint a least-privileged integration key", async () => {
+  it("uses an administrator key to mint a fixed-requester ticket submitter", async () => {
     mockAuth.mockResolvedValue(null);
+    const store = await getStore();
+    const requester = (await store.users.list({ tenantId: TENANT })).find(
+      (user) => user.email === "dana.lee@netlink.com"
+    )!;
     const response = await createApiKeyRoute(
       request("/api-keys", {
         method: "POST",
         key: adminKey,
         body: {
           name: "External ticket management system",
-          role: "agent",
+          role: "ticket_submitter",
+          requesterId: requester.id,
           description: "Route-level integration verification",
         },
       })
@@ -157,9 +165,10 @@ describe.sequential("API-key management routes and external integration lifecycl
     }>;
 
     expect(response.status).toBe(201);
-    expect(body.data.role).toBe("agent");
+    expect(body.data.role).toBe("ticket_submitter");
     expect(body.data.key).toMatch(/^nlk_[A-Za-z0-9_-]{43}$/);
     expect(body.data).not.toHaveProperty("keyHash");
+    expect(body.data).not.toHaveProperty("webhookSecretSalt");
     integrationKeyId = body.data.id;
     integrationKey = body.data.key;
   });
@@ -187,7 +196,52 @@ describe.sequential("API-key management routes and external integration lifecycl
     ticketId = body.data.id;
   });
 
-  it("prevents an agent integration key from managing credentials", async () => {
+  it("rotates bearer credentials and configures a separately signed callback", async () => {
+    mockAuth.mockResolvedValue(null);
+    const previous = integrationKey;
+    const rotated = await rotateApiKeyRoute(
+      request(`/api-keys/${integrationKeyId}/rotate`, { method: "POST", key: adminKey }),
+      params(integrationKeyId)
+    );
+    const rotatedBody = (await rotated.json()) as Envelope<{ key: string; webhookSecretSalt?: string }>;
+    expect(rotated.status).toBe(200);
+    expect(rotatedBody.data.key).toMatch(/^nlk_[A-Za-z0-9_-]{43}$/);
+    expect(rotatedBody.data).not.toHaveProperty("webhookSecretSalt");
+    integrationKey = rotatedBody.data.key;
+    expect((await listTicketsRoute(request("/tickets", { key: previous }))).status).toBe(401);
+
+    const privateTarget = await configureWebhookRoute(
+      request(`/api-keys/${integrationKeyId}/webhook`, {
+        method: "PATCH",
+        key: adminKey,
+        body: { url: "https://127.0.0.1/callback" },
+      }),
+      params(integrationKeyId)
+    );
+    expect(privateTarget.status).toBe(400);
+
+    const configured = await configureWebhookRoute(
+      request(`/api-keys/${integrationKeyId}/webhook`, {
+        method: "PATCH",
+        key: adminKey,
+        body: {
+          url: "https://partner.example.test/netlink",
+          events: ["ticket.updated"],
+          active: false,
+        },
+      }),
+      params(integrationKeyId)
+    );
+    const configuredBody = (await configured.json()) as Envelope<{
+      webhookSecret: string;
+      webhookSecretSalt?: string;
+    }>;
+    expect(configured.status).toBe(200);
+    expect(configuredBody.data.webhookSecret).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(configuredBody.data).not.toHaveProperty("webhookSecretSalt");
+  });
+
+  it("prevents a ticket submitter integration key from managing credentials", async () => {
     mockAuth.mockResolvedValue(null);
     const response = await listApiKeysRoute(request("/api-keys", { key: integrationKey }));
     expect(response.status).toBe(403);

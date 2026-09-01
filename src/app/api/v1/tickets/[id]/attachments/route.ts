@@ -7,7 +7,7 @@ import {
   readMultipartFormData,
 } from "@/server/http";
 import { actorContext, isResponse, loadTicket } from "@/server/guards";
-import { can, isAgentRole } from "@/server/auth/rbac";
+import { can, isAgentRole, isTicketSubmitterRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
 import { config } from "@/server/config";
 import {
@@ -75,6 +75,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return fail("Rate limit exceeded. Try again shortly.", 429);
   }
   const { id } = await params;
+  const submitterContext = await actorContext(req);
+  if (isTicketSubmitterRole(submitterContext.role)) {
+    return fail("Ticket submitter integrations cannot upload attachments.", 403);
+  }
   const res = await guard(req, id, true);
   if (!res.ok) return res.response;
 

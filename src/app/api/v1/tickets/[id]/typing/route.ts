@@ -1,6 +1,6 @@
-import { ok, readJson } from "@/server/http";
+import { fail, ok, readJson } from "@/server/http";
 import { actorContext, isResponse, loadTicket } from "@/server/guards";
-import { isAgentRole } from "@/server/auth/rbac";
+import { isAgentRole, isTicketSubmitterRole } from "@/server/auth/rbac";
 import { publishEvent } from "@/server/events/bus";
 import type { MessageVisibility } from "@/server/domain/models";
 
@@ -20,6 +20,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const ctx = await actorContext(req);
   const { actor } = ctx;
+  if (isTicketSubmitterRole(ctx.role)) {
+    return fail("Ticket submitter integrations cannot publish typing events.", 403);
+  }
   const agent = isAgentRole(ctx.role);
 
   // Same record security as messages: requesters only on their own tickets.

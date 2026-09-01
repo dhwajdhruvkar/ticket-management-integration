@@ -109,6 +109,7 @@ export async function POST(req: Request) {
       urgency: levels.urgency,
       ciIds,
       tags: ["monitoring"],
+      integrationKeyId: ctx.actor.apiKeyId,
     });
     return ok(ticket, { status: 201 });
   }
@@ -124,6 +125,7 @@ export async function POST(req: Request) {
     source: payload.source ?? "intake",
     type: payload.catalogItemId ? "service_request" : undefined,
     catalogItemId: payload.catalogItemId,
+    integrationKeyId: ctx.actor.apiKeyId,
   });
   return ok(ticket, { status: 201 });
 }

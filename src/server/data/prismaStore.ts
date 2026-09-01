@@ -123,6 +123,7 @@ export class PrismaStore implements DataStore {
   readonly apiKeys: PrismaCollection<any>;
   readonly emails: PrismaCollection<any>;
   readonly calendars: PrismaCollection<any>;
+  readonly webhookDeliveries: PrismaCollection<any>;
 
   constructor(
     private readonly p: any = prismaClient(),
@@ -156,6 +157,7 @@ export class PrismaStore implements DataStore {
     this.apiKeys = new PrismaCollection<any>(p.apiKey);
     this.emails = new PrismaCollection<any>(p.emailMessage);
     this.calendars = new PrismaCollection<any>(p.businessCalendar);
+    this.webhookDeliveries = new PrismaCollection<any>(p.webhookDelivery);
   }
 
   async ready(): Promise<void> {

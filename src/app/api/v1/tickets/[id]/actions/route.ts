@@ -1,6 +1,6 @@
 import { fail, ok, readJson } from "@/server/http";
 import { actorContext, isResponse, loadTicket } from "@/server/guards";
-import { can, isAgentRole } from "@/server/auth/rbac";
+import { can, isAgentRole, isTicketSubmitterRole } from "@/server/auth/rbac";
 import {
   agentClose,
   agentResolve,
@@ -49,6 +49,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!body?.action) return fail("action is required.");
   const ctx = await actorContext(req);
   const { actor, role } = ctx;
+  if (isTicketSubmitterRole(role)) return fail("Ticket submitter integrations are read-only after creation.", 403);
 
   // Tenant scope for everyone; requesters additionally only see their own.
   const ticket = await loadTicket(ctx, id);

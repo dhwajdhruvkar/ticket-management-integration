@@ -42,6 +42,9 @@ export async function intakeTicket(
   const requesterUser = (await store0.users.list({ tenantId })).find(
     (u) => u.email.toLowerCase() === input.requesterEmail.toLowerCase()
   );
+  // Resolve the relation server-side; API callers can choose an email only
+  // when their acting role allows it, never an arbitrary user id.
+  input.requesterId = requesterUser?.id;
   if (requesterUser?.vip) {
     input.urgency = "high";
     input.priority = derivePriority(input.impact ?? "medium", "high");

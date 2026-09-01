@@ -41,6 +41,7 @@ import type {
   TicketRow,
   UserRow,
   UserInvitationRow,
+  WebhookDeliveryRow,
 } from "../domain/models";
 
 export interface ListOptions<T> {
@@ -114,6 +115,7 @@ export interface DataStore {
   apiKeys: Collection<ApiKeyRow>;
   emails: Collection<EmailMessageRow>;
   calendars: Collection<BusinessCalendarRow>;
+  webhookDeliveries: Collection<WebhookDeliveryRow>;
 }
 
 /** Shallow equality match used by both drivers' `list`/`count`. */

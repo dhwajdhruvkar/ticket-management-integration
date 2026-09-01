@@ -33,6 +33,7 @@ export type Permission =
   | "admin";
 
 const REQUESTER: Permission[] = ["ticket.read", "ticket.create", "kb.read"];
+const TICKET_SUBMITTER: Permission[] = ["ticket.read", "ticket.create"];
 const AGENT: Permission[] = [
   ...REQUESTER,
   "ticket.write",
@@ -54,6 +55,7 @@ const TENANT_ADMIN: Permission[] = [...MANAGER, "automation.write", "admin"];
 
 const MATRIX: Record<Role, Permission[] | "*"> = {
   requester: REQUESTER,
+  ticket_submitter: TICKET_SUBMITTER,
   agent: AGENT,
   manager: MANAGER,
   tenant_admin: TENANT_ADMIN,
@@ -70,7 +72,11 @@ export function can(role: Role | string | undefined, permission: Permission): bo
 }
 
 export function isAgentRole(role: Role | undefined): boolean {
-  return !!role && role !== "requester";
+  return !!role && role !== "requester" && role !== "ticket_submitter";
+}
+
+export function isTicketSubmitterRole(role: Role | string | undefined): boolean {
+  return role === "ticket_submitter";
 }
 
 export class ForbiddenError extends Error {

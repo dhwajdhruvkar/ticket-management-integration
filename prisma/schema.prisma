@@ -34,6 +34,7 @@ enum Role {
   manager
   agent
   requester
+  ticket_submitter
 }
 
 enum TicketType {
@@ -188,22 +189,27 @@ model Tenant {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  users           User[]
-  departments     Department[]
-  tickets         Ticket[]
-  articles        KBArticle[]
-  problems        Problem[]
-  changes         Change[]
-  assets          Asset[]
-  cis             ConfigurationItem[]
-  catalogItems    ServiceRequestCatalogItem[]
-  slaPolicies     SlaPolicy[]
-  automations     AutomationRule[]
-  macros          Macro[]
-  customFieldDefs CustomFieldDef[]
-  audit           AuditRecord[]
-  groups          AssignmentGroup[]
-  invitations     UserInvitation[]
+  users             User[]
+  departments       Department[]
+  tickets           Ticket[]
+  articles          KBArticle[]
+  problems          Problem[]
+  changes           Change[]
+  assets            Asset[]
+  cis               ConfigurationItem[]
+  catalogItems      ServiceRequestCatalogItem[]
+  slaPolicies       SlaPolicy[]
+  automations       AutomationRule[]
+  macros            Macro[]
+  customFieldDefs   CustomFieldDef[]
+  audit             AuditRecord[]
+  groups            AssignmentGroup[]
+  invitations       UserInvitation[]
+  apiKeys           ApiKey[]
+  webhookDeliveries WebhookDelivery[]
+  notifications     Notification[]
+  emails            EmailMessage[]
+  calendars         BusinessCalendar[]
 
   @@index([slug])
 }
@@ -241,12 +247,13 @@ model User {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  departmentRef    Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  requestedTickets Ticket[]         @relation("Requester")
-  assignedTickets  Ticket[]         @relation("Assignee")
-  approvals        Approval[]
-  invitations      UserInvitation[]
+  tenant             Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentRef      Department?      @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  requestedTickets   Ticket[]         @relation("Requester")
+  assignedTickets    Ticket[]         @relation("Assignee")
+  approvals          Approval[]
+  invitations        UserInvitation[]
+  integrationApiKeys ApiKey[]         @relation("ApiKeyRequester")
 
   @@unique([tenantId, email])
   @@index([tenantId, role])
@@ -337,10 +344,14 @@ model Ticket {
   tags         String[]       @default([])
   customFields Json?
 
-  requesterEmail    String
-  requesterId       String?
-  assigneeId        String?
-  assignmentGroupId String?
+  requesterEmail         String
+  requesterId            String?
+  externalTicketId       String?
+  idempotencyScopeHash   String? @unique
+  idempotencyRequestHash String?
+  integrationKeyId       String?
+  assigneeId             String?
+  assignmentGroupId      String?
 
   problemId       String?
   changeId        String?
@@ -380,16 +391,19 @@ model Ticket {
   catalogItem     ServiceRequestCatalogItem? @relation(fields: [catalogItemId], references: [id])
   slaPolicy       SlaPolicy?                 @relation(fields: [slaPolicyId], references: [id])
 
-  messages    TicketMessage[]
-  events      TicketEvent[]
-  resolution  Resolution?
-  approvals   Approval[]
-  attachments Attachment[]
+  messages          TicketMessage[]
+  events            TicketEvent[]
+  resolution        Resolution?
+  approvals         Approval[]
+  attachments       Attachment[]
+  webhookDeliveries WebhookDelivery[]
 
   @@index([tenantId, status])
   @@index([tenantId, type])
   @@index([assigneeId])
   @@index([requesterEmail])
+  @@index([tenantId, externalTicketId])
+  @@index([integrationKeyId])
   @@index([tenantId, deletedAt])
 }
 
@@ -675,6 +689,7 @@ model BusinessCalendar {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   policies SlaPolicy[]
 
   @@unique([tenantId, name])
@@ -768,6 +783,8 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime            @default(now())
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@index([tenantId, sent])
   @@index([tenantId, toAddress])
 }
@@ -779,27 +796,68 @@ model Notification {
 /// Server-to-server credential ("Authorization: Bearer nlk_..."). Only the
 /// SHA-256 hash is stored; the full key is shown once at creation.
 model ApiKey {
-  id          String    @id @default(cuid())
-  tenantId    String
-  name        String
+  id                     String    @id @default(cuid())
+  tenantId               String
+  name                   String
   /// First characters of the key for display ("nlk_ab12...").
-  prefix      String
+  prefix                 String
   /// SHA-256 hex of the full key.
-  keyHash     String    @unique
+  keyHash                String    @unique
   /// Acting role for requests authenticated with this key.
-  role        Role      @default(agent)
+  role                   Role      @default(agent)
+  /// Fixed requester identity for requester-scoped machine credentials.
+  requesterId            String?
   /// Agents this integration acts on behalf of.
-  agentIds    String[]
+  agentIds               String[]
   /// Optional description of the integration/application.
-  description String?
-  active      Boolean   @default(true)
-  lastUsedAt  DateTime?
-  expiresAt   DateTime?
-  createdBy   String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  description            String?
+  active                 Boolean   @default(true)
+  lastUsedAt             DateTime?
+  lastTestedAt           DateTime?
+  lastTestStatus         String?
+  expiresAt              DateTime?
+  rotatedAt              DateTime?
+  webhookUrl             String?
+  webhookEvents          String[]  @default([])
+  webhookActive          Boolean   @default(false)
+  /// Non-secret salt; the HMAC signing secret is derived with AUTH_SECRET.
+  webhookSecretSalt      String?
+  webhookLastDeliveredAt DateTime?
+  webhookLastStatus      Int?
+  webhookLastError       String?
+  createdBy              String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester         User?             @relation("ApiKeyRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  webhookDeliveries WebhookDelivery[]
 
   @@index([tenantId, active])
+  @@index([requesterId])
+}
+
+/// Pending/failed outbound ticket status callback. Successful rows are removed;
+/// the scheduler retries failures with bounded exponential backoff.
+model WebhookDelivery {
+  id            String   @id @default(cuid())
+  tenantId      String
+  apiKeyId      String
+  ticketId      String
+  event         String
+  payload       Json
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, nextAttemptAt])
+  @@index([apiKeyId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +899,8 @@ model EmailMessage {
   ticketId          String?
   receivedAt        DateTime?
   createdAt         DateTime       @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, internetMessageId])
   @@index([tenantId, conversationId])

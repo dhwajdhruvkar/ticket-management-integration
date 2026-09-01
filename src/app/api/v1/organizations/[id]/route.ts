@@ -21,6 +21,12 @@ const PatchOrganizationSchema = z
     message: 'At least one organization field is required.',
   });
 
+const DeleteOrganizationSchema = z
+  .object({
+    confirmation: z.string().trim().min(1, 'Organization code confirmation is required.'),
+  })
+  .strict();
+
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -48,12 +54,20 @@ export async function DELETE(
   const { id } = await params;
   const ctx = await actorContext(req);
   if (ctx.role !== 'super_admin') {
-    return fail('Only a super admin can discard organizations.', 403);
+    return fail('Only a super admin can delete organizations.', 403);
   }
 
+  const body = await parseBody(req, DeleteOrganizationSchema);
+  if (body instanceof NextResponse) return body;
+
   try {
-    const removed = await deleteOrganization(id, ctx.tenantId, ctx.actor.name);
-    return removed ? ok({ deleted: true }) : fail('Organization not found.', 404);
+    const result = await deleteOrganization(
+      id,
+      ctx.tenantId,
+      body.confirmation,
+      ctx.actor.name
+    );
+    return result ? ok(result) : fail('Organization not found.', 404);
   } catch (error) {
     if (error instanceof OrganizationServiceError) return fail(error.message, error.status);
     throw error;

@@ -293,7 +293,19 @@ const BASE_SPEC = {
         responses: { "201": { description: "Organization, safe admin and one-time invitation" }, "409": { description: "Organization name already exists" } },
       },
     },
-    "/organizations/{id}": { patch: { summary: "Edit an organization (super admin)", parameters: [ID], responses: { "200": { description: "Updated" }, "409": { description: "Organization name already exists" } } }, delete: { summary: "Discard an empty organization (super admin)", parameters: [ID], responses: { "200": { description: "Discarded" }, "409": { description: "Protected, current, or non-empty organization" } } } },
+    "/organizations/{id}": {
+      patch: { summary: "Edit an organization (super admin)", parameters: [ID], responses: { "200": { description: "Updated" }, "409": { description: "Organization name already exists" } } },
+      delete: {
+        summary: "Permanently delete a verified organization and all tenant-owned data (super admin)",
+        parameters: [ID],
+        requestBody: { required: true, content: jsonContent(ref("DeleteOrganizationRequest")) },
+        responses: {
+          "200": { description: "Organization and tenant-owned records deleted" },
+          "400": { description: "Organization code confirmation does not match" },
+          "409": { description: "Current or internal organization is protected" },
+        },
+      },
+    },
     "/me": { get: { summary: "Current user profile", responses: { "200": { description: "Profile" } } }, patch: { summary: "Update profile/preferences", responses: { "200": { description: "Updated" } } } },
     "/catalog": { get: { summary: "Service request catalog", parameters: PAGINATION, responses: { "200": { description: "Paginated items" } } } },
   },
@@ -501,6 +513,10 @@ const CORE_SCHEMAS = {
       tags: { type: "array", items: { type: "string" } },
       customFields: { type: ["object", "null"], additionalProperties: true },
       requesterEmail: { type: "string", format: "email" },
+      externalTicketId: {
+        type: ["string", "null"],
+        description: "Caller reference used as an idempotency fallback within this integration key.",
+      },
       requesterId: { type: ["string", "null"] },
       assigneeId: { type: ["string", "null"] },
       assignmentGroupId: { type: ["string", "null"] },
@@ -595,7 +611,13 @@ const CORE_SCHEMAS = {
         type: "string",
         format: "email",
         description:
-          "Required for agent-or-higher keys. Requester keys always file as their own identity.",
+          "Required for agent-or-higher keys. ticket_submitter/requester keys ignore this field and always file as their bound requester identity.",
+      },
+      externalTicketId: {
+        type: "string",
+        maxLength: 128,
+        description:
+          "Stable partner-side ticket id. Used for idempotency when Idempotency-Key is omitted.",
       },
       type: { type: "string", enum: TICKET_TYPE, default: "incident" },
       channel: {
@@ -691,13 +713,23 @@ const CORE_SCHEMAS = {
       },
       role: {
         type: "string",
-        enum: ["requester", "agent", "manager", "tenant_admin", "super_admin"],
+        enum: ["ticket_submitter", "requester", "agent", "manager", "tenant_admin", "super_admin"],
       },
+      requesterId: { type: ["string", "null"] },
       agentIds: { type: "array", items: { type: "string" } },
       description: { type: ["string", "null"] },
       active: { type: "boolean" },
       lastUsedAt: { type: ["string", "null"], format: "date-time" },
+      lastTestedAt: { type: ["string", "null"], format: "date-time" },
+      lastTestStatus: { type: ["string", "null"] },
       expiresAt: { type: ["string", "null"], format: "date-time" },
+      rotatedAt: { type: ["string", "null"], format: "date-time" },
+      webhookUrl: { type: ["string", "null"], format: "uri" },
+      webhookEvents: { type: "array", items: { type: "string" } },
+      webhookActive: { type: "boolean" },
+      webhookLastDeliveredAt: { type: ["string", "null"], format: "date-time" },
+      webhookLastStatus: { type: ["integer", "null"] },
+      webhookLastError: { type: ["string", "null"] },
       createdBy: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -716,6 +748,12 @@ const CORE_SCHEMAS = {
             description:
               "Full secret returned exactly once. Store it in a secret manager.",
           },
+          webhookSecret: {
+            type: ["string", "null"],
+            readOnly: true,
+            description:
+              "HMAC signing secret returned once when a callback is first configured or explicitly rotated.",
+          },
         },
       },
     ],
@@ -727,12 +765,70 @@ const CORE_SCHEMAS = {
       name: { type: "string", minLength: 1, maxLength: 80 },
       role: {
         type: "string",
-        enum: ["requester", "agent", "manager", "tenant_admin"],
-        default: "agent",
+        enum: ["ticket_submitter", "requester", "agent", "manager", "tenant_admin"],
+        default: "ticket_submitter",
+      },
+      requesterId: {
+        type: ["string", "null"],
+        description:
+          "Required for ticket_submitter/requester roles. Must identify an active user in the key's organization.",
       },
       description: { type: ["string", "null"], maxLength: 300 },
       agentIds: { type: "array", items: { type: "string" } },
       expiresAt: { type: ["string", "null"], format: "date-time" },
+      webhook: {
+        type: ["object", "null"],
+        properties: {
+          url: { type: "string", format: "uri", maxLength: 500 },
+          events: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"],
+            },
+          },
+        },
+      },
+    },
+  },
+  WebhookConfigurationRequest: {
+    type: "object",
+    properties: {
+      url: { type: ["string", "null"], format: "uri", maxLength: 500 },
+      events: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"],
+        },
+      },
+      active: { type: "boolean" },
+      rotateSecret: { type: "boolean", default: false },
+    },
+  },
+  MeResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: {
+        type: "object",
+        required: ["role", "tenantId", "organization", "permissions"],
+        properties: {
+          role: { type: "string" },
+          tenantId: { type: "string" },
+          organization: {
+            type: "object",
+            required: ["id", "name", "code"],
+            properties: {
+              id: { type: "string" },
+              name: { type: ["string", "null"] },
+              code: { type: ["string", "null"] },
+            },
+          },
+          permissions: { type: "array", items: { type: "string" } },
+        },
+      },
     },
   },
   TicketResponse: {
@@ -775,6 +871,28 @@ const CORE_SCHEMAS = {
     properties: {
       ok: { type: "boolean", const: true },
       data: ref("CreatedApiKey"),
+    },
+  },
+  WebhookConfigurationResponse: {
+    type: "object",
+    required: ["ok", "data"],
+    properties: {
+      ok: { type: "boolean", const: true },
+      data: {
+        allOf: [
+          ref("ApiKey"),
+          {
+            type: "object",
+            properties: {
+              webhookSecret: {
+                type: ["string", "null"],
+                readOnly: true,
+                description: "Present only when newly created or explicitly rotated.",
+              },
+            },
+          },
+        ],
+      },
     },
   },
   DeleteTicketResponse: {
@@ -851,6 +969,19 @@ const CORE_SCHEMAS = {
     },
     example: { name: "Acme Support", brand: "Acme", isInternal: false, admin: { name: "Asha Sharma", email: "admin@acme.example" } },
   },
+  DeleteOrganizationRequest: {
+    type: "object",
+    required: ["confirmation"],
+    additionalProperties: false,
+    properties: {
+      confirmation: {
+        type: "string",
+        minLength: 1,
+        description: "Exact immutable organization code (slug) displayed in Settings.",
+      },
+    },
+    example: { confirmation: "acme-support" },
+  },
   CreateUserInvitationRequest: {
     type: "object",
     required: ["name", "email", "role"],
@@ -884,7 +1015,7 @@ const SPEC = {
   ...BASE_SPEC,
   info: {
     ...BASE_SPEC.info,
-    version: "2.1.0",
+    version: "2.2.0",
     description:
       "Production ITSM REST API. External systems authenticate with a tenant-scoped API key using Authorization: Bearer or x-api-key. Browser users may sign in with organization code + email + password when LOCAL_ACCOUNT_AUTH is enabled; the same email may belong to multiple organizations because the organization code selects the tenant. Responses use the documented success/error envelopes; the health probe and account setup operation are intentionally unauthenticated.",
     "x-browser-local-login-example": {
@@ -1007,6 +1138,22 @@ const SPEC = {
         },
       },
     },
+    "/me": {
+      get: {
+        tags: ["API Keys"],
+        operationId: "getCurrentIntegrationContext",
+        summary: "Validate credentials and discover the authoritative organization",
+        description:
+          "Use this for Save & Test. The organization is derived from the authenticated session/key; callers never submit a tenant id.",
+        "x-required-permission": "ticket.create",
+        responses: {
+          "200": jsonResponse("Credential and organization context", ref("MeResponse")),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
     "/tickets": {
       get: {
         tags: ["Tickets"],
@@ -1049,17 +1196,29 @@ const SPEC = {
         operationId: "createTicket",
         summary: "Create a ticket through the full intake pipeline",
         description:
-          "Requires ticket.create. The intake pipeline applies classification, SLA, routing, automations, and optional AI handling.",
+          "Requires ticket.create. ticket_submitter/requester credentials are fixed to their configured requester. The intake pipeline applies classification, SLA, routing, automations, and optional AI handling.",
         "x-required-permission": "ticket.create",
+        parameters: [
+          {
+            name: "Idempotency-Key",
+            in: "header",
+            required: false,
+            description:
+              "Unique 1-128 character operation id. Reusing it with the same JSON replays the original ticket; a different JSON returns 409.",
+            schema: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        ],
         requestBody: {
           required: true,
           content: jsonContent(ref("CreateTicketRequest")),
         },
         responses: {
+          "200": jsonResponse("Existing ticket replayed (Idempotency-Replayed: true)", ref("TicketResponse")),
           "201": jsonResponse("Ticket created", ref("TicketResponse")),
           "400": { $ref: "#/components/responses/BadRequest" },
           "401": { $ref: "#/components/responses/Unauthorized" },
           "403": { $ref: "#/components/responses/Forbidden" },
+          "409": errorResponse("The idempotency key was already used with a different payload.", "Idempotency key was already used with a different request payload."),
           "429": { $ref: "#/components/responses/RateLimited" },
         },
       },
@@ -1195,6 +1354,46 @@ const SPEC = {
           "403": { $ref: "#/components/responses/Forbidden" },
           "404": { $ref: "#/components/responses/NotFound" },
           "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/api-keys/{id}/rotate": {
+      post: {
+        tags: ["API Keys"],
+        operationId: "rotateApiKey",
+        summary: "Replace an API key secret in place",
+        description:
+          "The old bearer secret stops working immediately. Tenant, requester, expiry, and callback settings stay attached to the same integration record.",
+        "x-required-permission": "admin",
+        parameters: [ID],
+        responses: {
+          "200": jsonResponse("Replacement secret returned once", ref("CreateApiKeyResponse")),
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
+          "429": { $ref: "#/components/responses/RateLimited" },
+        },
+      },
+    },
+    "/api-keys/{id}/webhook": {
+      patch: {
+        tags: ["API Keys"],
+        operationId: "configureApiKeyWebhook",
+        summary: "Configure signed ticket-status callbacks",
+        description:
+          "Returns webhookSecret only when the signing secret is first created or rotateSecret is true. Store it immediately; later reads never expose it.",
+        "x-required-permission": "admin",
+        parameters: [ID],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("WebhookConfigurationRequest")),
+        },
+        responses: {
+          "200": jsonResponse("Callback configuration updated", ref("WebhookConfigurationResponse")),
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+          "404": { $ref: "#/components/responses/NotFound" },
         },
       },
     },

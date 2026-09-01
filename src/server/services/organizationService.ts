@@ -7,6 +7,7 @@
 // =============================================================================
 
 import { appendAudit } from "../audit/auditChain";
+import { logger } from "../observability/logger";
 import { getStore } from "../data";
 import {
   pageCollection,
@@ -16,6 +17,7 @@ import {
 } from "../data/store";
 import { newId, now } from "../domain/ids";
 import type { TenantRow } from "../domain/models";
+import { getBlobStore, type BlobStore } from "../storage/blobStore";
 import {
   deliverAccessLink,
   issueUserAccessLinkInStore,
@@ -244,75 +246,208 @@ export async function updateOrganization(
   return updated;
 }
 
+export interface OrganizationDeletionSummary {
+  users: number;
+  invitations: number;
+  tickets: number;
+  attachments: number;
+  apiKeys: number;
+  departments: number;
+  settingsAndBusinessRecords: number;
+}
+
+export interface OrganizationDeletionResult {
+  deleted: true;
+  organization: Pick<TenantRow, "id" | "name" | "slug">;
+  deletedRecords: OrganizationDeletionSummary;
+  attachmentCleanup: {
+    attempted: number;
+    deleted: number;
+    failed: number;
+  };
+}
+
+export interface OrganizationDeletionDependencies {
+  blobStore?: BlobStore;
+}
+
+async function cleanupAttachmentBlobs(
+  attachmentIds: string[],
+  dependencies: OrganizationDeletionDependencies
+): Promise<OrganizationDeletionResult["attachmentCleanup"]> {
+  if (attachmentIds.length === 0) return { attempted: 0, deleted: 0, failed: 0 };
+
+  let blobStore: BlobStore;
+  try {
+    blobStore = dependencies.blobStore ?? getBlobStore();
+  } catch (error) {
+    logger.error("organization attachment cleanup unavailable", {
+      attachmentCount: attachmentIds.length,
+      error,
+    });
+    return { attempted: attachmentIds.length, deleted: 0, failed: attachmentIds.length };
+  }
+
+  let deleted = 0;
+  let failed = 0;
+  for (const attachmentId of attachmentIds) {
+    try {
+      if (await blobStore.delete(attachmentId)) deleted += 1;
+    } catch (error) {
+      failed += 1;
+      logger.error("organization attachment blob cleanup failed", {
+        attachmentId,
+        error,
+      });
+    }
+  }
+  return { attempted: attachmentIds.length, deleted, failed };
+}
+
 /**
- * Discard a provisioned-but-unused organization. This deliberately refuses to
- * cascade-delete tenant data: once an organization contains business records,
- * it must be retained or handled through a dedicated migration/offboarding
- * process. The actor's own tenant receives the surviving audit event.
+ * Permanently delete a non-internal organization and everything it owns.
+ * The immutable organization code is required as a server-side confirmation;
+ * the current tenant remains protected. Database cleanup is atomic and the
+ * actor's own tenant receives the surviving audit event.
  */
 export async function deleteOrganization(
   id: string,
   actorTenantId: string,
-  actor = 'system'
-): Promise<boolean> {
+  confirmation: string,
+  actor = 'system',
+  dependencies: OrganizationDeletionDependencies = {}
+): Promise<OrganizationDeletionResult | null> {
   const store = await getStore();
-  const organization = await store.tenants.get(id);
-  if (!organization) return false;
-  if (id === actorTenantId) {
-    throw new OrganizationServiceError(
-      'You cannot discard the organization you are currently signed into.',
-      409
-    );
-  }
-  if (organization.isInternal) {
-    throw new OrganizationServiceError('Internal organizations cannot be discarded.', 409);
-  }
+  const deleted = await store.transaction(async (tx) => {
+    const organization = await tx.tenants.get(id);
+    if (!organization) return null;
+    if (id === actorTenantId) {
+      throw new OrganizationServiceError(
+        'You cannot delete the organization you are currently signed into.',
+        409
+      );
+    }
+    if (organization.isInternal) {
+      throw new OrganizationServiceError('Internal organizations cannot be deleted.', 409);
+    }
+    if (confirmation.trim() !== organization.slug) {
+      throw new OrganizationServiceError('Organization code does not match.', 400);
+    }
 
-  const ownedCollections = [
-    store.departments,
-    store.groups,
-    store.tickets,
-    store.articles,
-    store.problems,
-    store.changes,
-    store.assets,
-    store.cis,
-    store.catalogItems,
-    store.slaPolicies,
-    store.calendars,
-    store.automations,
-    store.macros,
-    store.customFieldDefs,
-    store.notifications,
-    store.apiKeys,
-    store.emails,
-  ] as const;
-  const counts = await Promise.all(
-    ownedCollections.map((collection) => collection.count({ tenantId: id } as never))
-  );
-  if (counts.some((count) => count > 0)) {
-    throw new OrganizationServiceError(
-      'This organization contains users, tickets, or settings and cannot be discarded.',
-      409
+    const [
+      users,
+      invitations,
+      tickets,
+      apiKeys,
+      departments,
+      groups,
+      articles,
+      problems,
+      changes,
+      assets,
+      cis,
+      catalogItems,
+      slaPolicies,
+      calendars,
+      automations,
+      macros,
+      customFieldDefs,
+      notifications,
+      emails,
+    ] = await Promise.all([
+      tx.users.list({ tenantId: id }),
+      tx.invitations.list({ tenantId: id }),
+      tx.tickets.list({ tenantId: id }),
+      tx.apiKeys.list({ tenantId: id }),
+      tx.departments.list({ tenantId: id }),
+      tx.groups.list({ tenantId: id }),
+      tx.articles.list({ tenantId: id }),
+      tx.problems.list({ tenantId: id }),
+      tx.changes.list({ tenantId: id }),
+      tx.assets.list({ tenantId: id }),
+      tx.cis.list({ tenantId: id }),
+      tx.catalogItems.list({ tenantId: id }),
+      tx.slaPolicies.list({ tenantId: id }),
+      tx.calendars.list({ tenantId: id }),
+      tx.automations.list({ tenantId: id }),
+      tx.macros.list({ tenantId: id }),
+      tx.customFieldDefs.list({ tenantId: id }),
+      tx.notifications.list({ tenantId: id }),
+      tx.emails.list({ tenantId: id }),
+    ]);
+    const ticketIds = new Set(tickets.map((ticket) => ticket.id));
+    const attachments = (await tx.attachments.list()).filter((attachment) =>
+      ticketIds.has(attachment.ticketId)
     );
-  }
-  const users = await store.users.list({ tenantId: id });
-  if (
-    users.some(
-      (user) => user.active || !!user.passwordHash || !!user.externalId
-    )
-  ) {
-    throw new OrganizationServiceError(
-      'This organization contains active users or credentials and cannot be discarded.',
-      409
-    );
-  }
+    const summary: OrganizationDeletionSummary = {
+      users: users.length,
+      invitations: invitations.length,
+      tickets: tickets.length,
+      attachments: attachments.length,
+      apiKeys: apiKeys.length,
+      departments: departments.length,
+      settingsAndBusinessRecords:
+        groups.length +
+        articles.length +
+        problems.length +
+        changes.length +
+        assets.length +
+        cis.length +
+        catalogItems.length +
+        slaPolicies.length +
+        calendars.length +
+        automations.length +
+        macros.length +
+        customFieldDefs.length +
+        notifications.length +
+        emails.length,
+    };
 
-  await appendAudit({
-    tenantId: actorTenantId,
-    actor,
-    action: 'organization.deleted',
-    payload: { organizationId: organization.id, name: organization.name, slug: organization.slug },
+    await appendAudit({
+      tenantId: actorTenantId,
+      actor,
+      action: 'organization.deleted',
+      payload: {
+        organizationId: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        deletedRecords: summary,
+      },
+    }, tx);
+
+    const removed = await tx.tenants.remove(id);
+    if (!removed) {
+      throw new OrganizationServiceError('Organization could not be deleted safely.', 409);
+    }
+
+    // Compatibility cleanup for deployments upgrading from schemas where
+    // these tenantId columns did not yet have Tenant foreign keys.
+    for (const row of [...notifications, ...emails, ...calendars]) {
+      const collection =
+        "channel" in row
+          ? tx.notifications
+          : "direction" in row
+            ? tx.emails
+            : tx.calendars;
+      await collection.remove(row.id);
+    }
+
+    return {
+      organization: {
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+      },
+      summary,
+      attachmentIds: attachments.map((attachment) => attachment.id),
+    };
   });
-  return store.tenants.remove(id);
+  if (!deleted) return null;
+
+  return {
+    deleted: true,
+    organization: deleted.organization,
+    deletedRecords: deleted.summary,
+    attachmentCleanup: await cleanupAttachmentBlobs(deleted.attachmentIds, dependencies),
+  };
 }

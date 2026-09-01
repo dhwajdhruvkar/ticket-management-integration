@@ -52,15 +52,20 @@ describe("API keys", () => {
   });
 
   it("does not allow one tenant to delete another tenant's key", async () => {
+    const store = await getStore();
+    const requester = (await store.users.list({ tenantId: TENANT })).find((user) => user.active)!;
     const { record, key } = await createApiKey(TENANT, {
       name: "Tenant boundary",
       role: "requester",
+      requesterId: requester.id,
     });
 
     expect(await deleteApiKey("tenant_other", record.id)).toBe(false);
     await expect(verifyApiKey(key)).resolves.toMatchObject({
       tenantId: TENANT,
       role: "requester",
+      requesterId: requester.id,
+      requesterEmail: requester.email,
     });
   });
 

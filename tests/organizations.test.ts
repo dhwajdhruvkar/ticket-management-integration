@@ -9,6 +9,7 @@ import {
   PATCH as PATCH_ORGANIZATION,
 } from '@/app/api/v1/organizations/[id]/route';
 import { getStore } from '@/server/data';
+import { createTicket } from '@/server/services/ticketService';
 
 const TENANT_ID = 'tenant_netlink';
 const SUPER_ADMIN = 'vikram.rao@netlink.com';
@@ -108,7 +109,10 @@ describe('organization tenant management', () => {
     });
 
     const deletedResponse = await DELETE_ORGANIZATION(
-      request(`/organizations/${created.data.organization.id}`, { method: 'DELETE' }),
+      request(`/organizations/${created.data.organization.id}`, {
+        method: 'DELETE',
+        body: { confirmation: created.data.organization.slug },
+      }),
       params(created.data.organization.id)
     );
     expect(deletedResponse.status).toBe(200);
@@ -164,9 +168,13 @@ describe('organization tenant management', () => {
     expect(forbiddenDelete.status).toBe(403);
   });
 
-  it('protects the current tenant, internal tenants, and organizations containing data', async () => {
+  it('protects current/internal tenants and requires the exact code before deleting tenant data', async () => {
+    const current = await (await getStore()).tenants.get(TENANT_ID);
     const currentTenant = await DELETE_ORGANIZATION(
-      request(`/organizations/${TENANT_ID}`, { method: 'DELETE' }),
+      request(`/organizations/${TENANT_ID}`, {
+        method: 'DELETE',
+        body: { confirmation: current?.slug },
+      }),
       params(TENANT_ID)
     );
     expect(currentTenant.status).toBe(409);
@@ -177,10 +185,13 @@ describe('organization tenant management', () => {
         body: organizationBody('Protected Internal', { isInternal: true }),
       })
     );
-    const internal = (await internalResponse.json()) as Envelope<{ organization: { id: string } }>;
+    const internal = (await internalResponse.json()) as Envelope<{ organization: { id: string; slug: string } }>;
     createdIds.add(internal.data.organization.id);
     const internalDelete = await DELETE_ORGANIZATION(
-      request(`/organizations/${internal.data.organization.id}`, { method: 'DELETE' }),
+      request(`/organizations/${internal.data.organization.id}`, {
+        method: 'DELETE',
+        body: { confirmation: internal.data.organization.slug },
+      }),
       params(internal.data.organization.id)
     );
     expect(internalDelete.status).toBe(409);
@@ -188,7 +199,7 @@ describe('organization tenant management', () => {
     const usedResponse = await POST(
       request('/organizations', { method: 'POST', body: organizationBody('Tenant With Data') })
     );
-    const used = (await usedResponse.json()) as Envelope<{ organization: { id: string } }>;
+    const used = (await usedResponse.json()) as Envelope<{ organization: { id: string; slug: string } }>;
     createdIds.add(used.data.organization.id);
     const timestamp = new Date().toISOString();
     await (await getStore()).departments.create({
@@ -199,15 +210,125 @@ describe('organization tenant management', () => {
       createdAt: timestamp,
       updatedAt: timestamp,
     });
+    const pendingAdmin = (await (await getStore()).users.list({
+      tenantId: used.data.organization.id,
+    }))[0];
+    expect(pendingAdmin).toBeDefined();
+    await (await getStore()).users.update(pendingAdmin.id, {
+      active: true,
+      passwordHash: 'scrypt:test-only-hash',
+      updatedAt: timestamp,
+    });
+    const ticket = await createTicket(
+      used.data.organization.id,
+      {
+        subject: 'Tenant data deletion verification',
+        body: 'This ticket must be removed with its organization.',
+        requesterEmail: pendingAdmin.email,
+        requesterId: pendingAdmin.id,
+      },
+      SUPER_ADMIN
+    );
+    await (await getStore()).attachments.create({
+      id: 'att_organization_delete',
+      ticketId: ticket.id,
+      fileName: 'tenant-file.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      blobUrl: 'local://att_organization_delete',
+      createdAt: timestamp,
+    });
+    await (await getStore()).notifications.create({
+      id: 'ntf_organization_delete',
+      tenantId: used.data.organization.id,
+      channel: 'in_app',
+      toAddress: pendingAdmin.email,
+      subject: 'Tenant notification',
+      body: 'Must be deleted',
+      link: null,
+      sent: false,
+      sentAt: null,
+      readAt: null,
+      createdAt: timestamp,
+    });
+    await (await getStore()).emails.create({
+      id: 'email_organization_delete',
+      tenantId: used.data.organization.id,
+      direction: 'inbound',
+      providerId: null,
+      internetMessageId: '<organization-delete@test>',
+      conversationId: null,
+      inReplyTo: null,
+      referencesHeader: null,
+      fromAddress: pendingAdmin.email,
+      toAddress: null,
+      subject: 'Tenant email',
+      bodyText: 'Must be deleted',
+      hasAttachments: false,
+      status: 'processed',
+      ticketId: ticket.id,
+      receivedAt: timestamp,
+      createdAt: timestamp,
+    });
+    await (await getStore()).calendars.create({
+      id: 'cal_organization_delete',
+      tenantId: used.data.organization.id,
+      name: 'Tenant calendar',
+      timezone: 'Asia/Kolkata',
+      workDays: [1, 2, 3, 4, 5],
+      startHour: 9,
+      endHour: 18,
+      holidays: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
 
-    const usedDelete = await DELETE_ORGANIZATION(
-      request(`/organizations/${used.data.organization.id}`, { method: 'DELETE' }),
+    const wrongCode = await DELETE_ORGANIZATION(
+      request(`/organizations/${used.data.organization.id}`, {
+        method: 'DELETE',
+        body: { confirmation: 'different-organization' },
+      }),
       params(used.data.organization.id)
     );
-    expect(usedDelete.status).toBe(409);
-    await expect(usedDelete.json()).resolves.toMatchObject({
+    expect(wrongCode.status).toBe(400);
+    await expect(wrongCode.json()).resolves.toMatchObject({
       ok: false,
-      error: 'This organization contains users, tickets, or settings and cannot be discarded.',
+      error: 'Organization code does not match.',
     });
+    expect(await (await getStore()).tenants.get(used.data.organization.id)).not.toBeNull();
+
+    const usedDelete = await DELETE_ORGANIZATION(
+      request(`/organizations/${used.data.organization.id}`, {
+        method: 'DELETE',
+        body: { confirmation: used.data.organization.slug },
+      }),
+      params(used.data.organization.id)
+    );
+    expect(usedDelete.status).toBe(200);
+    await expect(usedDelete.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        deleted: true,
+        organization: { id: used.data.organization.id, slug: used.data.organization.slug },
+        deletedRecords: {
+          departments: 1,
+          users: 1,
+          invitations: 1,
+          tickets: 1,
+          attachments: 1,
+        },
+      },
+    });
+    const store = await getStore();
+    expect(await store.tenants.get(used.data.organization.id)).toBeNull();
+    expect(await store.departments.list({ tenantId: used.data.organization.id })).toHaveLength(0);
+    expect(await store.users.list({ tenantId: used.data.organization.id })).toHaveLength(0);
+    expect(await store.invitations.list({ tenantId: used.data.organization.id })).toHaveLength(0);
+    expect(await store.tickets.get(ticket.id)).toBeNull();
+    expect(await store.events.list({ ticketId: ticket.id })).toHaveLength(0);
+    expect(await store.attachments.get('att_organization_delete')).toBeNull();
+    expect(await store.notifications.get('ntf_organization_delete')).toBeNull();
+    expect(await store.emails.get('email_organization_delete')).toBeNull();
+    expect(await store.calendars.get('cal_organization_delete')).toBeNull();
   });
 });

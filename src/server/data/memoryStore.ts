@@ -43,6 +43,7 @@ import type {
   TicketRow,
   UserRow,
   UserInvitationRow,
+  WebhookDeliveryRow,
 } from "../domain/models";
 
 // Bump when the row shapes change incompatibly (e.g. the P1-P5 priority
@@ -57,7 +58,7 @@ import type {
 // v9: admin-authored help text on custom field definitions.
 // v10: SLA deadlines recomputed with the fixed business-hours walker, so seeded
 //      due dates from v9 are wrong for business-hours policies.
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 interface MemDb {
   version?: number;
@@ -89,6 +90,7 @@ interface MemDb {
   apiKeys: ApiKeyRow[];
   emails: EmailMessageRow[];
   calendars: BusinessCalendarRow[];
+  webhookDeliveries: WebhookDeliveryRow[];
 }
 
 function emptyDb(): MemDb {
@@ -98,7 +100,7 @@ function emptyDb(): MemDb {
     resolutions: [], citations: [], articles: [], problems: [], changes: [],
     approvals: [], assets: [], cis: [], ciRelationships: [], catalogItems: [],
     slaPolicies: [], automations: [], macros: [], customFieldDefs: [], attachments: [], notifications: [], audit: [],
-    apiKeys: [], emails: [], calendars: [],
+    apiKeys: [], emails: [], calendars: [], webhookDeliveries: [],
   };
 }
 
@@ -152,7 +154,9 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
   async create(value: T): Promise<T> {
     if (this.uniqueBy) {
       const key = this.uniqueBy;
-      if (this.rows().some((r) => r[key] === value[key])) {
+      const candidate = value[key];
+      // PostgreSQL nullable unique columns allow multiple NULLs.
+      if (candidate !== null && candidate !== undefined && this.rows().some((r) => r[key] === candidate)) {
         throw new Error(`Unique constraint failed on ${String(key)}.`);
       }
     }
@@ -207,8 +211,11 @@ export class MemoryStore implements DataStore {
     "tokenHash"
   );
   groups = new MemoryCollection<AssignmentGroupRow>(() => this.db.groups, () => this.persist());
-  tickets = new MemoryCollection<TicketRow>(() => this.db.tickets, () => this.persist(), (id) =>
-    this.cascadeTicket(id)
+  tickets = new MemoryCollection<TicketRow>(
+    () => this.db.tickets,
+    () => this.persist(),
+    (id) => this.cascadeTicket(id),
+    "idempotencyScopeHash"
   );
   messages = new MemoryCollection<TicketMessageRow>(() => this.db.messages, () => this.persist());
   events = new MemoryCollection<TicketEventRow>(() => this.db.events, () => this.persist());
@@ -246,9 +253,15 @@ export class MemoryStore implements DataStore {
   attachments = new MemoryCollection<AttachmentRow>(() => this.db.attachments, () => this.persist());
   notifications = new MemoryCollection<NotificationRow>(() => this.db.notifications, () => this.persist());
   audit = new MemoryCollection<AuditRow>(() => this.db.audit, () => this.persist());
-  apiKeys = new MemoryCollection<ApiKeyRow>(() => this.db.apiKeys, () => this.persist());
+  apiKeys = new MemoryCollection<ApiKeyRow>(() => this.db.apiKeys, () => this.persist(), (id) => {
+    this.db.webhookDeliveries = this.db.webhookDeliveries.filter((row) => row.apiKeyId !== id);
+  });
   emails = new MemoryCollection<EmailMessageRow>(() => this.db.emails, () => this.persist());
   calendars = new MemoryCollection<BusinessCalendarRow>(() => this.db.calendars, () => this.persist());
+  webhookDeliveries = new MemoryCollection<WebhookDeliveryRow>(
+    () => this.db.webhookDeliveries,
+    () => this.persist()
+  );
 
   ready(): Promise<void> {
     this.initPromise ??= this.init();
@@ -282,6 +295,7 @@ export class MemoryStore implements DataStore {
     this.db.citations = this.db.citations.filter((c) => !resolutionIds.has(c.resolutionId));
     this.db.approvals = this.db.approvals.filter((a) => a.ticketId !== ticketId);
     this.db.attachments = this.db.attachments.filter((a) => a.ticketId !== ticketId);
+    this.db.webhookDeliveries = this.db.webhookDeliveries.filter((row) => row.ticketId !== ticketId);
     for (const t of this.db.tickets) {
       if (t.mergedIntoId === ticketId) t.mergedIntoId = null;
       if (t.linkedTicketIds?.includes(ticketId)) {
@@ -326,6 +340,8 @@ export class MemoryStore implements DataStore {
     this.db.notifications = owned(this.db.notifications);
     this.db.audit = owned(this.db.audit);
     this.db.apiKeys = owned(this.db.apiKeys);
+    this.db.webhookDeliveries = owned(this.db.webhookDeliveries);
+    this.db.emails = owned(this.db.emails);
     this.db.calendars = owned(this.db.calendars);
   }
 

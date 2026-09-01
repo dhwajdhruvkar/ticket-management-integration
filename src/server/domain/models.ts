@@ -7,7 +7,13 @@
 // store, the REST API, and the UI without conversion surprises.
 // =============================================================================
 
-export type Role = "super_admin" | "tenant_admin" | "manager" | "agent" | "requester";
+export type Role =
+  | "super_admin"
+  | "tenant_admin"
+  | "manager"
+  | "agent"
+  | "requester"
+  | "ticket_submitter";
 
 export type TicketType = "incident" | "service_request" | "problem" | "change";
 
@@ -162,6 +168,14 @@ export interface TicketRow extends Entity {
   customFields?: Record<string, unknown> | null;
   requesterEmail: string;
   requesterId?: string | null;
+  /** Caller-supplied correlation id for an external ticketing system. */
+  externalTicketId?: string | null;
+  /** SHA-256 of tenant + actor scope + Idempotency-Key; raw keys are never stored. */
+  idempotencyScopeHash?: string | null;
+  /** SHA-256 of the canonical ticket-create payload, used to reject key reuse. */
+  idempotencyRequestHash?: string | null;
+  /** API key that created this ticket (kept as attribution even if the key is deleted). */
+  integrationKeyId?: string | null;
   assigneeId?: string | null;
   assignmentGroupId?: string | null;
   problemId?: string | null;
@@ -482,14 +496,42 @@ export interface ApiKeyRow extends Entity {
   prefix: string;
   keyHash: string;
   role: Role;
+  /** Fixed requester identity for requester-scoped machine credentials. */
+  requesterId?: string | null;
   /** Agents this integration key acts on behalf of (attribution/scoping). */
   agentIds?: string[];
   /** Optional description of the integration/application. */
   description?: string | null;
   active: boolean;
   lastUsedAt?: string | null;
+  lastTestedAt?: string | null;
+  lastTestStatus?: "success" | "failed" | null;
   expiresAt?: string | null;
+  rotatedAt?: string | null;
+  /** Optional outbound status callback configuration. */
+  webhookUrl?: string | null;
+  webhookEvents?: string[];
+  webhookActive?: boolean;
+  /** Random non-secret salt used with AUTH_SECRET to derive the signing secret. */
+  webhookSecretSalt?: string | null;
+  webhookLastDeliveredAt?: string | null;
+  webhookLastStatus?: number | null;
+  webhookLastError?: string | null;
   createdBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Pending or failed outbound ticket callback. Successful deliveries are removed. */
+export interface WebhookDeliveryRow extends Entity {
+  tenantId: string;
+  apiKeyId: string;
+  ticketId: string;
+  event: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+  nextAttemptAt: string;
+  lastError?: string | null;
   createdAt: string;
   updatedAt: string;
 }

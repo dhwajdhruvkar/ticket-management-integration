@@ -44,7 +44,7 @@ interface Health {
   features: Record<string, boolean>;
 }
 
-type ApiKeyView = Omit<ApiKeyRow, "keyHash">;
+type ApiKeyView = Omit<ApiKeyRow, "keyHash" | "webhookSecretSalt">;
 
 type UserAccessStatus = "invited" | "active" | "locked" | "disabled";
 
@@ -77,6 +77,12 @@ interface ProvisionOrganizationResult {
   organization: TenantRow;
   admin: UserAccessView;
   invitation: AccessLinkView;
+}
+
+interface OrganizationDeletionResult {
+  deleted: true;
+  organization: Pick<TenantRow, "id" | "name" | "slug">;
+  attachmentCleanup: { attempted: number; deleted: number; failed: number };
 }
 
 export default function SettingsView() {
@@ -1129,31 +1135,47 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
   const toast = useToast();
   const activeKeys = keys.filter((key) => key.active);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"details" | "agents">("details");
+  const [tab, setTab] = useState<"details" | "identity" | "agents" | "callbacks">("details");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [role, setRole] = useState("agent");
+  const [role, setRole] = useState("ticket_submitter");
+  const [requesterId, setRequesterId] = useState("");
   const [agentIds, setAgentIds] = useState<string[]>([]);
-  const [agents, setAgents] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string; email: string; role: string; active: boolean }[]>([]);
+  const [expiresAt, setExpiresAt] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(["ticket.created", "ticket.updated"]);
   const [busy, setBusy] = useState(false);
   const [freshKey, setFreshKey] = useState<string | null>(null);
+  const [freshWebhookSecret, setFreshWebhookSecret] = useState<string | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [editingWebhookId, setEditingWebhookId] = useState<string | null>(null);
+  const [editingWebhookUrl, setEditingWebhookUrl] = useState("");
+  const [editingWebhookEvents, setEditingWebhookEvents] = useState<string[]>([]);
 
   useEffect(() => {
     apiGetAll<UserRow>("/users")
-      .then((us) =>
-        setAgents(
-          us.filter((u) => u.role !== "requester").map((u) => ({ id: u.id, name: u.name, role: u.role }))
-        )
-      )
-      .catch(() => setAgents([]));
+      .then((us) => setUsers(us.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, active: u.active }))))
+      .catch(() => setUsers([]));
   }, []);
 
-  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
+  const agents = users.filter((u) => u.role !== "requester" && u.role !== "ticket_submitter");
+  const requesters = users.filter((u) => u.active);
+  const requesterScoped = role === "requester" || role === "ticket_submitter";
+  const agentName = (id: string) => users.find((a) => a.id === id)?.name ?? id;
+  const requesterName = (id: string | null | undefined) => {
+    const user = users.find((candidate) => candidate.id === id);
+    return user ? `${user.name} (${user.email})` : id ?? "not bound";
+  };
   const resetForm = () => {
     setName("");
     setDescription("");
-    setRole("agent");
+    setRole("ticket_submitter");
+    setRequesterId("");
     setAgentIds([]);
+    setExpiresAt("");
+    setWebhookUrl("");
+    setWebhookEvents(["ticket.created", "ticket.updated"]);
     setTab("details");
   };
   const toggleAgent = (id: string) =>
@@ -1164,15 +1186,25 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
       setTab("details");
       return;
     }
+    if (requesterScoped && !requesterId) {
+      setTab("identity");
+      return;
+    }
     setBusy(true);
     try {
-      const created = await apiSend<ApiKeyView & { key: string }>("/api-keys", "POST", {
+      const created = await apiSend<ApiKeyView & { key: string; webhookSecret?: string | null }>("/api-keys", "POST", {
         name: name.trim(),
         description: description.trim() || null,
         role,
-        agentIds,
+        requesterId: requesterScoped ? requesterId : null,
+        agentIds: requesterScoped ? [] : agentIds,
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+        webhook: webhookUrl.trim()
+          ? { url: webhookUrl.trim(), events: webhookEvents }
+          : null,
       });
       setFreshKey(created.key);
+      setFreshWebhookSecret(created.webhookSecret ?? null);
       resetForm();
       setOpen(false);
       onChanged();
@@ -1181,6 +1213,39 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
       toast.error({ title: "Could not create integration", description: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function rotate(k: ApiKeyView) {
+    if (!confirm(`Replace the bearer token for "${k.name}"? The current token will stop working immediately.`)) return;
+    setRotatingId(k.id);
+    try {
+      const rotated = await apiSend<ApiKeyView & { key: string }>(`/api-keys/${k.id}/rotate`, "POST");
+      setFreshKey(rotated.key);
+      setFreshWebhookSecret(null);
+      onChanged();
+      toast.success({ title: "Token replaced", description: "Copy the new token now — it won't be shown again." });
+    } catch (err) {
+      toast.error({ title: "Could not replace token", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setRotatingId(null);
+    }
+  }
+
+  async function saveWebhook(k: ApiKeyView, rotateSecret = false) {
+    try {
+      const updated = await apiSend<ApiKeyView & { webhookSecret?: string | null }>(`/api-keys/${k.id}/webhook`, "PATCH", {
+        url: editingWebhookUrl.trim() || null,
+        events: editingWebhookEvents,
+        active: !!editingWebhookUrl.trim(),
+        rotateSecret,
+      });
+      if (updated.webhookSecret) setFreshWebhookSecret(updated.webhookSecret);
+      setEditingWebhookId(null);
+      onChanged();
+      toast.success({ title: editingWebhookUrl.trim() ? "Status callbacks updated" : "Status callbacks disabled" });
+    } catch (err) {
+      toast.error({ title: "Could not update callbacks", description: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -1195,10 +1260,10 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
     }
   }
 
-  async function copyFresh() {
-    if (!freshKey) return;
+  async function copyFresh(value = freshKey) {
+    if (!value) return;
     try {
-      await navigator.clipboard.writeText(freshKey);
+      await navigator.clipboard.writeText(value);
       toast.success({ title: "Copied to clipboard" });
     } catch {
       toast.error({ title: "Could not copy" });
@@ -1211,7 +1276,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
         <SectionHead
           icon={<KeyIcon />}
           title="API integrations"
-          hint="Register an application, choose the agents it acts as, then mint a key."
+          hint="Tenant-bound credentials, requester identity, rotation, and signed status callbacks."
           info={HINTS.apiKeys}
         />
         <button
@@ -1219,6 +1284,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
           style={{ flexShrink: 0 }}
           onClick={() => {
             setFreshKey(null);
+            setFreshWebhookSecret(null);
             setOpen((o) => !o);
           }}
         >
@@ -1226,7 +1292,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
         </button>
       </div>
 
-      {freshKey ? (
+      {freshKey || freshWebhookSecret ? (
         <div
           className="anim-scale-in"
           style={{
@@ -1242,21 +1308,27 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             flexWrap: "wrap",
           }}
         >
-          <div style={{ fontSize: "0.78rem", fontWeight: 700, flexShrink: 0 }}>Copy this key now:</div>
-          <code
-            className="mono"
-            style={{ fontSize: "0.74rem", wordBreak: "break-all", flex: 1, minWidth: 200 }}
+          {freshKey ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", flexWrap: "wrap" }}>
+              <div style={{ fontSize: "0.78rem", fontWeight: 700, flexShrink: 0 }}>Bearer token (shown once):</div>
+              <code className="mono" style={{ fontSize: "0.74rem", wordBreak: "break-all", flex: 1, minWidth: 200 }}>{freshKey}</code>
+              <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void copyFresh(freshKey)}>Copy token</button>
+            </div>
+          ) : null}
+          {freshWebhookSecret ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", flexWrap: "wrap" }}>
+              <div style={{ fontSize: "0.78rem", fontWeight: 700, flexShrink: 0 }}>Callback signing secret (shown once):</div>
+              <code className="mono" style={{ fontSize: "0.74rem", wordBreak: "break-all", flex: 1, minWidth: 200 }}>{freshWebhookSecret}</code>
+              <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void copyFresh(freshWebhookSecret)}>Copy secret</button>
+            </div>
+          ) : null}
+          <button
+            className="btn btn-ghost"
+            style={{ marginLeft: "auto", fontSize: "0.72rem", padding: "0.3rem 0.6rem" }}
+            onClick={() => { setFreshKey(null); setFreshWebhookSecret(null); }}
           >
-            {freshKey}
-          </code>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void copyFresh()}>
-              Copy
-            </button>
-            <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => setFreshKey(null)}>
-              Done
-            </button>
-          </div>
+            Done
+          </button>
         </div>
       ) : null}
 
@@ -1273,11 +1345,27 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             </button>
             <button
               type="button"
+              className={tab === "identity" ? "btn btn-primary" : "btn btn-ghost"}
+              style={{ fontSize: "0.74rem", padding: "0.3rem 0.7rem" }}
+              onClick={() => setTab("identity")}
+            >
+              2. Requester{requesterId ? " ✓" : ""}
+            </button>
+            <button
+              type="button"
               className={tab === "agents" ? "btn btn-primary" : "btn btn-ghost"}
               style={{ fontSize: "0.74rem", padding: "0.3rem 0.7rem" }}
               onClick={() => setTab("agents")}
             >
-              2. Agents{agentIds.length ? ` (${agentIds.length})` : ""}
+              3. Agents{agentIds.length ? ` (${agentIds.length})` : ""}
+            </button>
+            <button
+              type="button"
+              className={tab === "callbacks" ? "btn btn-primary" : "btn btn-ghost"}
+              style={{ fontSize: "0.74rem", padding: "0.3rem 0.7rem" }}
+              onClick={() => setTab("callbacks")}
+            >
+              4. Callbacks
             </button>
           </div>
 
@@ -1303,16 +1391,30 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                 </LabelWithHint>
               </label>
               <select id="api-key-role" className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="ticket_submitter">ticket submitter (recommended)</option>
                 <option value="requester">requester</option>
                 <option value="agent">agent</option>
                 <option value="manager">manager</option>
                 <option value="tenant_admin">tenant admin</option>
               </select>
+              <label className="muted" htmlFor="api-key-expiry" style={{ fontSize: "0.74rem", fontWeight: 600 }}>Expires at (recommended)</label>
+              <input id="api-key-expiry" className="input" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
             </div>
-          ) : (
+          ) : tab === "identity" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                Requester and ticket-submitter credentials are permanently bound to one active user. The caller cannot override this email.
+              </p>
+              <select className="select" value={requesterId} onChange={(e) => setRequesterId(e.target.value)} disabled={!requesterScoped}>
+                <option value="">{requesterScoped ? "Select requester identity" : "Not required for this role"}</option>
+                {requesters.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email} · {user.role.replaceAll("_", " ")}</option>)}
+              </select>
+            </div>
+          ) : tab === "agents" ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <p className="muted" style={{ fontSize: "0.78rem", margin: "0 0 4px" }}>
-                Select the agent(s) this integration acts on behalf of.
+                Optional ownership metadata for agent-or-higher integrations. This does not impersonate selected users or expand the acting role&apos;s permissions.
+                {requesterScoped ? " Requester-scoped roles use the fixed requester instead." : ""}
               </p>
               {agents.length === 0 ? (
                 <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>No agents available.</p>
@@ -1330,9 +1432,16 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                     <label
                       key={a.id}
                       className="panel-2"
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.4rem 0.6rem", cursor: "pointer" }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "0.4rem 0.6rem",
+                        cursor: requesterScoped ? "not-allowed" : "pointer",
+                        opacity: requesterScoped ? 0.65 : 1,
+                      }}
                     >
-                      <input type="checkbox" checked={agentIds.includes(a.id)} onChange={() => toggleAgent(a.id)} />
+                      <input type="checkbox" checked={agentIds.includes(a.id)} onChange={() => toggleAgent(a.id)} disabled={requesterScoped} />
                       <span style={{ minWidth: 0 }}>
                         <span
                           style={{
@@ -1355,6 +1464,21 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                 </div>
               )}
             </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                Optional HTTPS endpoint for signed ticket-created and status-change callbacks.
+              </p>
+              <input className="input" type="url" placeholder="https://partner.example.com/webhooks/netlink" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"].map((event) => (
+                  <label key={event} style={{ fontSize: "0.74rem", display: "flex", alignItems: "center", gap: 4 }}>
+                    <input type="checkbox" checked={webhookEvents.includes(event)} onChange={() => setWebhookEvents((current) => current.includes(event) ? current.filter((item) => item !== event) : [...current, event])} />
+                    {event}
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
@@ -1367,7 +1491,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             >
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !name.trim()}>
+            <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !name.trim() || (requesterScoped && !requesterId)}>
               {busy ? "Creating…" : "Generate key"}
             </button>
           </div>
@@ -1383,29 +1507,74 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
           {activeKeys.map((k) => (
             <div
               key={k.id}
-              className="panel-2 flex items-center justify-between"
+              className="panel-2"
               style={{ padding: "0.6rem 0.8rem", gap: 10 }}
             >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>{k.name}</span>
-                  <code className="mono muted" style={{ fontSize: "0.7rem" }}>{k.prefix}…</code>
-                  <span className="badge" style={{ fontSize: "0.64rem", textTransform: "capitalize" }}>{String(k.role).replace("_", " ")}</span>
+              <div className="flex items-center justify-between" style={{ gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>{k.name}</span>
+                    <code className="mono muted" style={{ fontSize: "0.7rem" }}>{k.prefix}…</code>
+                    <span className="badge" style={{ fontSize: "0.64rem", textTransform: "capitalize" }}>{String(k.role).replaceAll("_", " ")}</span>
+                    {k.webhookActive ? <span className="badge" style={{ fontSize: "0.64rem", background: "var(--success-bg)", color: "var(--success-fg)" }}>callbacks on</span> : null}
+                  </div>
+                  {k.description ? (
+                    <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{k.description}</div>
+                  ) : null}
+                  <div className="muted" style={{ fontSize: "0.7rem", marginTop: 2 }}>
+                    {k.requesterId ? `Requester: ${requesterName(k.requesterId)} · ` : ""}
+                    {k.agentIds && k.agentIds.length ? `Agents: ${k.agentIds.map(agentName).join(", ")} · ` : ""}
+                    Created {timeAgo(k.createdAt)}
+                    {k.lastUsedAt ? ` · last used ${timeAgo(k.lastUsedAt)}` : " · never used"}
+                    {k.lastTestedAt ? ` · tested ${timeAgo(k.lastTestedAt)} (${k.lastTestStatus ?? "unknown"})` : " · not tested"}
+                    {k.expiresAt ? ` · expires ${new Date(k.expiresAt).toLocaleString()}` : " · no expiry"}
+                    {k.rotatedAt ? ` · rotated ${timeAgo(k.rotatedAt)}` : ""}
+                  </div>
+                  {k.webhookUrl ? (
+                    <div className="muted" style={{ fontSize: "0.68rem", marginTop: 2, wordBreak: "break-all" }}>
+                      Callback: {k.webhookUrl}
+                      {k.webhookLastStatus ? ` · last HTTP ${k.webhookLastStatus}` : ""}
+                      {k.webhookLastError ? ` · ${k.webhookLastError}` : ""}
+                    </div>
+                  ) : null}
                 </div>
-                {k.description ? (
-                  <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{k.description}</div>
-                ) : null}
-                <div className="muted" style={{ fontSize: "0.7rem", marginTop: 2 }}>
-                  {k.agentIds && k.agentIds.length
-                    ? `Agents: ${k.agentIds.map(agentName).join(", ")} · `
-                    : ""}
-                  Created {timeAgo(k.createdAt)}
-                  {k.lastUsedAt ? ` · last used ${timeAgo(k.lastUsedAt)}` : " · never used"}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} disabled={rotatingId === k.id} onClick={() => void rotate(k)}>
+                    {rotatingId === k.id ? "Replacing…" : "Replace token"}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }}
+                    onClick={() => {
+                      setEditingWebhookId(editingWebhookId === k.id ? null : k.id);
+                      setEditingWebhookUrl(k.webhookUrl ?? "");
+                      setEditingWebhookEvents(k.webhookEvents?.length ? k.webhookEvents : ["ticket.created", "ticket.updated"]);
+                    }}
+                  >
+                    Callbacks
+                  </button>
+                  <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void remove(k)}>
+                    Delete
+                  </button>
                 </div>
               </div>
-              <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void remove(k)}>
-                Delete
-              </button>
+              {editingWebhookId === k.id ? (
+                <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <input className="input" type="url" placeholder="https://partner.example.com/webhooks/netlink" value={editingWebhookUrl} onChange={(e) => setEditingWebhookUrl(e.target.value)} />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"].map((event) => (
+                      <label key={event} style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: 4 }}>
+                        <input type="checkbox" checked={editingWebhookEvents.includes(event)} onChange={() => setEditingWebhookEvents((current) => current.includes(event) ? current.filter((item) => item !== event) : [...current, event])} />
+                        {event}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    {k.webhookUrl ? <button className="btn btn-ghost" onClick={() => void saveWebhook(k, true)}>Rotate signing secret</button> : null}
+                    <button className="btn btn-primary" onClick={() => void saveWebhook(k)}>Save callbacks</button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1836,6 +2005,7 @@ function OrganizationsSection() {
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [provisioned, setProvisioned] = useState<ProvisionOrganizationResult | null>(null);
   const [discarding, setDiscarding] = useState<OrganizationView | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -1938,17 +2108,41 @@ function OrganizationsSection() {
     }
   }
 
-  async function discard() {
+  function startDelete(organization: OrganizationView) {
+    setDeleteConfirmation("");
+    setDiscarding(organization);
+  }
+
+  function closeDelete() {
+    if (busy) return;
+    setDiscarding(null);
+    setDeleteConfirmation("");
+  }
+
+  async function deleteSelectedOrganization() {
     if (!discarding) return;
     setBusy(true);
     try {
-      await apiSend(`/organizations/${discarding.id}`, "DELETE");
-      toast.info({ title: "Organization discarded", description: discarding.name });
+      const result = await apiSend<OrganizationDeletionResult>(
+        `/organizations/${discarding.id}`,
+        "DELETE",
+        { confirmation: deleteConfirmation }
+      );
+      if (result.attachmentCleanup.failed > 0) {
+        toast.warning({
+          title: "Organization deleted",
+          description: `${result.attachmentCleanup.failed} attachment blob(s) still require storage cleanup.`,
+        });
+      } else {
+        toast.info({ title: "Organization deleted", description: discarding.name });
+      }
+      if (provisioned?.organization.id === discarding.id) setProvisioned(null);
       setDiscarding(null);
+      setDeleteConfirmation("");
       load();
     } catch (err) {
       toast.error({
-        title: "Could not discard organization",
+        title: "Could not delete organization",
         description: err instanceof Error ? err.message : String(err),
       });
     } finally {
@@ -2036,7 +2230,7 @@ function OrganizationsSection() {
               </div>
               <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginTop: 12, cursor: "pointer", fontSize: "0.8rem" }}>
                 <input type="checkbox" checked={draft.isInternal} onChange={(event) => setDraft((current) => ({ ...current, isInternal: event.target.checked }))} style={{ marginTop: 2 }} />
-                <span><strong>Internal organization</strong><span className="muted" style={{ display: "block", marginTop: 2 }}>Protected platform tenants cannot be discarded.</span></span>
+                <span><strong>Internal organization</strong><span className="muted" style={{ display: "block", marginTop: 2 }}>Protected platform tenants cannot be deleted.</span></span>
               </label>
             </>
           ) : null}
@@ -2162,11 +2356,11 @@ function OrganizationsSection() {
                   type="button"
                   className="btn btn-danger"
                   style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
-                  onClick={() => setDiscarding(organization)}
+                  onClick={() => startDelete(organization)}
                   disabled={busy || organization.isInternal}
-                  title={organization.isInternal ? "Internal organizations are protected." : "Discard this empty organization"}
+                  title={organization.isInternal ? "Internal organizations are protected." : "Permanently delete this organization"}
                 >
-                  Discard
+                  Delete
                 </button>
               </div>
             </div>
@@ -2176,27 +2370,44 @@ function OrganizationsSection() {
 
       <Modal
         open={discarding !== null}
-        onClose={() => {
-          if (!busy) setDiscarding(null);
-        }}
-        ariaLabel="Discard organization"
+        onClose={closeDelete}
+        ariaLabel="Delete organization"
         maxWidth={480}
       >
         <div style={{ padding: "1.1rem 1.2rem 1.2rem" }}>
           <div className="flex items-center justify-between" style={{ gap: 12, marginBottom: 6 }}>
-            <h2 style={{ fontSize: "1rem", fontWeight: 750, margin: 0 }}>Discard organization?</h2>
-            <CloseButton onClick={() => setDiscarding(null)} />
+            <h2 style={{ fontSize: "1rem", fontWeight: 750, margin: 0 }}>Permanently delete organization?</h2>
+            <CloseButton onClick={closeDelete} />
           </div>
-          <p className="muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, margin: "0 0 8px" }}>
-            <strong style={{ color: "var(--text)" }}>{discarding?.name}</strong> will be removed permanently.
-            Pending, unaccepted users and their invitations will also be removed. Accepted users, tickets, or business data protect the organization from discard.
+          <p className="muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, margin: "0 0 12px" }}>
+            <strong style={{ color: "var(--text)" }}>{discarding?.name}</strong> and all of its users, tickets,
+            messages, settings, API integrations, invitations, audit history, and attachments will be deleted.
+            This cannot be undone.
           </p>
+          <label className="label" style={{ display: "grid", gap: 6 }}>
+            Type organization code <span className="mono" style={{ color: "var(--text)", textTransform: "none" }}>{discarding?.slug}</span> to verify
+            <input
+              className="input mono"
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              placeholder={discarding?.slug}
+              disabled={busy}
+            />
+          </label>
           <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 16 }}>
-            <button type="button" className="btn btn-ghost" onClick={() => setDiscarding(null)} disabled={busy}>
+            <button type="button" className="btn btn-ghost" onClick={closeDelete} disabled={busy}>
               Keep organization
             </button>
-            <button type="button" className="btn btn-danger" onClick={() => void discard()} disabled={busy}>
-              {busy ? "Discarding…" : "Discard organization"}
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => void deleteSelectedOrganization()}
+              disabled={busy || deleteConfirmation.trim() !== discarding?.slug}
+            >
+              {busy ? "Deleting…" : "Delete organization permanently"}
             </button>
           </div>
         </div>

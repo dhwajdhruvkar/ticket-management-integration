@@ -80,9 +80,14 @@ describe.sequential("Phase 13 external ticket integration contract", () => {
     managerKeyId = manager.record.id;
     managerKey = manager.key;
 
+    const store = await getStore();
+    const boundRequester = (await store.users.list({ tenantId: TENANT })).find(
+      (user) => user.email === "dana.lee@netlink.com"
+    )!;
     const requester = await createApiKey(TENANT, {
       name: "Phase 13 insufficient-permission integration",
       role: "requester",
+      requesterId: boundRequester.id,
       expiresAt,
     });
     requesterKeyId = requester.record.id;
