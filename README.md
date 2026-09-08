@@ -1,50 +1,42 @@
-# Netlink Support — AI-First ITSM Platform
+# Netlink Support — Service Desk
 
-A production-grade, AI-first IT Service Management platform: the AI resolves
-tickets **before an agent ever sees them**, every decision is recorded in a
-**tamper-evident audit chain**, and the full **ITIL** module set (Incident,
-Service Request, Problem, Change, Asset/CMDB, Knowledge) sits on top of a real
-backend with Microsoft Entra ID SSO, RBAC, SLAs, an automation engine, and
-omnichannel intake.
+A service-desk application for tracking support requests, assigning work, managing approvals and monitoring service-level agreements. Built with **Next.js, React, TypeScript, Prisma and PostgreSQL**.
 
-## Runs two ways
+**My contribution:** I independently built the application using AI-assisted development, including the interface, backend workflows, data persistence, external API-key integration, automated tests and integration documentation.
 
-The same codebase runs with **zero infrastructure** for demos and against
-**Postgres + Azure** for production — selected by a single env var.
+[Live application](https://netlink-support.vercel.app/) · [API integration guide](docs/EXTERNAL_API_GUIDE.md) · [Implementation notes](docs/IMPLEMENTATION_STATUS.md)
 
-| Capability | Demo default (no infra) | Production |
-|---|---|---|
-| Data | In-memory + JSON file (`.data/store.json`) | Postgres + Prisma (`DATA_DRIVER=prisma`) |
-| Embeddings | Hashed bag-of-words (384-dim) | Azure OpenAI embeddings |
-| LLM answers | Offline grounded template | Azure OpenAI / Gemini / Groq |
-| Auth | Demo credential sign-in | Microsoft Entra ID SSO |
-| Jobs | In-process scheduler | BullMQ + Redis |
-| Channels / notify | Recorded in-app | M365 Graph email + Teams |
+## Project highlights
 
-Every external dependency is optional and degrades gracefully — nothing is
-required to run.
+- Ticket lifecycle, assignment, conversation threads and role-based access.
+- SLA tracking, approvals, dashboards and a knowledge base.
+- PostgreSQL persistence through Prisma, with pagination and ticket soft deletion.
+- External REST API integration with API keys, request validation and OpenAPI documentation.
+- AI-assisted ticket classification and response suggestions, with configurable providers and offline fallbacks.
 
-## Quick start
+## Start reviewing the code
 
-```bash
-npm install
-npm run dev
-# http://localhost:3000
-```
+- [`src/app`](src/app): application pages and API routes.
+- [`src/server/services`](src/server/services): ticket and service-desk workflows.
+- [`src/server/data`](src/server/data): shared datastore interface and persistence adapters.
+- [`src/server/auth/rbac.ts`](src/server/auth/rbac.ts): role and permission rules.
+- [`prisma`](prisma): schema, migrations and seed data.
+- [`docs/EXTERNAL_API_GUIDE.md`](docs/EXTERNAL_API_GUIDE.md): integration setup and request examples.
 
-Seeds itself on first run (one tenant, agents/manager/requester, SLA policies,
-knowledge base, demo tickets across ITIL types, assets/CIs, automations).
+## Local development and deployment
 
-### With Postgres (production data layer)
+The application includes a memory/JSON adapter for local demos and a Prisma adapter for PostgreSQL. Authentication, AI providers, email and attachment storage depend on environment configuration; an available integration does not mean it is enabled in the hosted showcase.
 
-```bash
-docker compose up -d            # Postgres (pgvector) + Redis
-# set DATA_DRIVER=prisma in .env
-npm run db:push                 # create the schema
-npm run db:seed                 # load the same demo dataset
-psql "$DATABASE_URL" -f prisma/sql/001_pgvector.sql   # optional: ANN vector index
+```sh
+git clone https://github.com/dhwajdhruvkar/ticket-management-integration.git
+cd ticket-management-integration
+npm ci
 npm run dev
 ```
+
+Open the local URL printed by Next.js. See [`.env.example`](.env.example) for local configuration. Demo mode uses seeded identities and data; it is intended for local exploration.
+
+For a deployment, follow [`.env.production.example`](.env.production.example) and run `npm run environment:check`. Production mode requires `DEMO_MODE=false`, PostgreSQL and the required authentication settings. The hosted showcase uses explicitly allowed demo identities; Microsoft Entra ID, Azure storage and messaging providers require separate configuration. See the implementation notes for deployment details and current limitations.
 
 ## How intake works (ITIL-aligned)
 
@@ -142,15 +134,7 @@ port (`src/server/data/store.ts`), implemented by both `memoryStore` and
 
 ## Auth & RBAC
 
-Auth.js (NextAuth v5) with Microsoft Entra ID SSO; demo credential sign-in
-(email-only against seeded users) for zero-infra use. **Every page requires a
-session** — middleware redirects to `/signin`, and the user menu switches demo
-identities through a real credentials sign-in (no localStorage anywhere; the
-theme preference lives in a cookie, profile and notification preferences live
-on the server User record). Roles escalate: `requester < agent < manager <
-tenant_admin < super_admin`, enforced by the RBAC matrix
-(`src/server/auth/rbac.ts`) on every API route: requesters only ever see their
-own tickets, writes need agent+, approvals need manager+.
+Authentication uses Auth.js (NextAuth v5), with Microsoft Entra ID when configured and separate demo sign-in modes. Protected application routes and API operations apply session and role checks. The public landing and sign-in pages remain accessible to visitors. Role permissions are defined in [`src/server/auth/rbac.ts`](src/server/auth/rbac.ts).
 
 **Demo vs production mode** (`DEMO_MODE`, defaults off once Entra ID is
 configured): demo mode keeps the zero-infra conveniences — passwordless demo
@@ -219,13 +203,12 @@ npm test            # Vitest (audit chain, SLA + pause, priority matrix,
                     #   routing, approvals, RBAC, embeddings, classification)
 npm run build       # production build (standalone output)
 
-# Full end-to-end smoke: signs in as all four roles and exercises the API
-# behind every UI control (61 checks). Needs the app running on :3000.
+# Additional local API smoke checks. Needs the app running on :3000.
 powershell -File scripts/e2e-smoke.ps1
 ```
 
 - CI: `.github/workflows/ci.yml` (install, generate, typecheck, test, build).
 - Docker: multi-stage `Dockerfile` (standalone) + `docker-compose.yml`.
-- Target: Azure Container Apps + Postgres Flexible Server + Redis + Blob.
+- Hosted showcase: Vercel with PostgreSQL. Additional infrastructure depends on the enabled providers.
 
 See `.env.example` for every configuration option.
