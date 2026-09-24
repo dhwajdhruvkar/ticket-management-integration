@@ -318,99 +318,114 @@ export async function deleteOrganization(
   dependencies: OrganizationDeletionDependencies = {}
 ): Promise<OrganizationDeletionResult | null> {
   const store = await getStore();
-  const deleted = await store.transaction(async (tx) => {
-    const organization = await tx.tenants.get(id);
-    if (!organization) return null;
+  const organization = await store.tenants.get(id);
+  if (!organization) return null;
+
+  function assertDeletable(target: TenantRow) {
     if (id === actorTenantId) {
       throw new OrganizationServiceError(
         'You cannot delete the organization you are currently signed into.',
         409
       );
     }
-    if (organization.isInternal) {
+    if (target.isInternal) {
       throw new OrganizationServiceError('Internal organizations cannot be deleted.', 409);
     }
-    if (confirmation.trim() !== organization.slug) {
+    if (confirmation.trim() !== target.slug) {
       throw new OrganizationServiceError('Organization code does not match.', 400);
     }
+  }
 
-    const [
-      users,
-      invitations,
-      tickets,
-      apiKeys,
-      departments,
-      groups,
-      articles,
-      problems,
-      changes,
-      assets,
-      cis,
-      catalogItems,
-      slaPolicies,
-      calendars,
-      automations,
-      macros,
-      customFieldDefs,
-      notifications,
-      emails,
-    ] = await Promise.all([
-      tx.users.list({ tenantId: id }),
-      tx.invitations.list({ tenantId: id }),
-      tx.tickets.list({ tenantId: id }),
-      tx.apiKeys.list({ tenantId: id }),
-      tx.departments.list({ tenantId: id }),
-      tx.groups.list({ tenantId: id }),
-      tx.articles.list({ tenantId: id }),
-      tx.problems.list({ tenantId: id }),
-      tx.changes.list({ tenantId: id }),
-      tx.assets.list({ tenantId: id }),
-      tx.cis.list({ tenantId: id }),
-      tx.catalogItems.list({ tenantId: id }),
-      tx.slaPolicies.list({ tenantId: id }),
-      tx.calendars.list({ tenantId: id }),
-      tx.automations.list({ tenantId: id }),
-      tx.macros.list({ tenantId: id }),
-      tx.customFieldDefs.list({ tenantId: id }),
-      tx.notifications.list({ tenantId: id }),
-      tx.emails.list({ tenantId: id }),
-    ]);
-    const ticketIds = new Set(tickets.map((ticket) => ticket.id));
-    const attachments = (await tx.attachments.list()).filter((attachment) =>
-      ticketIds.has(attachment.ticketId)
-    );
-    const summary: OrganizationDeletionSummary = {
-      users: users.length,
-      invitations: invitations.length,
-      tickets: tickets.length,
-      attachments: attachments.length,
-      apiKeys: apiKeys.length,
-      departments: departments.length,
-      settingsAndBusinessRecords:
-        groups.length +
-        articles.length +
-        problems.length +
-        changes.length +
-        assets.length +
-        cis.length +
-        catalogItems.length +
-        slaPolicies.length +
-        calendars.length +
-        automations.length +
-        macros.length +
-        customFieldDefs.length +
-        notifications.length +
-        emails.length,
-    };
+  assertDeletable(organization);
+
+  // Build the audit summary before opening the interactive transaction. Prisma
+  // serializes queries issued through one transaction connection, so keeping
+  // these independent reads inside it can exceed the default timeout when a
+  // Neon compute is waking or a Vercel burst is using the small connection pool.
+  const [
+    users,
+    invitations,
+    tickets,
+    apiKeys,
+    departments,
+    groups,
+    articles,
+    problems,
+    changes,
+    assets,
+    cis,
+    catalogItems,
+    slaPolicies,
+    calendars,
+    automations,
+    macros,
+    customFieldDefs,
+    notifications,
+    emails,
+  ] = await Promise.all([
+    store.users.list({ tenantId: id }),
+    store.invitations.list({ tenantId: id }),
+    store.tickets.list({ tenantId: id }),
+    store.apiKeys.list({ tenantId: id }),
+    store.departments.list({ tenantId: id }),
+    store.groups.list({ tenantId: id }),
+    store.articles.list({ tenantId: id }),
+    store.problems.list({ tenantId: id }),
+    store.changes.list({ tenantId: id }),
+    store.assets.list({ tenantId: id }),
+    store.cis.list({ tenantId: id }),
+    store.catalogItems.list({ tenantId: id }),
+    store.slaPolicies.list({ tenantId: id }),
+    store.calendars.list({ tenantId: id }),
+    store.automations.list({ tenantId: id }),
+    store.macros.list({ tenantId: id }),
+    store.customFieldDefs.list({ tenantId: id }),
+    store.notifications.list({ tenantId: id }),
+    store.emails.list({ tenantId: id }),
+  ]);
+  const ticketIds = new Set(tickets.map((ticket) => ticket.id));
+  const attachments = (await store.attachments.list()).filter((attachment) =>
+    ticketIds.has(attachment.ticketId)
+  );
+  const summary: OrganizationDeletionSummary = {
+    users: users.length,
+    invitations: invitations.length,
+    tickets: tickets.length,
+    attachments: attachments.length,
+    apiKeys: apiKeys.length,
+    departments: departments.length,
+    settingsAndBusinessRecords:
+      groups.length +
+      articles.length +
+      problems.length +
+      changes.length +
+      assets.length +
+      cis.length +
+      catalogItems.length +
+      slaPolicies.length +
+      calendars.length +
+      automations.length +
+      macros.length +
+      customFieldDefs.length +
+      notifications.length +
+      emails.length,
+  };
+
+  const deleted = await store.transaction(async (tx) => {
+    // Re-read under the transaction so concurrent edits cannot turn a protected
+    // organization into the target after the summary was collected.
+    const current = await tx.tenants.get(id);
+    if (!current) return null;
+    assertDeletable(current);
 
     await appendAudit({
       tenantId: actorTenantId,
       actor,
       action: 'organization.deleted',
       payload: {
-        organizationId: organization.id,
-        name: organization.name,
-        slug: organization.slug,
+        organizationId: current.id,
+        name: current.name,
+        slug: current.slug,
         deletedRecords: summary,
       },
     }, tx);
@@ -420,23 +435,11 @@ export async function deleteOrganization(
       throw new OrganizationServiceError('Organization could not be deleted safely.', 409);
     }
 
-    // Compatibility cleanup for deployments upgrading from schemas where
-    // these tenantId columns did not yet have Tenant foreign keys.
-    for (const row of [...notifications, ...emails, ...calendars]) {
-      const collection =
-        "channel" in row
-          ? tx.notifications
-          : "direction" in row
-            ? tx.emails
-            : tx.calendars;
-      await collection.remove(row.id);
-    }
-
     return {
       organization: {
-        id: organization.id,
-        name: organization.name,
-        slug: organization.slug,
+        id: current.id,
+        name: current.name,
+        slug: current.slug,
       },
       summary,
       attachmentIds: attachments.map((attachment) => attachment.id),
