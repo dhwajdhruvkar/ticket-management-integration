@@ -126,6 +126,13 @@ function validatePublicDemoAuth(env, errors) {
   }
 }
 
+function validateLocalAccountAuth(env, errors) {
+  const raw = value(env, "LOCAL_ACCOUNT_AUTH");
+  if (raw && raw !== "true" && raw !== "false") {
+    errors.push("LOCAL_ACCOUNT_AUTH must be explicitly true or false when provided.");
+  }
+}
+
 function validateAzureStorage(env, errors) {
   const raw = value(env, "AZURE_STORAGE_CONNECTION_STRING");
   if (!raw) {
@@ -201,6 +208,7 @@ function validateProductionEnvironmentEnv(env) {
 
   validateEntra(env, errors);
   validatePublicDemoAuth(env, errors);
+  validateLocalAccountAuth(env, errors);
   validateAzureStorage(env, errors);
 
   return { ok: errors.length === 0, errors };
@@ -214,11 +222,11 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  const authMode = value(process.env, "AUTH_MICROSOFT_ENTRA_ID_ID")
-    ? "entra"
-    : value(process.env, "PUBLIC_DEMO_AUTH") === "true"
-      ? "public-demo"
-      : "api-key-only";
+  const browserProviders = [];
+  if (value(process.env, "AUTH_MICROSOFT_ENTRA_ID_ID")) browserProviders.push("entra");
+  if (value(process.env, "PUBLIC_DEMO_AUTH") === "true") browserProviders.push("public-demo");
+  if (value(process.env, "LOCAL_ACCOUNT_AUTH") === "true") browserProviders.push("organization");
+  const authMode = browserProviders.join("+") || "api-key-only";
   const attachmentStorage = value(process.env, "AZURE_STORAGE_CONNECTION_STRING")
     ? "azure"
     : "disabled";

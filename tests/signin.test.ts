@@ -60,4 +60,21 @@ describe("Public demo authentication", () => {
     expect(proxy).toContain("public-demo-auth:");
     expect(proxy).toContain("30, 60_000");
   });
+
+  it("adds tenant-qualified local accounts without removing demo or future Entra providers", () => {
+    const auth = source("src/auth.ts");
+    const client = source("src/app/signin/SignInClient.tsx");
+    const setup = source("src/app/setup-account/SetupAccountClient.tsx");
+
+    expect(auth).toContain('id: "organization"');
+    expect(auth).toContain("authenticateOrganizationUser(");
+    expect(auth).toContain("config.localAccountAuth");
+    expect(auth).toContain("MicrosoftEntraID");
+    expect(client).toContain('signIn("organization"');
+    expect(client).toContain("Organization code");
+    expect(client).toContain("QUICK DEMO IDENTITIES");
+    expect(setup).toContain("window.location.hash");
+    expect(setup).toContain('window.history.replaceState(null, "", window.location.pathname)');
+    expect(setup).toContain('fetch("/api/account/setup"');
+  });
 });

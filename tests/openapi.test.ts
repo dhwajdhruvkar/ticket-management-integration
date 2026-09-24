@@ -36,7 +36,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
 
     const spec = object(await response.json());
     expect(spec.openapi).toBe("3.1.0");
-    expect(object(spec.info).version).toBe("2.0.0");
+    expect(object(spec.info).version).toBe("2.2.0");
 
     const servers = spec.servers as Array<JsonObject>;
     expect(servers[0]).toMatchObject({
@@ -65,6 +65,15 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
       "AddMessageRequest",
       "ApiKey",
       "CreatedApiKey",
+      "WebhookConfigurationRequest",
+      "WebhookConfigurationResponse",
+      "MeResponse",
+      "AccessLink",
+      "UserAccessView",
+      "CreateOrganizationRequest",
+      "CreateUserInvitationRequest",
+      "SetupAccountRequest",
+      "ChangePasswordRequest",
       "PageMeta",
     ]) {
       expect(schemas).toHaveProperty(name);
@@ -77,6 +86,9 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(
       object(profileProperties.authentication).enum as Array<string>
     ).toContain("public-demo");
+    expect(
+      object(profileProperties.authentication).enum as Array<string>
+    ).toContain("public-demo+organization");
 
     const apiKeySchema = object(schemas.ApiKey);
     expect(object(apiKeySchema.properties)).not.toHaveProperty("keyHash");
@@ -89,6 +101,14 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(paths).toHaveProperty("/tickets/{id}/messages");
     expect(paths).toHaveProperty("/api-keys");
     expect(paths).toHaveProperty("/api-keys/{id}");
+    expect(paths).toHaveProperty("/api-keys/{id}/rotate");
+    expect(paths).toHaveProperty("/api-keys/{id}/webhook");
+    expect(paths).toHaveProperty("/me");
+    expect(paths).toHaveProperty("/organizations");
+    expect(paths).toHaveProperty("/users");
+    expect(paths).toHaveProperty("/users/{id}/access-link");
+    expect(paths).toHaveProperty("/account/setup");
+    expect(paths).toHaveProperty("/account/password");
 
     expect(operation(paths, "/health", "get").security).toEqual([]);
     expect(operation(paths, "/tickets", "post")["x-required-permission"]).toBe(
@@ -103,6 +123,15 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(
       operation(paths, "/api-keys", "post")["x-required-permission"]
     ).toBe("admin");
+    expect(operation(paths, "/me", "get")["x-required-permission"]).toBe(
+      "ticket.create"
+    );
+    const createParameters = operation(paths, "/tickets", "post")
+      .parameters as Array<JsonObject>;
+    expect(createParameters).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "Idempotency-Key", in: "header" })])
+    );
+    expect(operation(paths, "/account/setup", "post").security).toEqual([]);
   });
 
   it("documents pagination, messages, and the 401/403 error boundary precisely", async () => {
@@ -137,6 +166,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
       ["/api-keys", "get"],
       ["/api-keys", "post"],
       ["/api-keys/{id}", "delete"],
+      ["/api-keys/{id}/rotate", "post"],
     ]) {
       const responses = object(operation(paths, route, method).responses);
       expect(responses).toHaveProperty("401");
@@ -166,8 +196,10 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
       "Production API base URL",
       "## Authentication",
       "### API key setup",
+      "### Save and test / tenant discovery",
       "## Roles and permissions",
       "## Create a ticket",
+      "## Signed ticket-status callbacks",
       "## Retrieve a ticket and its messages",
       "## Update a ticket",
       "## Add a message",
@@ -192,7 +224,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(openApiResponse.status).toBe(401);
     await expect(openApiResponse.json()).resolves.toEqual({
       ok: false,
-      error: "Invalid, expired, or revoked API key.",
+      error: "Invalid, expired, or deleted API key.",
     });
 
     const response = await listApiKeys(
@@ -204,7 +236,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
       ok: false,
-      error: "Invalid, expired, or revoked API key.",
+      error: "Invalid, expired, or deleted API key.",
     });
   });
 });

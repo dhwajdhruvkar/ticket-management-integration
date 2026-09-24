@@ -11,6 +11,11 @@ import { getStore } from "../data";
 import { newId, now, ticketReference } from "../domain/ids";
 import { derivePriority } from "../domain/priority";
 import { publishEvent } from "../events/bus";
+import { logger } from "../observability/logger";
+import {
+  queueTicketWebhookEvent,
+  type TicketWebhookEvent,
+} from "./integrationWebhookService";
 import { slaPausePatch, slaStatus, type SlaStatus } from "./slaService";
 import type {
   ApprovalRow,
@@ -56,6 +61,13 @@ export interface NewTicketInput {
   source?: string;
   catalogItemId?: string;
   ciIds?: string[];
+  externalTicketId?: string;
+  /** Server-resolved tenant user matching requesterEmail. */
+  requesterId?: string;
+  /** Server-populated idempotency metadata; callers cannot choose these hashes. */
+  idempotencyScopeHash?: string;
+  idempotencyRequestHash?: string;
+  integrationKeyId?: string;
 }
 
 import { pageCollection, type ListOptions, type PageResult } from "../data/store";
@@ -192,7 +204,11 @@ export async function createTicket(
     tags: input.tags ?? [],
     customFields: null,
     requesterEmail: input.requesterEmail.trim(),
-    requesterId: null,
+    requesterId: input.requesterId ?? null,
+    externalTicketId: input.externalTicketId?.trim() || null,
+    idempotencyScopeHash: input.idempotencyScopeHash ?? null,
+    idempotencyRequestHash: input.idempotencyRequestHash ?? null,
+    integrationKeyId: input.integrationKeyId ?? null,
     assigneeId: null,
     assignmentGroupId: null,
     problemId: null,
@@ -234,6 +250,12 @@ export async function createTicket(
       priority: ticket.priority,
     },
   });
+  await queueTicketWebhookEvent(ticket, "ticket.created").catch((error) =>
+    logger.warn("could not queue ticket.created callback", {
+      ticketId: ticket.id,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  );
   return ticket;
 }
 
@@ -283,6 +305,25 @@ export async function mutateTicket(
       ticketReference: updated.reference,
       requesterEmail: updated.requesterEmail,
     });
+    const callbackEvents: TicketWebhookEvent[] = ["ticket.updated"];
+    if (patch.status && patch.status !== current.status) {
+      if (patch.status === "resolved" || patch.status === "auto_resolved") {
+        callbackEvents.push("ticket.resolved");
+      } else if (patch.status === "closed") {
+        callbackEvents.push("ticket.closed");
+      } else if (patch.status === "reopened") {
+        callbackEvents.push("ticket.reopened");
+      }
+    }
+    for (const callbackEvent of callbackEvents) {
+      await queueTicketWebhookEvent(updated, callbackEvent).catch((error) =>
+        logger.warn("could not queue ticket callback", {
+          ticketId: updated.id,
+          event: callbackEvent,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
+    }
     // "ticket.updated" automations fire on status transitions only (the common
     // enterprise trigger), guarded against automation-inflicted recursion.
     if (patch.status && patch.status !== current.status) {

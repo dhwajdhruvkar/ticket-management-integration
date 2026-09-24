@@ -11,6 +11,11 @@ import { isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
 import { listTickets, type NewTicketInput } from "@/server/services/ticketService";
 import { intakeTicket } from "@/server/services/intake";
+import {
+  findIdempotentTicket,
+  IdempotencyError,
+  ticketIdempotencyMetadata,
+} from "@/server/services/idempotencyService";
 import type { Role, TicketRow } from "@/server/domain/models";
 
 export const runtime = "nodejs";
@@ -85,6 +90,17 @@ export async function POST(req: Request) {
   if (!body?.subject || !body?.body) {
     return fail("subject and body are required.");
   }
+  if (
+    body.externalTicketId !== undefined &&
+    (typeof body.externalTicketId !== "string" || body.externalTicketId.trim().length > 128)
+  ) {
+    return fail("externalTicketId must be a string of at most 128 characters.");
+  }
+  // These are always server-derived, even if a caller includes lookalike JSON.
+  delete body.idempotencyScopeHash;
+  delete body.idempotencyRequestHash;
+  delete body.integrationKeyId;
+  delete body.requesterId;
   if (typeof body.subject !== "string" || typeof body.body !== "string" || body.subject.length > 300 || body.body.length > 50_000) {
     return fail("subject/body must be strings within size limits.");
   }
@@ -94,6 +110,57 @@ export async function POST(req: Request) {
     body.requesterEmail = actor.email;
   }
   if (!body.requesterEmail) return fail("requesterEmail is required.");
-  const ticket = await intakeTicket(tenantId, body);
-  return ok(ticket, { status: 201 });
+
+  let metadata;
+  try {
+    metadata = ticketIdempotencyMetadata(
+      req,
+      tenantId,
+      actor,
+      body as unknown as Record<string, unknown>
+    );
+    if (metadata) {
+      const existing = await findIdempotentTicket(tenantId, metadata);
+      if (existing) {
+        return ok(existing, {
+          status: 200,
+          headers: { "Idempotency-Replayed": "true" },
+        });
+      }
+      body.idempotencyScopeHash = metadata.scopeHash;
+      body.idempotencyRequestHash = metadata.requestHash;
+      body.integrationKeyId = metadata.integrationKeyId;
+      body.externalTicketId = metadata.externalTicketId;
+    }
+    // Machine-created tickets retain their originating integration even when a
+    // partner omitted idempotency metadata. Scoped callbacks use this binding
+    // so they cannot observe other requesters' tickets in the tenant.
+    if (actor.apiKeyId) body.integrationKeyId = actor.apiKeyId;
+
+    const ticket = await intakeTicket(tenantId, body);
+    return ok(ticket, {
+      status: 201,
+      headers: metadata ? { "Idempotency-Replayed": "false" } : undefined,
+    });
+  } catch (error) {
+    // A concurrent request can win the unique idempotency insert after our
+    // initial lookup. Re-read and replay its ticket instead of surfacing P2002.
+    if (metadata) {
+      try {
+        const existing = await findIdempotentTicket(tenantId, metadata);
+        if (existing) {
+          return ok(existing, {
+            status: 200,
+            headers: { "Idempotency-Replayed": "true" },
+          });
+        }
+      } catch (replayError) {
+        if (replayError instanceof IdempotencyError) {
+          return fail(replayError.message, replayError.status);
+        }
+      }
+    }
+    if (error instanceof IdempotencyError) return fail(error.message, error.status);
+    throw error;
+  }
 }

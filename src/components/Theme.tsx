@@ -56,8 +56,17 @@ function apply(theme: Theme) {
   document.documentElement.style.colorScheme = theme;
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(readInitial);
+export function ThemeProvider({
+  children,
+  initialTheme = "light",
+}: {
+  children: ReactNode;
+  initialTheme?: Theme;
+}) {
+  // The first client render must match the server. The pre-hydration script can
+  // still change the document attribute for first-visit system dark mode; the
+  // effect below synchronises context immediately after hydration.
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);

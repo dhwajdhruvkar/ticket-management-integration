@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { getStore } from "../data";
 import { newId, now } from "../domain/ids";
 import type { AuditRow } from "../domain/models";
+import type { DataStore } from "../data/store";
 
 const GENESIS_HASH = "0".repeat(64);
 
@@ -50,8 +51,11 @@ export interface AppendAuditInput {
   payload?: Record<string, unknown>;
 }
 
-export async function appendAudit(input: AppendAuditInput): Promise<AuditRow> {
-  const store = await getStore();
+export async function appendAudit(
+  input: AppendAuditInput,
+  storeOverride?: DataStore
+): Promise<AuditRow> {
+  const store = storeOverride ?? (await getStore());
 
   // Index allocation is read-then-write; under concurrent writers on Postgres
   // two appends can race for the same index. The @@unique([tenantId, index])

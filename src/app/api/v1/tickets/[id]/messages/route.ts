@@ -1,6 +1,6 @@
 import { fail, ok, readJson } from "@/server/http";
 import { isResponse, loadTicket, requirePermission } from "@/server/guards";
-import { can, isAgentRole } from "@/server/auth/rbac";
+import { can, isAgentRole, isTicketSubmitterRole } from "@/server/auth/rbac";
 import { agentReply, requesterReply } from "@/server/services/agentActions";
 import type { MessageVisibility } from "@/server/domain/models";
 
@@ -25,6 +25,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const ctx = await requirePermission(req, "ticket.read");
   if (isResponse(ctx)) return ctx;
+  if (isTicketSubmitterRole(ctx.role)) {
+    return fail("Ticket submitter integrations are read-only after creation.", 403);
+  }
 
   const payload = await readJson<MessageBody>(req);
   if (!payload?.body?.trim()) return fail("Message body is required.");

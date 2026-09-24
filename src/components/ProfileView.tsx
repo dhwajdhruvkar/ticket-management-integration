@@ -99,6 +99,12 @@ export default function ProfileView() {
   const [form, setForm] = useState<ProfileForm | null>(null);
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const load = useCallback(() => {
     apiGet<Me>("/me")
@@ -262,6 +268,29 @@ export default function ProfileView() {
     } catch (err) {
       load();
       toast.error({ title: "Could not update availability", description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function changePassword() {
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error({ title: "Passwords do not match" });
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await apiSend("/account/password", "POST", {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      toast.success({ title: "Password changed" });
+    } catch (err) {
+      toast.error({
+        title: "Could not change password",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setChangingPassword(false);
     }
   }
 
@@ -600,6 +629,73 @@ export default function ProfileView() {
               <Row k="User ID" v={me.id ?? "—"} mono />
               <Row k="Role" v={me.role.replace("_", " ")} />
               <Row k="Member since" v={formatJoined(me.memberSince)} />
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  paddingTop: 12,
+                  marginTop: 8,
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                <div style={{ fontSize: "0.82rem", fontWeight: 700 }}>Change password</div>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="Current password"
+                  value={passwordForm.currentPassword}
+                  onChange={(event) =>
+                    setPasswordForm((current) => ({
+                      ...current,
+                      currentPassword: event.target.value,
+                    }))
+                  }
+                />
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={12}
+                  maxLength={128}
+                  placeholder="New password (12+ characters)"
+                  value={passwordForm.newPassword}
+                  onChange={(event) =>
+                    setPasswordForm((current) => ({
+                      ...current,
+                      newPassword: event.target.value,
+                    }))
+                  }
+                />
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={12}
+                  maxLength={128}
+                  placeholder="Confirm new password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) =>
+                    setPasswordForm((current) => ({
+                      ...current,
+                      confirmPassword: event.target.value,
+                    }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={
+                    changingPassword ||
+                    !passwordForm.currentPassword ||
+                    !passwordForm.newPassword ||
+                    !passwordForm.confirmPassword
+                  }
+                  onClick={() => void changePassword()}
+                >
+                  {changingPassword ? "Changing…" : "Change password"}
+                </button>
+              </div>
               <div
                 style={{
                   display: "flex",

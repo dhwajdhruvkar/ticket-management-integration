@@ -22,6 +22,7 @@ import { slaStatus } from "../services/slaService";
 import { buildReportPdf } from "../services/reportPdfService";
 import { runWithRetry, withJobLock } from "./lock";
 import { logger } from "../observability/logger";
+import { retryPendingWebhookDeliveries } from "../services/integrationWebhookService";
 import type { Role, TicketRow, UserRow } from "../domain/models";
 
 const OPEN = ["new", "open", "in_progress", "pending", "pending_agent", "escalated", "reopened"];
@@ -258,6 +259,11 @@ async function tick(): Promise<void> {
     await runWithRetry("autoCloseStale", autoCloseStale, { attempts: 2 });
     await runWithRetry("weeklyDigest", () => weeklyDigestSweep().then(() => undefined), { attempts: 2 });
     await runWithRetry("monthlyReport", () => monthlyReportSweep().then(() => undefined), { attempts: 2 });
+    await runWithRetry(
+      "integrationWebhooks",
+      () => retryPendingWebhookDeliveries().then(() => undefined),
+      { attempts: 2 }
+    );
     // Graph is pull-based; Brevo is push (its webhook), so only poll for Graph.
     if (config.emailProvider === "graph" && config.features.graph) {
       await runWithRetry("pollMailbox", () => pollMailbox().then(() => undefined), { attempts: 3 });

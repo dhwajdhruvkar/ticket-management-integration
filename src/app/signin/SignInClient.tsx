@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import {
@@ -48,10 +48,14 @@ function initialsOf(name: string): string {
 
 function subheading(
   ssoEnabled: boolean,
-  credentialLoginEnabled: boolean
+  credentialLoginEnabled: boolean,
+  localAccountAuth: boolean
 ): string {
+  if (localAccountAuth) {
+    return "Sign in with your organization account to continue.";
+  }
   if (ssoEnabled && credentialLoginEnabled) {
-    return "Sign in with your Microsoft account, or pick a demo identity to explore the workspace.";
+    return "Sign in with Microsoft, or pick a demo identity to explore the workspace.";
   }
   if (ssoEnabled) return "Sign in with your Microsoft work account to continue.";
   return "Pick a demo identity to explore the workspace.";
@@ -61,16 +65,52 @@ export default function SignInClient({
   ssoEnabled,
   demoMode,
   publicDemoAuth,
+  localAccountAuth,
 }: {
   ssoEnabled: boolean;
   demoMode: boolean;
   publicDemoAuth: boolean;
+  localAccountAuth: boolean;
 }) {
   const [email, setEmail] = useState("");
+  const [organizationCode, setOrganizationCode] = useState("");
+  const [organizationEmail, setOrganizationEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const credentialLoginEnabled = demoMode || publicDemoAuth;
-  const showCredentialPanel = credentialLoginEnabled || !ssoEnabled;
+  const showCredentialPanel = credentialLoginEnabled || (!ssoEnabled && !localAccountAuth);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setOrganizationCode(params.get("organization") ?? "");
+    setOrganizationEmail(params.get("email") ?? "");
+    if (params.get("setup") === "1") {
+      setAuthNotice("Account setup complete. Sign in with your new password.");
+    }
+  }, []);
+
+  async function organizationSignIn() {
+    if (!organizationCode.trim() || !organizationEmail.trim() || !password) return;
+    setAuthNotice(null);
+    setBusy("organization");
+    try {
+      const result = await signIn("organization", {
+        organizationCode: organizationCode.trim(),
+        email: organizationEmail.trim(),
+        password,
+        callbackUrl: "/",
+        redirect: false,
+      });
+      if (result?.error) {
+        setAuthNotice("Invalid organization code, email, or password.");
+        return;
+      }
+      window.location.assign(result?.url || "/");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function demoSignIn(value: string, key: string) {
     if (!credentialLoginEnabled) {
@@ -160,7 +200,7 @@ export default function SignInClient({
           <div className="signin-card-head">
             <h2 className="signin-card-title">Welcome back</h2>
             <p className="signin-card-sub">
-              {subheading(ssoEnabled, credentialLoginEnabled)}
+              {subheading(ssoEnabled, credentialLoginEnabled, localAccountAuth)}
             </p>
           </div>
 
@@ -175,6 +215,79 @@ export default function SignInClient({
                 {busy === "sso" ? "Redirecting…" : "Sign in with Microsoft"}
               </span>
             </button>
+          ) : null}
+
+          {localAccountAuth ? (
+            <>
+              <div className="signin-divider">
+                <span>{ssoEnabled ? "OR USE ORGANIZATION ACCOUNT" : "ORGANIZATION ACCOUNT"}</span>
+              </div>
+              <form
+                className="signin-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void organizationSignIn();
+                }}
+              >
+                <div className="signin-org-fields">
+                  <label className="signin-label" htmlFor="organization-code">
+                    Organization code
+                    <input
+                      id="organization-code"
+                      className="input"
+                      autoComplete="organization"
+                      placeholder="acme-support"
+                      value={organizationCode}
+                      onChange={(event) => setOrganizationCode(event.target.value)}
+                    />
+                  </label>
+                  <label className="signin-label" htmlFor="organization-email">
+                    Work email
+                    <input
+                      id="organization-email"
+                      className="input"
+                      type="email"
+                      autoComplete="username"
+                      placeholder="you@company.com"
+                      value={organizationEmail}
+                      onChange={(event) => setOrganizationEmail(event.target.value)}
+                    />
+                  </label>
+                  <label className="signin-label" htmlFor="organization-password">
+                    Password
+                    <input
+                      id="organization-password"
+                      className="input"
+                      type="password"
+                      autoComplete="current-password"
+                      placeholder="Your password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                  </label>
+                </div>
+                <button
+                  className="btn btn-primary signin-sso"
+                  type="submit"
+                  disabled={
+                    busy !== null ||
+                    !organizationCode.trim() ||
+                    !organizationEmail.trim() ||
+                    !password
+                  }
+                >
+                  {busy === "organization" ? "Signing in…" : "Sign in"}
+                </button>
+                <p className="signin-help">
+                  Use the organization code supplied by your administrator.
+                </p>
+              </form>
+              {authNotice ? (
+                <p className="signin-preview-notice" role="status">
+                  {authNotice}
+                </p>
+              ) : null}
+            </>
           ) : null}
 
           {showCredentialPanel ? (
@@ -221,7 +334,7 @@ export default function SignInClient({
                 </p>
               </form>
 
-              {authNotice ? (
+              {authNotice && !localAccountAuth ? (
                 <p className="signin-preview-notice" role="status">
                   {authNotice}
                 </p>
@@ -545,6 +658,18 @@ export default function SignInClient({
           font-size: 0.72rem;
           color: var(--muted);
           margin: 4px 0 0;
+        }
+        .signin-org-fields {
+          display: grid;
+          gap: 10px;
+        }
+        .signin-org-fields .signin-label {
+          display: grid;
+          gap: 5px;
+        }
+        .signin-org-fields .input {
+          height: 40px;
+          text-transform: none;
         }
         .signin-preview-notice {
           border: 1px solid var(--info-border);

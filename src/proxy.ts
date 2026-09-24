@@ -124,7 +124,7 @@ export const config = {
   matcher: [
     // /legal is public: the sign-in screen links to it, so requiring a session
     // would bounce anyone who wants to read the terms before agreeing to them.
-    "/((?!api|_next/static|_next/image|favicon\\.ico|signin|legal).*)",
+    "/((?!api|_next/static|_next/image|favicon\\.ico|signin|setup-account|legal).*)",
     "/api/v1/:path*",
     "/api/auth/callback/demo",
   ],

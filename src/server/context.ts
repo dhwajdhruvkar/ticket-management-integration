@@ -43,6 +43,7 @@ const ANONYMOUS: ActingUser = { name: "anonymous", role: "none" };
 
 const ADMIN_ROLES = new Set(["tenant_admin", "super_admin", "manager"]);
 const ROLE_RANK: Record<string, number> = {
+  ticket_submitter: 0,
   requester: 0,
   agent: 1,
   manager: 2,
@@ -127,7 +128,13 @@ async function baseActor(req?: Request): Promise<ActingUser> {
     if (presented) {
       const verified = await verifyApiKey(presented);
       if (verified) {
-        return { name: verified.name, role: verified.role, apiKeyId: verified.keyId };
+        return {
+          id: verified.requesterId,
+          name: verified.name,
+          role: verified.role,
+          email: verified.requesterEmail,
+          apiKeyId: verified.keyId,
+        };
       }
       // A presented-but-invalid key never falls back to a privileged identity.
       return ANONYMOUS;

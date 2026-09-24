@@ -14,17 +14,26 @@
 
 export type DataDriver = "memory" | "prisma";
 export type EmailProvider = "graph" | "brevo" | "none";
-export type AuthMode = "demo" | "public-demo" | "entra" | "api-key-only";
+export type AuthMode =
+  | "demo"
+  | "public-demo"
+  | "organization"
+  | "public-demo+organization"
+  | "entra"
+  | "entra+organization"
+  | "api-key-only";
 export type AttachmentStorageMode = "local" | "azure" | "disabled";
 
 export function resolveAuthMode(
   demoMode: boolean,
   entraConfigured: boolean,
-  publicDemoAuth = false
+  publicDemoAuth = false,
+  localAccountAuth = false
 ): AuthMode {
   if (demoMode) return "demo";
-  if (entraConfigured) return "entra";
-  return publicDemoAuth ? "public-demo" : "api-key-only";
+  if (entraConfigured) return localAccountAuth ? "entra+organization" : "entra";
+  if (publicDemoAuth) return localAccountAuth ? "public-demo+organization" : "public-demo";
+  return localAccountAuth ? "organization" : "api-key-only";
 }
 
 export function resolveAttachmentStorage(
@@ -100,7 +109,13 @@ const demoMode = demoModeEnv !== undefined ? demoModeEnv === "true" : !entraConf
 // Unlike DEMO_MODE, this opt-in enables only the allowlisted browser
 // credentials provider. API header fallbacks and open webhooks remain off.
 const publicDemoAuth = val("PUBLIC_DEMO_AUTH") === "true" && !entraConfigured;
-const authMode = resolveAuthMode(demoMode, entraConfigured, publicDemoAuth);
+const localAccountAuth = val("LOCAL_ACCOUNT_AUTH") === "true";
+const authMode = resolveAuthMode(
+  demoMode,
+  entraConfigured,
+  publicDemoAuth,
+  localAccountAuth
+);
 const attachmentStorage = resolveAttachmentStorage(demoMode, !!blobConnString);
 
 // Shared secret(s) for inbound webhook HMAC (x-webhook-signature). A per-source
@@ -159,6 +174,7 @@ export const config = {
   sentryDsn: val("SENTRY_DSN"),
   demoMode,
   publicDemoAuth,
+  localAccountAuth,
   webhookSecrets,
   slack,
   brevo,
@@ -177,6 +193,7 @@ export const config = {
     redis: !!redisUrl,
     entraId: entraConfigured,
     publicDemoAuth,
+    localAccountAuth,
     graph: graphConfigured,
     blob: !!blobConnString,
     attachments: attachmentStorage !== "disabled",

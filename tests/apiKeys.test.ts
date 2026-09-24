@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { getStore } from "@/server/data";
-import { createApiKey, extractApiKey, revokeApiKey, verifyApiKey } from "@/server/auth/apiKeys";
+import { createApiKey, deleteApiKey, extractApiKey, verifyApiKey } from "@/server/auth/apiKeys";
 import { can } from "@/server/auth/rbac";
 import { verifyChain } from "@/server/audit/auditChain";
 
@@ -33,13 +33,14 @@ describe("API keys", () => {
     expect(verified!.role).toBe("agent");
   });
 
-  it("rejects unknown and revoked keys", async () => {
+  it("rejects unknown and deleted keys", async () => {
     expect(await verifyApiKey("nlk_definitely-not-a-real-key")).toBeNull();
 
     const { record, key } = await createApiKey(TENANT, { name: "Short lived" });
     expect(await verifyApiKey(key)).not.toBeNull();
-    await revokeApiKey(TENANT, record.id);
+    await deleteApiKey(TENANT, record.id);
     expect(await verifyApiKey(key)).toBeNull();
+    await expect((await getStore()).apiKeys.get(record.id)).resolves.toBeNull();
   });
 
   it("rejects expired keys", async () => {
@@ -50,16 +51,21 @@ describe("API keys", () => {
     expect(await verifyApiKey(key)).toBeNull();
   });
 
-  it("does not allow one tenant to revoke another tenant's key", async () => {
+  it("does not allow one tenant to delete another tenant's key", async () => {
+    const store = await getStore();
+    const requester = (await store.users.list({ tenantId: TENANT })).find((user) => user.active)!;
     const { record, key } = await createApiKey(TENANT, {
       name: "Tenant boundary",
       role: "requester",
+      requesterId: requester.id,
     });
 
-    expect(await revokeApiKey("tenant_other", record.id)).toBe(false);
+    expect(await deleteApiKey("tenant_other", record.id)).toBe(false);
     await expect(verifyApiKey(key)).resolves.toMatchObject({
       tenantId: TENANT,
       role: "requester",
+      requesterId: requester.id,
+      requesterEmail: requester.email,
     });
   });
 
@@ -71,18 +77,18 @@ describe("API keys", () => {
     expect(can("super_admin", "admin")).toBe(true);
   });
 
-  it("audits creation and revocation without recording the full key", async () => {
+  it("audits creation and deletion without recording the full key", async () => {
     const { record, key } = await createApiKey(
       TENANT,
       { name: "Audited integration", role: "agent" },
       "security-test"
     );
-    expect(await revokeApiKey(TENANT, record.id, "security-test")).toBe(true);
+    expect(await deleteApiKey(TENANT, record.id, "security-test")).toBe(true);
 
     const store = await getStore();
     const audits = await store.audit.list({ tenantId: TENANT });
     expect(audits.some((row) => row.action === "auth.key_created")).toBe(true);
-    expect(audits.some((row) => row.action === "auth.key_revoked")).toBe(true);
+    expect(audits.some((row) => row.action === "auth.key_deleted")).toBe(true);
     expect(JSON.stringify(audits)).not.toContain(key);
     await expect(verifyChain(TENANT)).resolves.toMatchObject({ valid: true });
   });

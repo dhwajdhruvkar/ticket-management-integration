@@ -23,7 +23,7 @@ import { useTheme } from "@/components/Theme";
 import { PRIORITY_ORDER, priorityCode } from "@/shared/priority";
 import type { TicketPriority } from "@/server/domain/models";
 import { InfoHint, LabelWithHint, timeAgo } from "@/components/ui";
-import { PromptDialog } from "@/components/primitives";
+import { CloseButton, Modal, PromptDialog } from "@/components/primitives";
 import { customFieldHint, HINTS } from "@/lib/hints";
 
 // =============================================================================
@@ -44,7 +44,46 @@ interface Health {
   features: Record<string, boolean>;
 }
 
-type ApiKeyView = Omit<ApiKeyRow, "keyHash">;
+type ApiKeyView = Omit<ApiKeyRow, "keyHash" | "webhookSecretSalt">;
+
+type UserAccessStatus = "invited" | "active" | "locked" | "disabled";
+
+interface UserAccessView
+  extends Omit<UserRow, "passwordHash" | "failedLoginAttempts" | "lockedUntil"> {
+  accessStatus: UserAccessStatus;
+  pendingInvitationExpiresAt: string | null;
+  hasLocalPassword: boolean;
+}
+
+interface AccessLinkView {
+  status: "pending";
+  purpose: "activate" | "reset";
+  expiresAt: string;
+  delivery: "email_sent" | "copy_required";
+  setupUrl: string;
+}
+
+interface InvitedUserResult {
+  user: UserAccessView;
+  invitation: AccessLinkView;
+}
+
+interface OrganizationView extends TenantRow {
+  onboardingStatus: "pending" | "active" | "locked";
+  admin: UserAccessView | null;
+}
+
+interface ProvisionOrganizationResult {
+  organization: TenantRow;
+  admin: UserAccessView;
+  invitation: AccessLinkView;
+}
+
+interface OrganizationDeletionResult {
+  deleted: true;
+  organization: Pick<TenantRow, "id" | "name" | "slug">;
+  attachmentCleanup: { attempted: number; deleted: number; failed: number };
+}
 
 export default function SettingsView() {
   const router = useRouter();
@@ -1094,32 +1133,49 @@ function FieldIcon() {
 
 function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: () => void }) {
   const toast = useToast();
+  const activeKeys = keys.filter((key) => key.active);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"details" | "agents">("details");
+  const [tab, setTab] = useState<"details" | "identity" | "agents" | "callbacks">("details");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [role, setRole] = useState("agent");
+  const [role, setRole] = useState("ticket_submitter");
+  const [requesterId, setRequesterId] = useState("");
   const [agentIds, setAgentIds] = useState<string[]>([]);
-  const [agents, setAgents] = useState<{ id: string; name: string; role: string }[]>([]);
+  const [users, setUsers] = useState<{ id: string; name: string; email: string; role: string; active: boolean }[]>([]);
+  const [expiresAt, setExpiresAt] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(["ticket.created", "ticket.updated"]);
   const [busy, setBusy] = useState(false);
   const [freshKey, setFreshKey] = useState<string | null>(null);
+  const [freshWebhookSecret, setFreshWebhookSecret] = useState<string | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [editingWebhookId, setEditingWebhookId] = useState<string | null>(null);
+  const [editingWebhookUrl, setEditingWebhookUrl] = useState("");
+  const [editingWebhookEvents, setEditingWebhookEvents] = useState<string[]>([]);
 
   useEffect(() => {
     apiGetAll<UserRow>("/users")
-      .then((us) =>
-        setAgents(
-          us.filter((u) => u.role !== "requester").map((u) => ({ id: u.id, name: u.name, role: u.role }))
-        )
-      )
-      .catch(() => setAgents([]));
+      .then((us) => setUsers(us.map((u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, active: u.active }))))
+      .catch(() => setUsers([]));
   }, []);
 
-  const agentName = (id: string) => agents.find((a) => a.id === id)?.name ?? id;
+  const agents = users.filter((u) => u.role !== "requester" && u.role !== "ticket_submitter");
+  const requesters = users.filter((u) => u.active);
+  const requesterScoped = role === "requester" || role === "ticket_submitter";
+  const agentName = (id: string) => users.find((a) => a.id === id)?.name ?? id;
+  const requesterName = (id: string | null | undefined) => {
+    const user = users.find((candidate) => candidate.id === id);
+    return user ? `${user.name} (${user.email})` : id ?? "not bound";
+  };
   const resetForm = () => {
     setName("");
     setDescription("");
-    setRole("agent");
+    setRole("ticket_submitter");
+    setRequesterId("");
     setAgentIds([]);
+    setExpiresAt("");
+    setWebhookUrl("");
+    setWebhookEvents(["ticket.created", "ticket.updated"]);
     setTab("details");
   };
   const toggleAgent = (id: string) =>
@@ -1130,15 +1186,25 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
       setTab("details");
       return;
     }
+    if (requesterScoped && !requesterId) {
+      setTab("identity");
+      return;
+    }
     setBusy(true);
     try {
-      const created = await apiSend<ApiKeyView & { key: string }>("/api-keys", "POST", {
+      const created = await apiSend<ApiKeyView & { key: string; webhookSecret?: string | null }>("/api-keys", "POST", {
         name: name.trim(),
         description: description.trim() || null,
         role,
-        agentIds,
+        requesterId: requesterScoped ? requesterId : null,
+        agentIds: requesterScoped ? [] : agentIds,
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+        webhook: webhookUrl.trim()
+          ? { url: webhookUrl.trim(), events: webhookEvents }
+          : null,
       });
       setFreshKey(created.key);
+      setFreshWebhookSecret(created.webhookSecret ?? null);
       resetForm();
       setOpen(false);
       onChanged();
@@ -1150,21 +1216,54 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
     }
   }
 
-  async function revoke(k: ApiKeyView) {
-    if (!confirm(`Revoke "${k.name}"? Integrations using it will stop working immediately.`)) return;
+  async function rotate(k: ApiKeyView) {
+    if (!confirm(`Replace the bearer token for "${k.name}"? The current token will stop working immediately.`)) return;
+    setRotatingId(k.id);
     try {
-      await apiSend(`/api-keys/${k.id}`, "DELETE");
+      const rotated = await apiSend<ApiKeyView & { key: string }>(`/api-keys/${k.id}/rotate`, "POST");
+      setFreshKey(rotated.key);
+      setFreshWebhookSecret(null);
       onChanged();
-      toast.info({ title: "API key revoked", description: k.prefix + "…" });
+      toast.success({ title: "Token replaced", description: "Copy the new token now — it won't be shown again." });
     } catch (err) {
-      toast.error({ title: "Could not revoke key", description: err instanceof Error ? err.message : String(err) });
+      toast.error({ title: "Could not replace token", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setRotatingId(null);
     }
   }
 
-  async function copyFresh() {
-    if (!freshKey) return;
+  async function saveWebhook(k: ApiKeyView, rotateSecret = false) {
     try {
-      await navigator.clipboard.writeText(freshKey);
+      const updated = await apiSend<ApiKeyView & { webhookSecret?: string | null }>(`/api-keys/${k.id}/webhook`, "PATCH", {
+        url: editingWebhookUrl.trim() || null,
+        events: editingWebhookEvents,
+        active: !!editingWebhookUrl.trim(),
+        rotateSecret,
+      });
+      if (updated.webhookSecret) setFreshWebhookSecret(updated.webhookSecret);
+      setEditingWebhookId(null);
+      onChanged();
+      toast.success({ title: editingWebhookUrl.trim() ? "Status callbacks updated" : "Status callbacks disabled" });
+    } catch (err) {
+      toast.error({ title: "Could not update callbacks", description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function remove(k: ApiKeyView) {
+    if (!confirm(`Delete "${k.name}" permanently? Integrations using it will stop working immediately. The audit history will be retained.`)) return;
+    try {
+      await apiSend(`/api-keys/${k.id}`, "DELETE");
+      onChanged();
+      toast.info({ title: "API integration deleted", description: k.prefix + "…" });
+    } catch (err) {
+      toast.error({ title: "Could not delete integration", description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function copyFresh(value = freshKey) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
       toast.success({ title: "Copied to clipboard" });
     } catch {
       toast.error({ title: "Could not copy" });
@@ -1177,7 +1276,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
         <SectionHead
           icon={<KeyIcon />}
           title="API integrations"
-          hint="Register an application, choose the agents it acts as, then mint a key."
+          hint="Tenant-bound credentials, requester identity, rotation, and signed status callbacks."
           info={HINTS.apiKeys}
         />
         <button
@@ -1185,6 +1284,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
           style={{ flexShrink: 0 }}
           onClick={() => {
             setFreshKey(null);
+            setFreshWebhookSecret(null);
             setOpen((o) => !o);
           }}
         >
@@ -1192,7 +1292,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
         </button>
       </div>
 
-      {freshKey ? (
+      {freshKey || freshWebhookSecret ? (
         <div
           className="anim-scale-in"
           style={{
@@ -1208,21 +1308,27 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             flexWrap: "wrap",
           }}
         >
-          <div style={{ fontSize: "0.78rem", fontWeight: 700, flexShrink: 0 }}>Copy this key now:</div>
-          <code
-            className="mono"
-            style={{ fontSize: "0.74rem", wordBreak: "break-all", flex: 1, minWidth: 200 }}
+          {freshKey ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", flexWrap: "wrap" }}>
+              <div style={{ fontSize: "0.78rem", fontWeight: 700, flexShrink: 0 }}>Bearer token (shown once):</div>
+              <code className="mono" style={{ fontSize: "0.74rem", wordBreak: "break-all", flex: 1, minWidth: 200 }}>{freshKey}</code>
+              <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void copyFresh(freshKey)}>Copy token</button>
+            </div>
+          ) : null}
+          {freshWebhookSecret ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", flexWrap: "wrap" }}>
+              <div style={{ fontSize: "0.78rem", fontWeight: 700, flexShrink: 0 }}>Callback signing secret (shown once):</div>
+              <code className="mono" style={{ fontSize: "0.74rem", wordBreak: "break-all", flex: 1, minWidth: 200 }}>{freshWebhookSecret}</code>
+              <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void copyFresh(freshWebhookSecret)}>Copy secret</button>
+            </div>
+          ) : null}
+          <button
+            className="btn btn-ghost"
+            style={{ marginLeft: "auto", fontSize: "0.72rem", padding: "0.3rem 0.6rem" }}
+            onClick={() => { setFreshKey(null); setFreshWebhookSecret(null); }}
           >
-            {freshKey}
-          </code>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn-primary" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void copyFresh()}>
-              Copy
-            </button>
-            <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => setFreshKey(null)}>
-              Done
-            </button>
-          </div>
+            Done
+          </button>
         </div>
       ) : null}
 
@@ -1239,11 +1345,27 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             </button>
             <button
               type="button"
+              className={tab === "identity" ? "btn btn-primary" : "btn btn-ghost"}
+              style={{ fontSize: "0.74rem", padding: "0.3rem 0.7rem" }}
+              onClick={() => setTab("identity")}
+            >
+              2. Requester{requesterId ? " ✓" : ""}
+            </button>
+            <button
+              type="button"
               className={tab === "agents" ? "btn btn-primary" : "btn btn-ghost"}
               style={{ fontSize: "0.74rem", padding: "0.3rem 0.7rem" }}
               onClick={() => setTab("agents")}
             >
-              2. Agents{agentIds.length ? ` (${agentIds.length})` : ""}
+              3. Agents{agentIds.length ? ` (${agentIds.length})` : ""}
+            </button>
+            <button
+              type="button"
+              className={tab === "callbacks" ? "btn btn-primary" : "btn btn-ghost"}
+              style={{ fontSize: "0.74rem", padding: "0.3rem 0.7rem" }}
+              onClick={() => setTab("callbacks")}
+            >
+              4. Callbacks
             </button>
           </div>
 
@@ -1269,16 +1391,30 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                 </LabelWithHint>
               </label>
               <select id="api-key-role" className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="ticket_submitter">ticket submitter (recommended)</option>
                 <option value="requester">requester</option>
                 <option value="agent">agent</option>
                 <option value="manager">manager</option>
                 <option value="tenant_admin">tenant admin</option>
               </select>
+              <label className="muted" htmlFor="api-key-expiry" style={{ fontSize: "0.74rem", fontWeight: 600 }}>Expires at (recommended)</label>
+              <input id="api-key-expiry" className="input" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
             </div>
-          ) : (
+          ) : tab === "identity" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                Requester and ticket-submitter credentials are permanently bound to one active user. The caller cannot override this email.
+              </p>
+              <select className="select" value={requesterId} onChange={(e) => setRequesterId(e.target.value)} disabled={!requesterScoped}>
+                <option value="">{requesterScoped ? "Select requester identity" : "Not required for this role"}</option>
+                {requesters.map((user) => <option key={user.id} value={user.id}>{user.name} · {user.email} · {user.role.replaceAll("_", " ")}</option>)}
+              </select>
+            </div>
+          ) : tab === "agents" ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <p className="muted" style={{ fontSize: "0.78rem", margin: "0 0 4px" }}>
-                Select the agent(s) this integration acts on behalf of.
+                Optional ownership metadata for agent-or-higher integrations. This does not impersonate selected users or expand the acting role&apos;s permissions.
+                {requesterScoped ? " Requester-scoped roles use the fixed requester instead." : ""}
               </p>
               {agents.length === 0 ? (
                 <p className="muted" style={{ fontSize: "0.8rem", margin: 0 }}>No agents available.</p>
@@ -1296,9 +1432,16 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                     <label
                       key={a.id}
                       className="panel-2"
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "0.4rem 0.6rem", cursor: "pointer" }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "0.4rem 0.6rem",
+                        cursor: requesterScoped ? "not-allowed" : "pointer",
+                        opacity: requesterScoped ? 0.65 : 1,
+                      }}
                     >
-                      <input type="checkbox" checked={agentIds.includes(a.id)} onChange={() => toggleAgent(a.id)} />
+                      <input type="checkbox" checked={agentIds.includes(a.id)} onChange={() => toggleAgent(a.id)} disabled={requesterScoped} />
                       <span style={{ minWidth: 0 }}>
                         <span
                           style={{
@@ -1321,6 +1464,21 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
                 </div>
               )}
             </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <p className="muted" style={{ fontSize: "0.78rem", margin: 0 }}>
+                Optional HTTPS endpoint for signed ticket-created and status-change callbacks.
+              </p>
+              <input className="input" type="url" placeholder="https://partner.example.com/webhooks/netlink" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"].map((event) => (
+                  <label key={event} style={{ fontSize: "0.74rem", display: "flex", alignItems: "center", gap: 4 }}>
+                    <input type="checkbox" checked={webhookEvents.includes(event)} onChange={() => setWebhookEvents((current) => current.includes(event) ? current.filter((item) => item !== event) : [...current, event])} />
+                    {event}
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
@@ -1333,51 +1491,89 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
             >
               Cancel
             </button>
-            <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !name.trim()}>
+            <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !name.trim() || (requesterScoped && !requesterId)}>
               {busy ? "Creating…" : "Generate key"}
             </button>
           </div>
         </div>
       ) : null}
 
-      {keys.length === 0 ? (
+      {activeKeys.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.82rem", margin: 0 }}>
-          No API keys yet. Create one for each integration so access can be revoked independently.
+          No active API integrations. Create one for each integration so credentials can be deleted independently.
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {keys.map((k) => (
+          {activeKeys.map((k) => (
             <div
               key={k.id}
-              className="panel-2 flex items-center justify-between"
-              style={{ padding: "0.6rem 0.8rem", gap: 10, opacity: k.active ? 1 : 0.55 }}
+              className="panel-2"
+              style={{ padding: "0.6rem 0.8rem", gap: 10 }}
             >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>{k.name}</span>
-                  <code className="mono muted" style={{ fontSize: "0.7rem" }}>{k.prefix}…</code>
-                  <span className="badge" style={{ fontSize: "0.64rem", textTransform: "capitalize" }}>{String(k.role).replace("_", " ")}</span>
-                  {!k.active ? (
-                    <span className="badge" style={{ fontSize: "0.64rem", background: "var(--danger-bg)", color: "var(--danger-fg)", borderColor: "var(--danger-border)" }}>
-                      revoked
-                    </span>
+              <div className="flex items-center justify-between" style={{ gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>{k.name}</span>
+                    <code className="mono muted" style={{ fontSize: "0.7rem" }}>{k.prefix}…</code>
+                    <span className="badge" style={{ fontSize: "0.64rem", textTransform: "capitalize" }}>{String(k.role).replaceAll("_", " ")}</span>
+                    {k.webhookActive ? <span className="badge" style={{ fontSize: "0.64rem", background: "var(--success-bg)", color: "var(--success-fg)" }}>callbacks on</span> : null}
+                  </div>
+                  {k.description ? (
+                    <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{k.description}</div>
+                  ) : null}
+                  <div className="muted" style={{ fontSize: "0.7rem", marginTop: 2 }}>
+                    {k.requesterId ? `Requester: ${requesterName(k.requesterId)} · ` : ""}
+                    {k.agentIds && k.agentIds.length ? `Agents: ${k.agentIds.map(agentName).join(", ")} · ` : ""}
+                    Created {timeAgo(k.createdAt)}
+                    {k.lastUsedAt ? ` · last used ${timeAgo(k.lastUsedAt)}` : " · never used"}
+                    {k.lastTestedAt ? ` · tested ${timeAgo(k.lastTestedAt)} (${k.lastTestStatus ?? "unknown"})` : " · not tested"}
+                    {k.expiresAt ? ` · expires ${new Date(k.expiresAt).toLocaleString()}` : " · no expiry"}
+                    {k.rotatedAt ? ` · rotated ${timeAgo(k.rotatedAt)}` : ""}
+                  </div>
+                  {k.webhookUrl ? (
+                    <div className="muted" style={{ fontSize: "0.68rem", marginTop: 2, wordBreak: "break-all" }}>
+                      Callback: {k.webhookUrl}
+                      {k.webhookLastStatus ? ` · last HTTP ${k.webhookLastStatus}` : ""}
+                      {k.webhookLastError ? ` · ${k.webhookLastError}` : ""}
+                    </div>
                   ) : null}
                 </div>
-                {k.description ? (
-                  <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{k.description}</div>
-                ) : null}
-                <div className="muted" style={{ fontSize: "0.7rem", marginTop: 2 }}>
-                  {k.agentIds && k.agentIds.length
-                    ? `Agents: ${k.agentIds.map(agentName).join(", ")} · `
-                    : ""}
-                  Created {timeAgo(k.createdAt)}
-                  {k.lastUsedAt ? ` · last used ${timeAgo(k.lastUsedAt)}` : " · never used"}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button className="btn btn-ghost" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} disabled={rotatingId === k.id} onClick={() => void rotate(k)}>
+                    {rotatingId === k.id ? "Replacing…" : "Replace token"}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }}
+                    onClick={() => {
+                      setEditingWebhookId(editingWebhookId === k.id ? null : k.id);
+                      setEditingWebhookUrl(k.webhookUrl ?? "");
+                      setEditingWebhookEvents(k.webhookEvents?.length ? k.webhookEvents : ["ticket.created", "ticket.updated"]);
+                    }}
+                  >
+                    Callbacks
+                  </button>
+                  <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void remove(k)}>
+                    Delete
+                  </button>
                 </div>
               </div>
-              {k.active ? (
-                <button className="btn btn-danger" style={{ fontSize: "0.72rem", padding: "0.3rem 0.6rem" }} onClick={() => void revoke(k)}>
-                  Revoke
-                </button>
+              {editingWebhookId === k.id ? (
+                <div style={{ marginTop: 10, borderTop: "1px solid var(--border)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <input className="input" type="url" placeholder="https://partner.example.com/webhooks/netlink" value={editingWebhookUrl} onChange={(e) => setEditingWebhookUrl(e.target.value)} />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"].map((event) => (
+                      <label key={event} style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: 4 }}>
+                        <input type="checkbox" checked={editingWebhookEvents.includes(event)} onChange={() => setEditingWebhookEvents((current) => current.includes(event) ? current.filter((item) => item !== event) : [...current, event])} />
+                        {event}
+                      </label>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    {k.webhookUrl ? <button className="btn btn-ghost" onClick={() => void saveWebhook(k, true)}>Rotate signing secret</button> : null}
+                    <button className="btn btn-primary" onClick={() => void saveWebhook(k)}>Save callbacks</button>
+                  </div>
+                </div>
               ) : null}
             </div>
           ))}
@@ -1389,27 +1585,36 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
 
 const ROLE_OPTIONS_BY_ADMIN: Record<string, string[]> = {
   super_admin: ["requester", "agent", "manager", "tenant_admin", "super_admin"],
-  tenant_admin: ["requester", "agent", "manager"],
+  tenant_admin: ["requester", "agent", "manager", "tenant_admin"],
 };
 
 function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   const toast = useToast();
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const [users, setUsers] = useState<UserAccessView[]>([]);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
-  const [orgs, setOrgs] = useState<TenantRow[]>([]);
+  const [orgs, setOrgs] = useState<OrganizationView[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
+  const [accessLink, setAccessLink] = useState<{ email: string; link: AccessLinkView } | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", role: "agent", departmentId: "", organizationId: "" });
+  const [form, setForm] = useState({ name: "", email: "", role: "agent", departmentId: "" });
 
   const roleOptions = isSuperAdmin
     ? ROLE_OPTIONS_BY_ADMIN.super_admin
     : ROLE_OPTIONS_BY_ADMIN.tenant_admin;
 
+  const organizationQuery = isSuperAdmin && selectedOrganizationId
+    ? "?organizationId=" + encodeURIComponent(selectedOrganizationId)
+    : "";
+
   const load = useCallback(() => {
-    apiGetAll<UserRow>("/users").then(setUsers).catch(() => setUsers([]));
-    apiGetAll<DepartmentRow>("/departments").then(setDepartments).catch(() => setDepartments([]));
-    if (isSuperAdmin) apiGetAll<TenantRow>("/organizations").then(setOrgs).catch(() => setOrgs([]));
-  }, [isSuperAdmin]);
+    const query = isSuperAdmin && selectedOrganizationId
+      ? "?organizationId=" + encodeURIComponent(selectedOrganizationId)
+      : "";
+    apiGetAll<UserAccessView>("/users" + query).then(setUsers).catch(() => setUsers([]));
+    apiGetAll<DepartmentRow>("/departments" + query).then(setDepartments).catch(() => setDepartments([]));
+    if (isSuperAdmin) apiGetAll<OrganizationView>("/organizations").then(setOrgs).catch(() => setOrgs([]));
+  }, [isSuperAdmin, selectedOrganizationId]);
   useEffect(() => {
     load();
   }, [load]);
@@ -1420,15 +1625,16 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     if (!form.name.trim() || !form.email.trim()) return;
     setBusy(true);
     try {
-      await apiSend("/users", "POST", {
+      const result = await apiSend<InvitedUserResult>("/users", "POST", {
         name: form.name.trim(),
         email: form.email.trim(),
         role: form.role,
         departmentId: form.departmentId || null,
-        ...(form.organizationId ? { organizationId: form.organizationId } : {}),
+        ...(selectedOrganizationId ? { organizationId: selectedOrganizationId } : {}),
       });
-      toast.success({ title: "User created", description: form.email.trim() });
-      setForm({ name: "", email: "", role: "agent", departmentId: "", organizationId: "" });
+      setAccessLink({ email: result.user.email, link: result.invitation });
+      toast.success({ title: "Invitation created", description: form.email.trim() });
+      setForm({ name: "", email: "", role: "agent", departmentId: "" });
       setOpen(false);
       load();
     } catch (err) {
@@ -1438,10 +1644,10 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     }
   }
 
-  async function changeRole(u: UserRow, role: string) {
+  async function changeRole(u: UserAccessView, role: string) {
     if (role === u.role) return;
     try {
-      await apiSend(`/users/${u.id}`, "PATCH", { role });
+      await apiSend("/users/" + u.id + organizationQuery, "PATCH", { role });
       toast.success({ title: "Role updated", description: `${u.name} → ${role.replace("_", " ")}` });
       load();
     } catch (err) {
@@ -1449,18 +1655,48 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     }
   }
 
-  async function toggleActive(u: UserRow) {
+  async function toggleActive(u: UserAccessView) {
     try {
       if (u.active) {
-        await apiSend(`/users/${u.id}`, "DELETE");
+        await apiSend("/users/" + u.id + organizationQuery, "DELETE");
         toast.info({ title: "User deactivated", description: u.name });
       } else {
-        await apiSend(`/users/${u.id}`, "PATCH", { active: true });
+        await apiSend("/users/" + u.id + organizationQuery, "PATCH", { active: true });
         toast.success({ title: "User reactivated", description: u.name });
       }
       load();
     } catch (err) {
       toast.error({ title: "Could not update user", description: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async function issueAccessLink(user: UserAccessView) {
+    setBusy(true);
+    try {
+      const result = await apiSend<InvitedUserResult>(
+        "/users/" + user.id + "/access-link" + organizationQuery,
+        "POST"
+      );
+      setAccessLink({ email: result.user.email, link: result.invitation });
+      toast.success({
+        title: result.invitation.purpose === "reset" ? "Reset link created" : "Setup link regenerated",
+        description: user.email,
+      });
+      load();
+    } catch (err) {
+      toast.error({ title: "Could not create access link", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyAccessLink() {
+    if (!accessLink) return;
+    try {
+      await navigator.clipboard.writeText(accessLink.link.setupUrl);
+      toast.success({ title: "Setup link copied", description: accessLink.email });
+    } catch {
+      toast.error({ title: "Copy failed", description: "Select and copy the link manually." });
     }
   }
 
@@ -1472,6 +1708,44 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           {open ? "Close" : "+ New user"}
         </button>
       </div>
+
+      {isSuperAdmin ? (
+        <label className="label" style={{ display: "grid", gap: 6, maxWidth: 420, marginBottom: 12 }}>
+          Organization
+          <select
+            className="select"
+            value={selectedOrganizationId}
+            onChange={(event) => {
+              setSelectedOrganizationId(event.target.value);
+              setForm((current) => ({ ...current, departmentId: "" }));
+              setAccessLink(null);
+            }}
+          >
+            <option value="">Current organization</option>
+            {orgs.map((organization) => (
+              <option key={organization.id} value={organization.id}>
+                {organization.name} ({organization.slug})
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {accessLink ? (
+        <div className="panel-2 anim-fade-up" style={{ padding: "0.85rem", marginBottom: 12, borderColor: "var(--brand-300)" }}>
+          <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: 4 }}>
+            One-time {accessLink.link.purpose === "reset" ? "reset" : "setup"} link for {accessLink.email}
+          </div>
+          <div className="muted" style={{ fontSize: "0.72rem", marginBottom: 7 }}>
+            Expires {new Date(accessLink.link.expiresAt).toLocaleString()} · {accessLink.link.delivery === "email_sent" ? "Email sent" : "Copy and share securely"}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input className="input mono" readOnly value={accessLink.link.setupUrl} onFocus={(event) => event.currentTarget.select()} />
+            <button type="button" className="btn btn-primary" onClick={() => void copyAccessLink()}>Copy</button>
+            <button type="button" className="btn btn-ghost" onClick={() => setAccessLink(null)}>Hide</button>
+          </div>
+        </div>
+      ) : null}
 
       {open ? (
         <div
@@ -1501,19 +1775,9 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
               </option>
             ))}
           </select>
-          {isSuperAdmin ? (
-            <select className="select" value={form.organizationId} onChange={(e) => setForm((f) => ({ ...f, organizationId: e.target.value }))}>
-              <option value="">Current organization</option>
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
           <div style={{ gridColumn: "1 / -1", display: "flex", justifyContent: "flex-end", gap: 6 }}>
             <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !form.name.trim() || !form.email.trim()}>
-              {busy ? "Creating…" : "Create user"}
+              {busy ? "Creating…" : "Create invitation"}
             </button>
           </div>
         </div>
@@ -1523,14 +1787,15 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         <p className="muted" style={{ fontSize: "0.84rem", margin: 0 }}>No users yet.</p>
       ) : (
         <div className="table-scroll" style={{ margin: "0 -1.25rem" }}>
-          <table className="data-table" style={{ minWidth: 640 }}>
+          <table className="data-table" style={{ minWidth: 850 }}>
             <thead>
               <tr>
                 <th style={{ paddingLeft: "1.25rem" }}>Name</th>
                 <th>Email</th>
                 <th>Department</th>
                 <th>Role</th>
-                <th style={{ textAlign: "right", paddingRight: "1.25rem" }}>Status</th>
+                <th>Access</th>
+                <th style={{ textAlign: "right", paddingRight: "1.25rem" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1538,7 +1803,7 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                 const canManage = roleOptions.includes(u.role);
                 const opts = canManage ? roleOptions : [u.role, ...roleOptions];
                 return (
-                  <tr key={u.id} className="row-hover" style={{ opacity: u.active ? 1 : 0.55 }}>
+                  <tr key={u.id} className="row-hover" style={{ opacity: u.accessStatus === "disabled" ? 0.62 : 1 }}>
                     <td style={{ paddingLeft: "1.25rem", fontWeight: 600 }}>{u.name}</td>
                     <td className="muted">{u.email}</td>
                     <td className="muted">{deptName(u.departmentId)}</td>
@@ -1557,14 +1822,32 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
                         ))}
                       </select>
                     </td>
-                    <td style={{ textAlign: "right", paddingRight: "1.25rem" }}>
+                    <td>
+                      <span className="badge" style={{ fontSize: "0.65rem" }}>
+                        {u.accessStatus === "invited" ? "Pending setup" : u.accessStatus[0].toUpperCase() + u.accessStatus.slice(1)}
+                      </span>
+                      {u.pendingInvitationExpiresAt ? (
+                        <div className="muted" style={{ fontSize: "0.64rem", marginTop: 3 }}>
+                          Expires {new Date(u.pendingInvitationExpiresAt).toLocaleString()}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td style={{ textAlign: "right", paddingRight: "1.25rem", whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem", marginRight: 5 }}
+                        disabled={!canManage || busy}
+                        onClick={() => void issueAccessLink(u)}
+                      >
+                        {u.accessStatus === "active" || u.accessStatus === "locked" ? "Reset access" : "Setup link"}
+                      </button>
                       <button
                         className={u.active ? "btn btn-danger" : "btn btn-ghost"}
                         style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
-                        disabled={!canManage}
+                        disabled={!canManage || (!u.active && !u.hasLocalPassword)}
                         onClick={() => void toggleActive(u)}
                       >
-                        {u.active ? "Deactivate" : "Reactivate"}
+                        {u.active ? "Deactivate" : u.hasLocalPassword ? "Reactivate" : "Awaiting setup"}
                       </button>
                     </td>
                   </tr>
@@ -1698,31 +1981,170 @@ function DepartmentsSection() {
   );
 }
 
+type OrganizationDraft = {
+  name: string;
+  brand: string;
+  isInternal: boolean;
+  adminName: string;
+  adminEmail: string;
+};
+
+const EMPTY_ORGANIZATION: OrganizationDraft = {
+  name: "",
+  brand: "",
+  isInternal: false,
+  adminName: "",
+  adminEmail: "",
+};
+
 function OrganizationsSection() {
   const toast = useToast();
-  const [orgs, setOrgs] = useState<TenantRow[]>([]);
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
+  const [orgs, setOrgs] = useState<OrganizationView[]>([]);
+  const [editing, setEditing] = useState<OrganizationView | "new" | null>(null);
+  const [draft, setDraft] = useState<OrganizationDraft>(EMPTY_ORGANIZATION);
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [provisioned, setProvisioned] = useState<ProvisionOrganizationResult | null>(null);
+  const [discarding, setDiscarding] = useState<OrganizationView | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiGetAll<TenantRow>("/organizations").then(setOrgs).catch(() => setOrgs([]));
+    apiGetAll<OrganizationView>("/organizations").then(setOrgs).catch(() => setOrgs([]));
   }, []);
   useEffect(() => {
     load();
   }, [load]);
 
-  async function create() {
-    if (!name.trim()) return;
+  function startCreate() {
+    setDraft(EMPTY_ORGANIZATION);
+    setWizardStep(1);
+    setProvisioned(null);
+    setEditing("new");
+  }
+
+  function startEdit(organization: OrganizationView) {
+    setDraft({
+      name: organization.name,
+      brand: organization.brand ?? "",
+      isInternal: organization.isInternal,
+      adminName: "",
+      adminEmail: "",
+    });
+    setEditing(organization);
+  }
+
+  function closeEditor() {
+    if (busy) return;
+    setEditing(null);
+    setDraft(EMPTY_ORGANIZATION);
+  }
+
+  async function save() {
+    const name = draft.name.trim();
+    if (!editing || !name) return;
     setBusy(true);
     try {
-      await apiSend("/organizations", "POST", { name: name.trim() });
-      toast.success({ title: "Organization created", description: name.trim() });
-      setName("");
-      setOpen(false);
+      const payload = {
+        name,
+        brand: draft.brand.trim() || null,
+        isInternal: draft.isInternal,
+      };
+      if (editing === "new") {
+        const result = await apiSend<ProvisionOrganizationResult>("/organizations", "POST", {
+          ...payload,
+          admin: { name: draft.adminName.trim(), email: draft.adminEmail.trim() },
+        });
+        setProvisioned(result);
+        toast.success({ title: "Organization created", description: name });
+      } else {
+        await apiSend(`/organizations/${editing.id}`, "PATCH", payload);
+        toast.success({ title: "Organization updated", description: name });
+      }
+      setEditing(null);
+      setDraft(EMPTY_ORGANIZATION);
       load();
     } catch (err) {
-      toast.error({ title: "Could not create organization", description: err instanceof Error ? err.message : String(err) });
+      toast.error({
+        title: editing === "new" ? "Could not create organization" : "Could not update organization",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetAdminAccess(organization: OrganizationView) {
+    if (!organization.admin) return;
+    setBusy(true);
+    try {
+      const result = await apiSend<InvitedUserResult>(
+        "/users/" + organization.admin.id + "/access-link?organizationId=" + encodeURIComponent(organization.id),
+        "POST"
+      );
+      setProvisioned({
+        organization,
+        admin: result.user,
+        invitation: result.invitation,
+      });
+      toast.success({
+        title: result.invitation.purpose === "reset" ? "Admin reset link created" : "Admin setup link regenerated",
+        description: organization.admin.email,
+      });
+      load();
+    } catch (err) {
+      toast.error({ title: "Could not create admin access link", description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyProvisionedLink() {
+    if (!provisioned) return;
+    try {
+      await navigator.clipboard.writeText(provisioned.invitation.setupUrl);
+      toast.success({ title: "Setup link copied", description: provisioned.admin.email });
+    } catch {
+      toast.error({ title: "Copy failed", description: "Select and copy the link manually." });
+    }
+  }
+
+  function startDelete(organization: OrganizationView) {
+    setDeleteConfirmation("");
+    setDiscarding(organization);
+  }
+
+  function closeDelete() {
+    if (busy) return;
+    setDiscarding(null);
+    setDeleteConfirmation("");
+  }
+
+  async function deleteSelectedOrganization() {
+    if (!discarding) return;
+    setBusy(true);
+    try {
+      const result = await apiSend<OrganizationDeletionResult>(
+        `/organizations/${discarding.id}`,
+        "DELETE",
+        { confirmation: deleteConfirmation }
+      );
+      if (result.attachmentCleanup.failed > 0) {
+        toast.warning({
+          title: "Organization deleted",
+          description: `${result.attachmentCleanup.failed} attachment blob(s) still require storage cleanup.`,
+        });
+      } else {
+        toast.info({ title: "Organization deleted", description: discarding.name });
+      }
+      if (provisioned?.organization.id === discarding.id) setProvisioned(null);
+      setDiscarding(null);
+      setDeleteConfirmation("");
+      load();
+    } catch (err) {
+      toast.error({
+        title: "Could not delete organization",
+        description: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setBusy(false);
     }
@@ -1734,38 +2156,262 @@ function OrganizationsSection() {
         <SectionHead
           icon={<OrgIcon />}
           title="Organizations"
-          hint="Provision additional organizations (tenants)."
+          hint="Create and manage isolated tenants on this deployment."
           info={HINTS.organizations}
         />
-        <button className="btn btn-ghost" style={{ flexShrink: 0 }} onClick={() => setOpen((o) => !o)}>
-          {open ? "Close" : "+ New organization"}
+        <button
+          type="button"
+          className="btn btn-primary"
+          style={{ flexShrink: 0 }}
+          onClick={startCreate}
+          disabled={busy || editing === "new"}
+        >
+          + New organization
         </button>
       </div>
-      {open ? (
-        <div className="panel-2 anim-fade-up" style={{ padding: "0.9rem", marginBottom: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <input className="input" placeholder="Organization name" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: "1 1 220px" }} />
-          <button className="btn btn-primary" onClick={() => void create()} disabled={busy || !name.trim()}>
-            {busy ? "Creating…" : "Create"}
-          </button>
+
+      {provisioned ? (
+        <div className="panel-2 anim-fade-up" style={{ padding: "1rem", marginBottom: 12, borderColor: "var(--brand-300)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9 }}>
+            <div>
+              <div style={{ fontSize: "0.9rem", fontWeight: 750 }}>Organization access is ready</div>
+              <div className="muted" style={{ fontSize: "0.74rem", marginTop: 3 }}>
+                Share this one-time link securely. It is not stored in notifications or audit records.
+              </div>
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => setProvisioned(null)}>Hide</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 9 }}>
+            <div><span className="label">Organization code</span><div className="mono" style={{ marginTop: 3 }}>{provisioned.organization.slug}</div></div>
+            <div><span className="label">Initial admin</span><div style={{ marginTop: 3 }}>{provisioned.admin.email}</div></div>
+            <div><span className="label">Expires</span><div style={{ marginTop: 3 }}>{new Date(provisioned.invitation.expiresAt).toLocaleString()}</div></div>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input className="input mono" readOnly value={provisioned.invitation.setupUrl} onFocus={(event) => event.currentTarget.select()} />
+            <button type="button" className="btn btn-primary" onClick={() => void copyProvisionedLink()}>Copy link</button>
+          </div>
         </div>
       ) : null}
+
+      {editing ? (
+        <form
+          className="panel-2 anim-fade-up"
+          style={{ padding: "1rem", marginBottom: 12 }}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (editing !== "new" || wizardStep === 3) void save();
+            else setWizardStep((current) => (current + 1) as 2 | 3);
+          }}
+        >
+          <div style={{ fontSize: "0.88rem", fontWeight: 750, marginBottom: 10 }}>
+            {editing === "new" ? "Create organization" : `Edit ${editing.name}`}
+          </div>
+          {editing === "new" ? (
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {["Organization", "Initial admin", "Review"].map((label, index) => (
+                <span key={label} className="badge" style={{ opacity: wizardStep === index + 1 ? 1 : 0.55 }}>
+                  {index + 1}. {label}
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          {editing !== "new" || wizardStep === 1 ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+                <label className="label" style={{ display: "grid", gap: 6 }}>
+                  Organization name
+                  <input className="input" autoFocus required maxLength={120} placeholder="e.g. Acme Support" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+                </label>
+                <label className="label" style={{ display: "grid", gap: 6 }}>
+                  Display brand <span className="muted" style={{ fontWeight: 400 }}>(optional)</span>
+                  <input className="input" maxLength={120} placeholder="Defaults to the organization name" value={draft.brand} onChange={(event) => setDraft((current) => ({ ...current, brand: event.target.value }))} />
+                </label>
+              </div>
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 9, marginTop: 12, cursor: "pointer", fontSize: "0.8rem" }}>
+                <input type="checkbox" checked={draft.isInternal} onChange={(event) => setDraft((current) => ({ ...current, isInternal: event.target.checked }))} style={{ marginTop: 2 }} />
+                <span><strong>Internal organization</strong><span className="muted" style={{ display: "block", marginTop: 2 }}>Protected platform tenants cannot be deleted.</span></span>
+              </label>
+            </>
+          ) : null}
+
+          {editing === "new" && wizardStep === 2 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+              <label className="label" style={{ display: "grid", gap: 6 }}>
+                Admin full name
+                <input className="input" autoFocus required maxLength={120} placeholder="e.g. Asha Sharma" value={draft.adminName} onChange={(event) => setDraft((current) => ({ ...current, adminName: event.target.value }))} />
+              </label>
+              <label className="label" style={{ display: "grid", gap: 6 }}>
+                Admin work email
+                <input className="input" type="email" required maxLength={254} placeholder="admin@company.com" value={draft.adminEmail} onChange={(event) => setDraft((current) => ({ ...current, adminEmail: event.target.value }))} />
+              </label>
+              <p className="muted" style={{ gridColumn: "1 / -1", fontSize: "0.76rem", margin: 0 }}>
+                The admin is created inactive and becomes active only after using the one-time setup link.
+              </p>
+            </div>
+          ) : null}
+
+          {editing === "new" && wizardStep === 3 ? (
+            <div className="panel" style={{ padding: "0.85rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                <div><span className="label">Organization</span><div style={{ marginTop: 3 }}>{draft.name.trim()}</div></div>
+                <div><span className="label">Brand</span><div style={{ marginTop: 3 }}>{draft.brand.trim() || draft.name.trim()}</div></div>
+                <div><span className="label">Initial admin</span><div style={{ marginTop: 3 }}>{draft.adminName.trim()} · {draft.adminEmail.trim()}</div></div>
+              </div>
+              <p className="muted" style={{ fontSize: "0.76rem", margin: "10px 0 0" }}>
+                This creates only the fresh tenant, pending admin invitation, and audit records. No tickets, users, catalogs, automations, or settings are copied.
+              </p>
+            </div>
+          ) : null}
+          <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 14 }}>
+            <button type="button" className="btn btn-ghost" onClick={closeEditor} disabled={busy}>
+              {editing === "new" ? "Discard draft" : "Cancel edit"}
+            </button>
+            {editing === "new" && wizardStep > 1 ? (
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => setWizardStep((current) => (current - 1) as 1 | 2)}>
+                Back
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={busy || !draft.name.trim() || (editing === "new" && wizardStep >= 2 && (!draft.adminName.trim() || !draft.adminEmail.trim()))}
+            >
+              {busy ? "Saving…" : editing !== "new" ? "Save changes" : wizardStep < 3 ? "Continue" : "Create organization"}
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       {orgs.length === 0 ? (
         <p className="muted" style={{ fontSize: "0.84rem", margin: 0 }}>No organizations yet.</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {orgs.map((o) => (
-            <div key={o.id} className="panel-2 flex items-center justify-between" style={{ padding: "0.6rem 0.8rem", gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: "0.85rem", fontWeight: 700 }}>{o.name}</div>
-                <div className="muted" style={{ fontSize: "0.72rem" }}>
-                  {o.slug}
-                  {o.isInternal ? " · internal" : ""}
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {orgs.map((organization) => (
+            <div
+              key={organization.id}
+              className="panel-2 flex items-center justify-between"
+              style={{ padding: "0.7rem 0.8rem", gap: 12 }}
+            >
+              <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 9,
+                    background: "var(--brand-50)",
+                    color: "var(--brand-700)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <OrgIcon />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: "0.86rem", fontWeight: 700 }}>{organization.name}</span>
+                    {organization.isInternal ? (
+                      <span className="badge" style={{ fontSize: "0.64rem", background: "var(--surface-3)" }}>
+                        Internal
+                      </span>
+                    ) : null}
+                    <span className="badge" style={{ fontSize: "0.64rem" }}>
+                      {organization.onboardingStatus === "pending" ? "Pending setup" : organization.onboardingStatus === "locked" ? "Locked" : "Active"}
+                    </span>
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.71rem", marginTop: 2 }}>
+                    {organization.brand && organization.brand !== organization.name ? `${organization.brand} · ` : ""}
+                    Tenant ID: <span className="mono">{organization.slug}</span>
+                  </div>
+                  {organization.admin ? (
+                    <div className="muted" style={{ fontSize: "0.69rem", marginTop: 2 }}>Admin: {organization.admin.email}</div>
+                  ) : null}
                 </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                {organization.admin ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
+                    onClick={() => void resetAdminAccess(organization)}
+                    disabled={busy}
+                  >
+                    {organization.onboardingStatus === "pending" ? "Regenerate setup" : "Reset admin"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
+                  onClick={() => startEdit(organization)}
+                  disabled={busy}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem" }}
+                  onClick={() => startDelete(organization)}
+                  disabled={busy || organization.isInternal}
+                  title={organization.isInternal ? "Internal organizations are protected." : "Permanently delete this organization"}
+                >
+                  Delete
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      <Modal
+        open={discarding !== null}
+        onClose={closeDelete}
+        ariaLabel="Delete organization"
+        maxWidth={480}
+      >
+        <div style={{ padding: "1.1rem 1.2rem 1.2rem" }}>
+          <div className="flex items-center justify-between" style={{ gap: 12, marginBottom: 6 }}>
+            <h2 style={{ fontSize: "1rem", fontWeight: 750, margin: 0 }}>Permanently delete organization?</h2>
+            <CloseButton onClick={closeDelete} />
+          </div>
+          <p className="muted" style={{ fontSize: "0.82rem", lineHeight: 1.55, margin: "0 0 12px" }}>
+            <strong style={{ color: "var(--text)" }}>{discarding?.name}</strong> and all of its users, tickets,
+            messages, settings, API integrations, invitations, audit history, and attachments will be deleted.
+            This cannot be undone.
+          </p>
+          <label className="label" style={{ display: "grid", gap: 6 }}>
+            Type organization code <span className="mono" style={{ color: "var(--text)", textTransform: "none" }}>{discarding?.slug}</span> to verify
+            <input
+              className="input mono"
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              value={deleteConfirmation}
+              onChange={(event) => setDeleteConfirmation(event.target.value)}
+              placeholder={discarding?.slug}
+              disabled={busy}
+            />
+          </label>
+          <div className="flex items-center justify-end" style={{ gap: 8, marginTop: 16 }}>
+            <button type="button" className="btn btn-ghost" onClick={closeDelete} disabled={busy}>
+              Keep organization
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => void deleteSelectedOrganization()}
+              disabled={busy || deleteConfirmation.trim() !== discarding?.slug}
+            >
+              {busy ? "Deleting…" : "Delete organization permanently"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </section>
   );
 }

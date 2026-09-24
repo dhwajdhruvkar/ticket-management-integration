@@ -1,6 +1,6 @@
 # Netlink Support External API Integration Guide
 
-This guide is for backend-to-backend integrations with the Netlink Support REST API. It covers the production ticket workflow verified in Phase 13 and the OpenAPI contract finalized in Phase 14.
+This guide is for backend-to-backend integrations with the Netlink Support REST API, including least-privilege ticket submission, tenant discovery, safe retries, key rotation, and signed status callbacks.
 
 ## Quick reference
 
@@ -14,6 +14,7 @@ This guide is for backend-to-backend integrations with the Netlink Support REST 
 | Content type | application/json |
 | Maximum JSON/text request body | 1 MiB |
 | Browser CORS support | None; call the API from a backend |
+| Tenant selection | Derived from the API key through GET /me; never supplied by the caller |
 
 The OpenAPI endpoint is protected in Production. Download it with the same API-key header used for other authenticated endpoints. The health endpoint is intentionally unauthenticated.
 
@@ -37,6 +38,17 @@ Use only one API-key header per request. Never place a key in a query string, UR
 
 A key begins with the Netlink key prefix, but the examples in this guide never contain a usable secret. Read the value from a secret manager or protected environment variable.
 
+### Save and test / tenant discovery
+
+After an administrator enters the API base URL and bearer token in an external platform, that platform should call `GET /me`. A successful response validates the token and returns the authoritative organization:
+
+~~~bash
+curl "$NETLINK_BASE_URL/me" \
+  --header "Authorization: Bearer $NETLINK_API_KEY"
+~~~
+
+Relevant response fields are `data.organization.id`, `data.organization.code`, `data.organization.name`, `data.role`, and `data.permissions`. The external platform may display or persist the returned organization id, but it must not ask an operator to type an arbitrary Netlink tenant id. This prevents a token from being paired with another organization's identifier.
+
 ### API key setup
 
 A tenant administrator or platform administrator creates the first integration key. Available setup paths are:
@@ -45,7 +57,7 @@ A tenant administrator or platform administrator creates the first integration k
 2. Use POST /api-keys with an existing tenant_admin or super_admin session/key.
 3. If the deployment has no initial administrator credential, ask the platform owner to bootstrap one through the controlled application-operator process.
 
-Do not insert a key hash directly into PostgreSQL. The application generates a cryptographically random secret, stores only its SHA-256 hash, returns the full key once, and records creation/revocation in the audit chain.
+Do not insert a key hash directly into PostgreSQL. The application generates a cryptographically random secret, stores only its SHA-256 hash, returns the full key once, and records creation/deletion in the audit chain.
 
 Create a key with an existing administrator credential:
 
@@ -56,14 +68,28 @@ curl --request POST \
   --header "Content-Type: application/json" \
   --data '{
     "name": "External ticket synchronization",
-    "role": "manager",
-    "description": "Backend integration for the external support platform"
+    "role": "ticket_submitter",
+    "requesterId": "usr_partner_service_account",
+    "description": "Least-privilege ticket intake for the external support platform",
+    "expiresAt": "2027-09-01T00:00:00.000Z"
   }'
 ~~~
 
-The response data contains the full key exactly once. Store it immediately in a secret manager. Later list calls return only non-secret metadata and the identifying prefix.
+`requesterId` is required for `ticket_submitter` and `requester` keys and must be an active user in the same organization. The response data contains the full key exactly once. Store it immediately in a secret manager. Later list calls return only non-secret metadata and the identifying prefix.
 
-Revoke a key immediately when it is replaced, exposed, or no longer required:
+Legacy requester-role keys created before fixed requester binding are made inactive by the migration because they cannot be mapped safely. Replace them with a `ticket_submitter` or requester key bound to an explicit active user.
+
+Replace a bearer secret without changing the integration's tenant, requester, expiry, or callback mapping:
+
+~~~bash
+curl --request POST \
+  "$NETLINK_BASE_URL/api-keys/$KEY_ID/rotate" \
+  --header "Authorization: Bearer $NETLINK_ADMIN_API_KEY"
+~~~
+
+The old bearer token stops working immediately and the replacement is returned once.
+
+Delete a key immediately when it is replaced, exposed, or no longer required. This permanently removes the credential row while retaining its non-secret audit history:
 
 ~~~bash
 curl --request DELETE \
@@ -71,7 +97,7 @@ curl --request DELETE \
   --header "Authorization: Bearer $NETLINK_ADMIN_API_KEY"
 ~~~
 
-Revoked and expired keys return HTTP 401 on permission-guarded endpoints.
+Deleted and expired keys return HTTP 401 on permission-guarded endpoints.
 
 ## Roles and permissions
 
@@ -79,7 +105,8 @@ Choose the least-privileged role that supports the integration.
 
 | Role | Ticket access | Messages | Delete tickets | Manage API keys |
 |---|---|---|---|---|
-| requester | Create tickets and read only tickets filed by that requester identity | Public replies on owned tickets | No | No |
+| ticket_submitter | Create tickets and read only tickets filed by its fixed requester identity | No post-create mutation or replies | No | No |
+| requester | Create tickets and read only tickets filed by its fixed requester identity | Public replies on owned tickets | No | No |
 | agent | Create/read/update tenant tickets | Public replies and internal notes | No | No |
 | manager | Agent capabilities plus dispatch and soft delete | Public replies and internal notes | Yes | No |
 | tenant_admin | Manager capabilities plus administration | Public replies and internal notes | Yes | Yes |
@@ -97,7 +124,9 @@ The core permissions used by this workflow are:
 | DELETE /tickets/{id} | ticket.delete |
 | GET/POST/DELETE API-key endpoints | admin |
 
-Record-level security is enforced in addition to RBAC. Requester keys can access only their own tickets. Cross-tenant or non-visible resource identifiers return 404 to avoid disclosing that a record exists.
+Use `ticket_submitter` when another organization only needs to raise tickets and track their status. Use `requester` only if the integration must also participate in the public ticket conversation. Use agent or higher only for a trusted service desk integration that genuinely needs tenant-wide access.
+
+Record-level security is enforced in addition to RBAC. `ticket_submitter` and requester keys are bound to one active requester and can access only tickets belonging to that identity. A caller-supplied `requesterEmail` cannot override that binding. Cross-tenant or non-visible resource identifiers return 404 to avoid disclosing that a record exists.
 
 ## Response envelopes
 
@@ -154,12 +183,13 @@ Use your platform's secret manager for production services. Do not commit a popu
 
 POST /tickets runs the same intake pipeline as the existing UI: classification, SLA selection, group routing, automations, and optional AI handling.
 
-For agent-or-higher keys, requesterEmail is required. A requester-role key is always forced to its own requester identity.
+For agent-or-higher keys, requesterEmail is required. A `ticket_submitter` or requester key is always forced to its bound requester identity, so omit requesterEmail for those roles.
 
 ~~~bash
 curl --request POST \
   "$NETLINK_BASE_URL/tickets" \
   --header "Authorization: Bearer $NETLINK_API_KEY" \
+  --header "Idempotency-Key: partner-ticket-9f8c2f" \
   --header "Content-Type: application/json" \
   --data '{
     "subject": "VPN access fails after client update",
@@ -172,11 +202,12 @@ curl --request POST \
     "urgency": "high",
     "tags": ["external-integration"],
     "source": "external-support-system",
+    "externalTicketId": "partner-INC-1042",
     "autoResolve": false
   }'
 ~~~
 
-A successful request returns HTTP 201. Persist both data.id and data.reference in the external system. Subsequent API paths use the opaque id, not the human-readable reference.
+A successful first request returns HTTP 201 with `Idempotency-Replayed: false`. Repeating the same key and JSON returns the original ticket with HTTP 200 and `Idempotency-Replayed: true`; reusing the key with different JSON returns HTTP 409. If the header is unavailable, `externalTicketId` provides the same scoped deduplication behavior. Persist both `data.id` and `data.reference` in the external system. Subsequent API paths use the opaque id, not the human-readable reference.
 
 The API currently has no idempotency-key contract. Before retrying a timed-out create request, reconcile the external system's stored mapping or search/list results to avoid duplicate tickets.
 
@@ -397,6 +428,41 @@ async function listAllTickets() {
 
 Do not log full response headers or request configuration if they include Authorization.
 
+## Signed ticket-status callbacks
+
+An administrator can register a callback while creating a key or later through `PATCH /api-keys/{id}/webhook`:
+
+~~~bash
+curl --request PATCH \
+  "$NETLINK_BASE_URL/api-keys/$KEY_ID/webhook" \
+  --header "Authorization: Bearer $NETLINK_ADMIN_API_KEY" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "url": "https://partner.example.com/webhooks/netlink",
+    "events": ["ticket.created", "ticket.updated", "ticket.resolved", "ticket.closed", "ticket.reopened"],
+    "active": true
+  }'
+~~~
+
+The callback URL must be public HTTPS and cannot contain credentials or a fragment. Local/private network targets are rejected. The response returns `webhookSecret` once when signing is first configured. Store it separately from the bearer key. To replace it later, repeat the request with `"rotateSecret": true`.
+
+Each callback is a JSON `POST` with these headers:
+
+| Header | Purpose |
+|---|---|
+| X-Netlink-Event | Event name |
+| X-Netlink-Delivery | Stable delivery attempt group id |
+| X-Netlink-Timestamp | Unix timestamp in seconds |
+| X-Netlink-Signature | `sha256=<hex HMAC>` |
+
+Verify the signature over the exact raw request bytes before parsing JSON:
+
+~~~text
+HMAC_SHA256(webhookSecret, X-Netlink-Timestamp + "." + rawBody)
+~~~
+
+Use a timing-safe comparison and reject stale timestamps (five minutes is a reasonable receiver policy). Return any 2xx response only after the event is durably accepted. Failures are retried with bounded exponential backoff, up to eight attempts. `ticket_submitter` and requester integrations receive callbacks only for tickets created by that exact integration key; agent-or-higher callback subscriptions are tenant-wide.
+
 ## Error handling
 
 | HTTP status | Meaning | Recommended action |
@@ -404,7 +470,7 @@ Do not log full response headers or request configuration if they include Author
 | 200 | Successful read/update/message/delete | Process data |
 | 201 | Ticket or API key created | Persist returned identifiers; store a newly returned key once |
 | 400 | Malformed JSON, missing/invalid values, or invalid pagination | Fix the request; do not retry unchanged |
-| 401 | No credentials, or key is invalid, expired, or revoked | Stop and rotate/reconfigure credentials |
+| 401 | No credentials, or key is invalid, expired, or deleted | Stop and rotate/reconfigure credentials |
 | 403 | Key is valid but its role lacks the required permission | Use an appropriately scoped key or change the workflow |
 | 404 | Resource is absent or outside tenant/requester scope | Reconcile the stored id; do not infer cross-tenant existence |
 | 413 | A selected validated-body endpoint rejected a body above 1 MiB | Reduce the payload |

@@ -43,7 +43,7 @@ export async function requirePermission(
   const ctx = await actorContext(req);
   if (!can(ctx.role, permission)) {
     if (ctx.actor.role === "none" && extractApiKey(req)) {
-      return fail("Invalid, expired, or revoked API key.", 401);
+      return fail("Invalid, expired, or deleted API key.", 401);
     }
     return fail("Forbidden.", 403);
   }

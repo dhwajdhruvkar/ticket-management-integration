@@ -6,6 +6,7 @@ import { getStore } from "@/server/data";
 import { appendAudit } from "@/server/audit/auditChain";
 import { now } from "@/server/domain/ids";
 import type { Role, UserPreferences, UserRow } from "@/server/domain/models";
+import { markApiKeyTested } from "@/server/auth/apiKeys";
 
 // =============================================================================
 // /api/v1/me — the signed-in user's own profile.
@@ -24,14 +25,23 @@ const ALL_PERMISSIONS: Permission[] = [
 ];
 
 export async function GET(req: Request) {
-  const ctx = await requirePermission(req, "ticket.read");
+  // Every supported interactive or machine identity can create tickets. Using
+  // this permission lets least-privilege ticket_submitter keys discover their
+  // authoritative organization without accepting a caller-controlled tenant.
+  const ctx = await requirePermission(req, "ticket.create");
   if (isResponse(ctx)) return ctx;
   const { actor, tenantId } = ctx;
   const role = actor.role as Role;
   const permissions = ALL_PERMISSIONS.filter((p) => can(role, p));
 
   const store = await getStore();
-  const user = actor.id ? await store.users.get(actor.id) : null;
+  const [user, tenant] = await Promise.all([
+    actor.id ? store.users.get(actor.id) : Promise.resolve(null),
+    store.tenants.get(tenantId),
+  ]);
+  if (actor.apiKeyId) {
+    await markApiKeyTested(actor.apiKeyId, "success").catch(() => undefined);
+  }
 
   return ok({
     id: actor.id ?? null,
@@ -49,6 +59,9 @@ export async function GET(req: Request) {
     memberSince: user?.createdAt ?? null,
     impersonating: !!actor.impersonating,
     tenantId,
+    organization: tenant
+      ? { id: tenant.id, name: tenant.name, code: tenant.slug }
+      : { id: tenantId, name: null, code: null },
     permissions,
     // Agent availability for dispatch (defaults available when unset).
     available: user?.available !== false,
@@ -74,6 +87,7 @@ export async function PATCH(req: Request) {
   const ctx = await requirePermission(req, "ticket.read");
   if (isResponse(ctx)) return ctx;
   const { actor, tenantId } = ctx;
+  if (actor.apiKeyId) return fail("Machine credentials cannot edit user profiles.", 403);
   if (!actor.id) return fail("No signed-in user to update.", 401);
 
   const body = await readJson<ProfilePatch>(req);

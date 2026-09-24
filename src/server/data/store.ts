@@ -40,6 +40,8 @@ import type {
   TicketMessageRow,
   TicketRow,
   UserRow,
+  UserInvitationRow,
+  WebhookDeliveryRow,
 } from "../domain/models";
 
 export interface ListOptions<T> {
@@ -83,10 +85,12 @@ export async function pageCollection<T extends Entity>(
 export interface DataStore {
   readonly driver: "memory" | "prisma";
   ready(): Promise<void>;
+  transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T>;
 
   tenants: Collection<TenantRow>;
   departments: Collection<DepartmentRow>;
   users: Collection<UserRow>;
+  invitations: Collection<UserInvitationRow>;
   groups: Collection<AssignmentGroupRow>;
   tickets: Collection<TicketRow>;
   messages: Collection<TicketMessageRow>;
@@ -111,6 +115,7 @@ export interface DataStore {
   apiKeys: Collection<ApiKeyRow>;
   emails: Collection<EmailMessageRow>;
   calendars: Collection<BusinessCalendarRow>;
+  webhookDeliveries: Collection<WebhookDeliveryRow>;
 }
 
 /** Shallow equality match used by both drivers' `list`/`count`. */

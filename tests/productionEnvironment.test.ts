@@ -62,6 +62,9 @@ describe("Phase 10 production environment", () => {
     expect(resolveAuthMode(false, true)).toBe("entra");
     expect(resolveAuthMode(true, false)).toBe("demo");
     expect(resolveAuthMode(false, false, true)).toBe("public-demo");
+    expect(resolveAuthMode(false, false, false, true)).toBe("organization");
+    expect(resolveAuthMode(false, false, true, true)).toBe("public-demo+organization");
+    expect(resolveAuthMode(false, true, false, true)).toBe("entra+organization");
     expect(resolveAttachmentStorage(false, false)).toBe("disabled");
     expect(resolveAttachmentStorage(false, true)).toBe("azure");
     expect(resolveAttachmentStorage(true, false)).toBe("local");
@@ -218,12 +221,13 @@ describe("Phase 10 production environment", () => {
         "DATA_DRIVER",
         "DEMO_MODE",
         "DIRECT_URL",
+        "LOCAL_ACCOUNT_AUTH",
       ].sort()
     );
     expect(assignments.get("DATA_DRIVER")).toBe("prisma");
     expect(assignments.get("DEMO_MODE")).toBe("false");
     for (const [name, value] of assignments) {
-      if (name === "DATA_DRIVER" || name === "DEMO_MODE") continue;
+      if (name === "DATA_DRIVER" || name === "DEMO_MODE" || name === "LOCAL_ACCOUNT_AUTH") continue;
       expect(value, `${name} must remain a placeholder`).toMatch(/[<>]/);
     }
     expect(source).toContain("# AUTH_MICROSOFT_ENTRA_ID_ID=<application-client-id>");
@@ -232,6 +236,7 @@ describe("Phase 10 production environment", () => {
       "# AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0"
     );
     expect(source).toContain("# PUBLIC_DEMO_AUTH=false");
+    expect(assignments.get("LOCAL_ACCOUNT_AUTH")).toBe("true");
     expect(source).toContain("# AZURE_STORAGE_CONNECTION_STRING=");
     expect(source).not.toMatch(/(?:GROQ|GEMINI|SENTRY|WEBHOOK|REDIS|ALLOWED_ORIGINS)=/);
   });
