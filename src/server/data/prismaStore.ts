@@ -166,8 +166,15 @@ export class PrismaStore implements DataStore {
 
   async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
     if (this.transactionScoped) return work(this);
-    return this.p.$transaction((tx: any) =>
-      work(new PrismaStore(tx, true))
+    return this.p.$transaction(
+      (tx: any) => work(new PrismaStore(tx, true)),
+      {
+        // Neon's compute can need a few seconds to wake and PgBouncer may queue
+        // briefly during a Vercel burst. Prisma's 5s interactive-transaction
+        // default is too short for otherwise healthy production operations.
+        maxWait: 10_000,
+        timeout: 30_000,
+      }
     );
   }
 }
