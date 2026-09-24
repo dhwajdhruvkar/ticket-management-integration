@@ -28,6 +28,8 @@ import {
 } from "lucide-react";
 import { usePersona } from "./Persona";
 import { ThemeToggle } from "./Theme";
+import { InfoHint } from "./InfoHint";
+import { HINTS } from "@/lib/hints";
 import { DISPATCH_ROLES } from "@/shared/rbac";
 
 // =============================================================================
@@ -43,6 +45,7 @@ const NAV_ICON = { size: 18, strokeWidth: 1.75, "aria-hidden": true } as const;
 interface RailItem {
   href: string;
   label: string;
+  description: string;
   icon: React.ReactNode;
   match: (p: string) => boolean;
 }
@@ -68,35 +71,111 @@ export default function IconRail({
   const groups: RailGroup[] = isAgent
     ? [
         {
-          items: [{ href: "/", label: "Home", icon: <Home {...NAV_ICON} />, match: (p) => p === "/" }],
+          items: [
+            {
+              href: "/",
+              label: "Home",
+              description: HINTS.navHome,
+              icon: <Home {...NAV_ICON} />,
+              match: (p) => p === "/",
+            },
+          ],
         },
         {
           caption: "Operations",
           items: [
-            { href: "/tickets", label: "Tickets", icon: <Ticket {...NAV_ICON} />, match: (p) => p.startsWith("/tickets") },
+            {
+              href: "/tickets",
+              label: "Tickets",
+              description: HINTS.navTickets,
+              icon: <Ticket {...NAV_ICON} />,
+              match: (p) => p.startsWith("/tickets"),
+            },
             ...(canTriage
-              ? [{ href: "/triage", label: "Triage", icon: <ListFilter {...NAV_ICON} />, match: (p: string) => p.startsWith("/triage") }]
+              ? [
+                  {
+                    href: "/triage",
+                    label: "Triage",
+                    description: HINTS.navTriage,
+                    icon: <ListFilter {...NAV_ICON} />,
+                    match: (p: string) => p.startsWith("/triage"),
+                  },
+                ]
               : []),
-            { href: "/problems", label: "Problems", icon: <Bug {...NAV_ICON} />, match: (p) => p.startsWith("/problems") },
-            { href: "/changes", label: "Changes", icon: <GitBranch {...NAV_ICON} />, match: (p) => p.startsWith("/changes") },
+            {
+              href: "/problems",
+              label: "Problems",
+              description: HINTS.navProblems,
+              icon: <Bug {...NAV_ICON} />,
+              match: (p) => p.startsWith("/problems"),
+            },
+            {
+              href: "/changes",
+              label: "Changes",
+              description: HINTS.navChanges,
+              icon: <GitBranch {...NAV_ICON} />,
+              match: (p) => p.startsWith("/changes"),
+            },
           ],
         },
         {
           caption: "Resources",
           items: [
-            { href: "/assets", label: "Assets & CMDB", icon: <Boxes {...NAV_ICON} />, match: (p) => p.startsWith("/assets") },
-            { href: "/knowledge-base", label: "Knowledge", icon: <BookOpen {...NAV_ICON} />, match: (p) => p.startsWith("/knowledge-base") },
-            { href: "/analytics", label: "Insights", icon: <BarChart3 {...NAV_ICON} />, match: (p) => p.startsWith("/analytics") },
-            { href: "/audit", label: "Audit", icon: <ShieldCheck {...NAV_ICON} />, match: (p) => p.startsWith("/audit") },
+            {
+              href: "/assets",
+              label: "Assets & CMDB",
+              description: HINTS.navAssets,
+              icon: <Boxes {...NAV_ICON} />,
+              match: (p) => p.startsWith("/assets"),
+            },
+            {
+              href: "/knowledge-base",
+              label: "Knowledge",
+              description: HINTS.navKnowledge,
+              icon: <BookOpen {...NAV_ICON} />,
+              match: (p) => p.startsWith("/knowledge-base"),
+            },
+            {
+              href: "/analytics",
+              label: "Insights",
+              description: HINTS.navInsights,
+              icon: <BarChart3 {...NAV_ICON} />,
+              match: (p) => p.startsWith("/analytics"),
+            },
+            {
+              href: "/audit",
+              label: "Audit",
+              description: HINTS.navAudit,
+              icon: <ShieldCheck {...NAV_ICON} />,
+              match: (p) => p.startsWith("/audit"),
+            },
           ],
         },
       ]
     : [
         {
           items: [
-            { href: "/tickets", label: "My Requests", icon: <Ticket {...NAV_ICON} />, match: (p) => p.startsWith("/tickets") },
-            { href: "/portal", label: "Raise a Request", icon: <PlusCircle {...NAV_ICON} />, match: (p) => p.startsWith("/portal") },
-            { href: "/knowledge-base", label: "Help Center", icon: <BookOpen {...NAV_ICON} />, match: (p) => p.startsWith("/knowledge-base") },
+            {
+              href: "/tickets",
+              label: "My Requests",
+              description: HINTS.navMyRequests,
+              icon: <Ticket {...NAV_ICON} />,
+              match: (p) => p.startsWith("/tickets"),
+            },
+            {
+              href: "/portal",
+              label: "Raise a Request",
+              description: HINTS.navRaiseRequest,
+              icon: <PlusCircle {...NAV_ICON} />,
+              match: (p) => p.startsWith("/portal"),
+            },
+            {
+              href: "/knowledge-base",
+              label: "Help Center",
+              description: HINTS.navHelpCenter,
+              icon: <BookOpen {...NAV_ICON} />,
+              match: (p) => p.startsWith("/knowledge-base"),
+            },
           ],
         },
       ];
@@ -229,8 +308,8 @@ export default function IconRail({
                   <Link
                     key={item.href}
                     href={item.href}
-                    aria-label={item.label}
-                    title={collapsed ? item.label : undefined}
+                    aria-label={`${item.label}. ${item.description}`}
+                    title={collapsed ? `${item.label}: ${item.description}` : undefined}
                     className={`rail-item${item.match(pathname) ? " active" : ""}`}
                     onClick={onNavigate}
                   >
@@ -238,6 +317,9 @@ export default function IconRail({
                       {item.icon}
                     </span>
                     <span className="rail-label">{item.label}</span>
+                    <span className="rail-info-hint">
+                      <InfoHint text={item.description} side="right" size={12} nested />
+                    </span>
                   </Link>
                 ))}
               </div>
@@ -259,8 +341,8 @@ export default function IconRail({
         {ready && isAgent ? (
           <button
             type="button"
-            aria-label="Settings"
-            title={collapsed ? "Settings" : undefined}
+            aria-label={`Settings. ${HINTS.navSettings}`}
+            title={collapsed ? `Settings: ${HINTS.navSettings}` : undefined}
             className={`rail-item${pathname.startsWith("/settings") ? " active" : ""}`}
             onClick={() => {
               onNavigate?.();
@@ -271,6 +353,9 @@ export default function IconRail({
               <Settings {...NAV_ICON} />
             </span>
             <span className="rail-label">Settings</span>
+            <span className="rail-info-hint">
+              <InfoHint text={HINTS.navSettings} side="right" size={12} nested />
+            </span>
           </button>
         ) : null}
         <div

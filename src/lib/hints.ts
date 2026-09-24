@@ -10,6 +10,21 @@
 import type { CustomFieldType } from "@/server/domain/models";
 
 export const HINTS = {
+  // --- Primary navigation ---------------------------------------------------
+  navHome: "View the service desk overview, live workload, SLA health, and key operational shortcuts.",
+  navTickets: "View, search, create, and manage support tickets for your organization.",
+  navTriage: "Review unassigned or escalated tickets and route them to the right agent.",
+  navProblems: "Track recurring incidents, root causes, workarounds, and permanent fixes.",
+  navChanges: "Plan, assess, approve, schedule, and review controlled service changes.",
+  navAssets: "Manage IT assets, configuration items, dependencies, and service impact.",
+  navKnowledge: "Find and maintain support articles used by people, agents, and AI answers.",
+  navInsights: "Review ticket volume, SLA, service quality, and AI performance trends.",
+  navAudit: "Inspect the tamper-evident record of actions taken in this organization.",
+  navSettings: "Configure users, teams, workflows, integrations, and organization controls.",
+  navMyRequests: "Track the status and conversation history of the requests you raised.",
+  navRaiseRequest: "Submit a new incident or service request to the support team.",
+  navHelpCenter: "Search help articles and guidance before or while raising a request.",
+
   // --- Ticket fields (ITIL) -------------------------------------------------
   assignee: "The individual agent who owns this ticket. Assigning notifies them and moves the ticket into their queue.",
   assignmentGroup:
