@@ -214,3 +214,7 @@ powershell -File scripts/e2e-smoke.ps1
 - Hosted showcase: Vercel with PostgreSQL. Additional infrastructure depends on the enabled providers.
 
 See `.env.example` for every configuration option.
+
+For the opt-in human-review and department-bucket workflow, availability,
+escalation, resolution confirmation and performance periods, see the
+[service-desk workflow guide](docs/SERVICE_DESK_WORKFLOW.md).

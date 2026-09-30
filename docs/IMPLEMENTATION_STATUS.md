@@ -1,5 +1,28 @@
 # Implementation Status
 
+## Service-desk workflow release — 2026-09-30
+
+The opt-in workflow adds searchable requester intake, automatic priority with
+audited overrides, service-desk review and department pickup/acceptance,
+calendar/capacity availability, staged manager/RM escalation, persistent alerts,
+similar-case agent suggestions, durable email/one-use resolution confirmation,
+and date-filtered actual-resolver performance. Existing tickets remain legacy.
+
+See [the detailed changes and activation guide](SERVICE_DESK_WORKFLOW.md).
+The additive migration and a reverse-migration transaction rehearsal passed on
+an isolated Neon branch; the rehearsal preserved its data. Real PostgreSQL smoke
+checks covered fresh-tenant isolation, human review, concurrent pickup, atomic
+resolution, one-use acknowledgement, attribution, approval holds, nullable JSON,
+concurrent audit, transaction rollback and lease races.
+
+The release intentionally does not configure Brevo, Teams credentials or an
+external scheduler account. On Vercel, enable the authenticated minute trigger
+before opting in an organization; outbound email requires its provider setup.
+Next.js and affected transitive/development dependencies were security-patched.
+
+The phase history below describes earlier releases, not this release's deployment
+status. Exact commit and deployment results are reported at delivery time.
+
 ## Project Objective
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
 
