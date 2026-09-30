@@ -26,6 +26,8 @@ import { HINTS } from "@/lib/hints";
 import { usePersona } from "./Persona";
 import { useToast } from "./Toast";
 import { TableSkeleton } from "./Skeleton";
+import { RequesterPicker } from "./RequesterPicker";
+import { PriorityPreview } from "./PriorityPreview";
 
 // =============================================================================
 // TicketsExplorer — the primary ticket workspace (route: /tickets).
@@ -1528,6 +1530,8 @@ function NewTicketForm({
   const [subcategory, setSubcategory] = useState("");
   const [impact, setImpact] = useState<ImpactLevel>("medium");
   const [urgency, setUrgency] = useState<ImpactLevel>("medium");
+  const [overridePriority, setOverridePriority] = useState(false);
+  const [priorityOverrideReason, setPriorityOverrideReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
 
@@ -1540,10 +1544,11 @@ function NewTicketForm({
         subject,
         body,
         requesterEmail: requester,
+        priorityMode: isAgent && overridePriority ? "manual" : "automatic",
         category: category as TicketCategory,
         subcategory: subcategory.trim() || undefined,
         // Requesters don't pick impact/urgency — AI classification fills them.
-        ...(isAgent ? { impact, urgency } : {}),
+        ...(isAgent && overridePriority ? { impact, urgency, priorityOverrideReason } : {}),
       });
       setSubject("");
       setBody("");
@@ -1628,13 +1633,7 @@ function NewTicketForm({
         <section>
           <div className="label" style={{ marginBottom: 6 }}>Who and where</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-            <input
-              className="input"
-              placeholder="requester@netlink.com"
-              value={requester}
-              disabled={lockRequester}
-              onChange={(e) => setRequester(e.target.value)}
-            />
+            <RequesterPicker value={requester} onChange={setRequester} disabled={lockRequester} />
             <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
@@ -1651,7 +1650,11 @@ function NewTicketForm({
           </div>
         </section>
 
-        {isAgent ? (
+        <PriorityPreview subject={subject} body={body} />
+        {isAgent && <label className="flex items-center" style={{ gap: 8 }}>
+          <input type="checkbox" checked={overridePriority} onChange={(e) => setOverridePriority(e.target.checked)} />Override automatic priority
+        </label>}
+        {isAgent && overridePriority ? (
           <section>
             <div className="label" style={{ marginBottom: 6 }}>Prioritisation</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
@@ -1683,6 +1686,8 @@ function NewTicketForm({
             <p className="muted" style={{ fontSize: "0.74rem", margin: "8px 0 0" }}>
               Priority is derived from impact × urgency (ITIL matrix).
             </p>
+            <label className="label" htmlFor="priority-override-reason">Reason for priority override</label>
+            <input id="priority-override-reason" className="input" maxLength={500} value={priorityOverrideReason} onChange={(e) => setPriorityOverrideReason(e.target.value)} required />
           </section>
         ) : null}
 
@@ -1690,9 +1695,9 @@ function NewTicketForm({
           <button
             className="btn btn-primary"
             onClick={submit}
-            disabled={submitting || !subject || !body || !requester}
+            disabled={submitting || !subject || !body || !requester || (overridePriority && !priorityOverrideReason.trim())}
           >
-            {submitting ? "Finding an answer…" : isAgent ? "Create & answer" : "Submit request"}
+            {submitting ? "Creating ticket…" : isAgent ? "Create ticket" : "Submit request"}
           </button>
         </div>
       </div>

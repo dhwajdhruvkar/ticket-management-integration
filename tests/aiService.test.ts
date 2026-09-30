@@ -13,6 +13,8 @@ describe("classifyTicket (heuristic)", () => {
     expect(c.impact).toBe("high");
     expect(c.urgency).toBe("high");
     expect(c.priority).toBe("critical");
+    expect(c.source).toBe("rules");
+    expect(c.explanation).toContain("impact");
   });
 
   it("classifies a password reset as an access request", async () => {

@@ -47,6 +47,8 @@ export interface TicketView extends TicketRow {
 }
 
 export interface NewTicketInput {
+  priorityMode?: "automatic" | "manual";
+  priorityOverrideReason?: string;
   subject: string;
   body: string;
   requesterEmail: string;

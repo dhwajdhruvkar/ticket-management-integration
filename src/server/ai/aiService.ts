@@ -29,6 +29,8 @@ const CATEGORIES: TicketCategory[] = [
 const LEVELS: ImpactLevel[] = ["low", "medium", "high"];
 
 export interface Classification {
+  source: "ai" | "rules";
+  explanation: string;
   category: TicketCategory;
   impact: ImpactLevel;
   urgency: ImpactLevel;
@@ -48,6 +50,8 @@ export async function classifyTicket(subject: string, body: string): Promise<Cla
     const impact = parsed.impact as ImpactLevel;
     const urgency = parsed.urgency as ImpactLevel;
     return {
+      source: "ai",
+      explanation: `AI assessed ${impact} impact and ${urgency} urgency; priority follows the ITIL matrix.`,
       category: parsed.category as TicketCategory,
       impact,
       urgency,
@@ -199,7 +203,8 @@ function heuristicClassify(text: string): Classification {
     ? "positive"
     : "neutral";
 
-  return { category, impact, urgency, priority: derivePriority(impact, urgency), sentiment };
+  return { category, impact, urgency, priority: derivePriority(impact, urgency), sentiment,
+    source: "rules", explanation: `Rules-based fallback assessed ${impact} impact and ${urgency} urgency; priority follows the ITIL matrix.` };
 }
 
 function heuristicTags(text: string): string[] {

@@ -17,6 +17,8 @@ import {
   ticketIdempotencyMetadata,
 } from "@/server/services/idempotencyService";
 import type { Role, TicketRow } from "@/server/domain/models";
+import { z } from "zod";
+import { appendAudit } from "@/server/audit/auditChain";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,6 +112,25 @@ export async function POST(req: Request) {
     body.requesterEmail = actor.email;
   }
   if (!body.requesterEmail) return fail("requesterEmail is required.");
+  const email = z.string().trim().email().max(254).safeParse(body.requesterEmail);
+  if (!email.success) return fail("A valid requester email is required.");
+  body.requesterEmail = email.data.toLowerCase();
+  if (body.priorityMode !== undefined && !["automatic", "manual"].includes(body.priorityMode)) return fail("Invalid priority mode.");
+  if (!isAgentRole(actor.role as Role)) body.priorityMode = "automatic";
+  if (body.priorityMode === "automatic") {
+    delete body.priority;
+    delete body.impact;
+    delete body.urgency;
+    delete body.priorityOverrideReason;
+  } else if (body.priorityMode === "manual") {
+    const override = z.object({
+      impact: z.enum(["low", "medium", "high"]), urgency: z.enum(["low", "medium", "high"]),
+      priorityOverrideReason: z.string().trim().min(1).max(500),
+    }).safeParse(body);
+    if (!override.success) return fail("Manual priority requires impact, urgency and an override reason (1–500 characters).");
+    body.priorityOverrideReason = override.data.priorityOverrideReason;
+    delete body.priority;
+  }
 
   let metadata;
   try {
@@ -138,6 +159,10 @@ export async function POST(req: Request) {
     if (actor.apiKeyId) body.integrationKeyId = actor.apiKeyId;
 
     const ticket = await intakeTicket(tenantId, body);
+    if (body.priorityMode === "manual") {
+      await appendAudit({ tenantId, ticketId: ticket.id, actor: actor.name, action: "ticket.priority.overridden_at_intake",
+        payload: { priority: ticket.priority, reason: body.priorityOverrideReason } });
+    }
     return ok(ticket, {
       status: 201,
       headers: metadata ? { "Idempotency-Replayed": "false" } : undefined,
