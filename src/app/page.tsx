@@ -20,6 +20,8 @@ import { DashboardSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/primitives";
 import { usePersona } from "@/components/Persona";
 import { AlertTriangle } from "lucide-react";
+import { WorkflowDashboardAlerts } from "@/components/WorkflowAlerts";
+import { AgentPerformance } from "@/components/AgentPerformance";
 
 // =============================================================================
 // DashboardPage — the workspace home for agents/managers/admins.
@@ -176,6 +178,7 @@ export default function DashboardPage() {
         />
 
         {isAdmin ? <AdminQuickActions /> : null}
+        <WorkflowDashboardAlerts key={persona.id} />
 
         <SlaHealthStrip metrics={metrics} chainValid={chainValid} />
 
@@ -190,7 +193,7 @@ export default function DashboardPage() {
           <GroupBacklog metrics={metrics} />
         </div>
 
-        <AgentLeaderboard metrics={metrics} users={users} />
+        <AgentPerformance key={`performance-${persona.id}`}>{(report) => <AgentLeaderboard metrics={{ ...metrics, leaderboard: report.rows.map((row) => ({ id: row.id, name: row.name, resolved: row.resolutions, open: row.liveOpen })) }} users={users} />}</AgentPerformance>
       </div>
 
       <style jsx>{`
@@ -1307,10 +1310,10 @@ function AgentLeaderboard({ metrics, users }: { metrics: Metrics; users: UserRow
               <tr>
                 <th style={{ paddingLeft: "1.2rem" }}>Agent</th>
                 <th>
-                  <LabelWithHint info={HINTS.agentWorkload}>Workload</LabelWithHint>
+                  <LabelWithHint info="Recorded resolutions in the selected period (green) alongside live open workload (blue), not a completion-rate percentage.">Activity counts</LabelWithHint>
                 </th>
-                <th style={{ textAlign: "right" }}>Resolved</th>
-                <th style={{ textAlign: "right", paddingRight: "1.2rem" }}>Open</th>
+                <th style={{ textAlign: "right" }}>Period resolutions</th>
+                <th style={{ textAlign: "right", paddingRight: "1.2rem" }}>Live open</th>
               </tr>
             </thead>
             <tbody>

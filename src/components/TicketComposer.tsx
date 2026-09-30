@@ -105,7 +105,7 @@ export default function TicketComposer({
         setBody("");
         toast.success({
           title: tab === "public" ? "Reply sent" : "Note added",
-          description: tab === "public" ? "Delivered to the requester." : "Saved as an internal note.",
+          description: tab === "public" ? (ticket.workflow ? "Saved; email notification queued." : "Your reply was saved.") : "Saved as an internal note.",
         });
       },
       "Could not post message"
@@ -129,7 +129,7 @@ export default function TicketComposer({
       },
       () => {
         setBody("");
-        toast.success({ title: "Submitted as Solved", description: "Ticket resolved — the requester was notified." });
+        toast.success({ title: "Submitted as Solved", description: ticket.workflow ? "Awaiting requester confirmation; email notification queued." : "Ticket resolved." });
       },
       "Could not resolve ticket"
     );
@@ -322,7 +322,7 @@ export default function TicketComposer({
                 </LabelWithHint>
               </button>
             ) : null}
-            {active ? (
+            {active && !ticket.workflow ? (
               <button
                 className="btn btn-ghost"
                 disabled={!!busy}
@@ -346,7 +346,7 @@ export default function TicketComposer({
                 <button className="btn btn-ghost" disabled={!!busy || !hasText} onClick={send}>
                   {busy === "send" ? "Sending…" : "Send"}
                 </button>
-                <button className="btn btn-primary" disabled={!!busy} onClick={submitSolved}>
+                <button className="btn btn-primary" disabled={!!busy || (!!ticket.workflow && !ticket.workflow.acceptedAt)} title={ticket.workflow && !ticket.workflow.acceptedAt ? "Accept this ticket from its department bucket first" : undefined} onClick={submitSolved}>
                   {busy === "solve" ? "Submitting…" : "Submit as Solved"}
                 </button>
               </>

@@ -1,8 +1,9 @@
-import { fail, ok, readJson } from "@/server/http";
+import { fail, ok, parseBody } from "@/server/http";
 import { isResponse, loadTicket, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { getTicketView, deleteTicket } from "@/server/services/ticketService";
-import { updateTicketFields, type TicketFieldPatch } from "@/server/services/agentActions";
+import { updateTicketFields, TicketFieldPatchSchema } from "@/server/services/agentActions";
+import { WorkflowError } from "@/server/services/workflowService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,10 +28,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const ticket = await loadTicket(ctx, id);
   if (isResponse(ticket)) return ticket;
 
-  const patch = await readJson<TicketFieldPatch>(req);
-  if (!patch) return fail("Invalid body.");
-  const updated = await updateTicketFields(id, patch, ctx.actor);
-  return updated ? ok(updated) : fail("Ticket not found.", 404);
+  const patch = await parseBody(req, TicketFieldPatchSchema);
+  if (isResponse(patch)) return patch;
+  try {
+    const updated = await updateTicketFields(id, patch, ctx.actor);
+    return updated ? ok(updated) : fail("Ticket not found.", 404);
+  } catch (error) {
+    if (error instanceof WorkflowError) return fail(error.message, error.status);
+    throw error;
+  }
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {

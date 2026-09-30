@@ -27,7 +27,7 @@ export default function RequesterReplyBox({
   const pingTyping = useTypingPing(ticket.id);
 
   const isResolved = ["closed", "auto_resolved", "resolved"].includes(ticket.status);
-  const showCsat = isResolved && !ticket.satisfaction;
+  const showCsat = isResolved && !ticket.satisfaction && (!ticket.workflow || ticket.status === "resolved");
 
   async function run(key: string, fn: () => Promise<unknown>, onOk: () => void, fail: string) {
     setBusy(key);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isResponse, requirePermission } from "@/server/guards";
+import { workflowPaths, workflowSchemas } from "@/server/workflowOpenApi";
 
 // =============================================================================
 // GET /api/v1/openapi.json — hand-maintained OpenAPI 3.1 description of the
@@ -635,6 +636,8 @@ const CORE_SCHEMAS = {
       catalogItemId: { type: "string" },
       ciIds: { type: "array", items: { type: "string" } },
       autoResolve: { type: "boolean", default: false },
+      priorityMode: { type: "string", enum: ["automatic", "manual"], description: "Use automatic to assess the final subject/body. Omitted preserves legacy staff integration behavior. Requester intake is always automatic; workflow intake always requires human review." },
+      priorityOverrideReason: { type: "string", minLength: 1, maxLength: 500, description: "Required for staff manual priority mode. Requesters cannot override automatic assessment." },
     },
     example: {
       subject: "VPN access fails after client update",
@@ -1015,7 +1018,7 @@ const SPEC = {
   ...BASE_SPEC,
   info: {
     ...BASE_SPEC.info,
-    version: "2.2.0",
+    version: "2.3.0",
     description:
       "Production ITSM REST API. External systems authenticate with a tenant-scoped API key using Authorization: Bearer or x-api-key. Browser users may sign in with organization code + email + password when LOCAL_ACCOUNT_AUTH is enabled; the same email may belong to multiple organizations because the organization code selects the tenant. Responses use the documented success/error envelopes; the health probe and account setup operation are intentionally unauthenticated.",
     "x-browser-local-login-example": {
@@ -1040,6 +1043,7 @@ const SPEC = {
     url: "https://github.com/dhwajdhruvkar/ticket-management-integration/blob/main/docs/EXTERNAL_API_GUIDE.md",
   },
   tags: [
+    { name: "Workflow", description: "Human review, department buckets, availability, monitoring and requester confirmation." },
     { name: "Health", description: "Unauthenticated service capability probe." },
     { name: "OpenAPI", description: "Machine-readable API contract." },
     { name: "Tickets", description: "Ticket intake, retrieval, updates, and soft deletion." },
@@ -1052,6 +1056,7 @@ const SPEC = {
   components: {
     ...BASE_SPEC.components,
     securitySchemes: {
+      cronSecret: { type: "http", scheme: "bearer", description: "Deployment CRON_SECRET, not a tenant API key." },
       bearerApiKey: {
         type: "http",
         scheme: "bearer",
@@ -1077,6 +1082,7 @@ const SPEC = {
     schemas: {
       ...BASE_SPEC.components.schemas,
       ...CORE_SCHEMAS,
+      ...workflowSchemas,
     },
     responses: {
       BadRequest: errorResponse(
@@ -1112,6 +1118,7 @@ const SPEC = {
   ],
   paths: {
     ...BASE_SPEC.paths,
+    ...workflowPaths,
     "/openapi.json": {
       get: {
         tags: ["OpenAPI"],

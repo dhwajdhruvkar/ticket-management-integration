@@ -93,7 +93,7 @@ function handleApiV1Request(
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
-  if (pathname === "/api/auth/callback/demo" && PUBLIC_DEMO_AUTH) {
+  if (pathname === "/api/auth/callback/demo" && (DEMO_MODE || PUBLIC_DEMO_AUTH)) {
     const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
     const clientIp = fwd || req.headers.get("x-real-ip") || "local";
     if (!edgeRateLimit(`public-demo-auth:${clientIp}`, 30, 60_000)) {
@@ -124,7 +124,7 @@ export const config = {
   matcher: [
     // /legal is public: the sign-in screen links to it, so requiring a session
     // would bounce anyone who wants to read the terms before agreeing to them.
-    "/((?!api|_next/static|_next/image|favicon\\.ico|signin|setup-account|legal).*)",
+    "/((?!api|_next/static|_next/image|favicon\\.ico|signin|setup-account|ticket-confirmation|legal).*)",
     "/api/v1/:path*",
     "/api/auth/callback/demo",
   ],

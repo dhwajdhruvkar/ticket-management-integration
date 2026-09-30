@@ -1,4 +1,5 @@
-import { fail, ok, readJson } from "@/server/http";
+import { fail, ok, parseBody } from "@/server/http";
+import { z } from "zod";
 import { actorContext, isResponse, loadTicket } from "@/server/guards";
 import { can, isAgentRole, isTicketSubmitterRole } from "@/server/auth/rbac";
 import {
@@ -11,6 +12,7 @@ import {
 } from "@/server/services/agentActions";
 import { acceptSuggestion, resolveTicket } from "@/server/ai/resolver";
 import type { TicketStatus } from "@/server/domain/models";
+import { WorkflowError } from "@/server/services/workflowService";
 
 // =============================================================================
 // POST /api/v1/tickets/[id]/actions — ticket lifecycle actions.
@@ -24,29 +26,17 @@ import type { TicketStatus } from "@/server/domain/models";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface ActionBody {
-  action:
-    | "assign"
-    | "resolve"
-    | "close"
-    | "reopen"
-    | "escalate"
-    | "feedback"
-    | "run_ai"
-    | "accept_suggestion";
-  assigneeId?: string | null;
-  assignmentGroupId?: string | null;
-  reply?: string;
-  resolutionNotes?: string;
-  reason?: string;
-  satisfaction?: "satisfied" | "unsatisfied";
-  comment?: string;
-}
+const ActionBody = z.object({
+  action: z.enum(["assign", "resolve", "close", "reopen", "escalate", "feedback", "run_ai", "accept_suggestion"]),
+  assigneeId: z.string().max(100).nullable().optional(), assignmentGroupId: z.string().max(100).nullable().optional(),
+  reply: z.string().max(20000).optional(), resolutionNotes: z.string().max(20000).optional(), reason: z.string().max(2000).optional(),
+  satisfaction: z.enum(["satisfied", "unsatisfied"]).optional(), comment: z.string().max(5000).optional(),
+}).strict();
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const body = await readJson<ActionBody>(req);
-  if (!body?.action) return fail("action is required.");
+  const body = await parseBody(req, ActionBody);
+  if (isResponse(body)) return body;
   const ctx = await actorContext(req);
   const { actor, role } = ctx;
   if (isTicketSubmitterRole(role)) return fail("Ticket submitter integrations are read-only after creation.", 403);
@@ -65,7 +55,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   }
 
-  switch (body.action) {
+  try { switch (body.action) {
     case "assign":
       if (!can(role, "ticket.assign")) return fail("Forbidden.", 403);
       return respond(await assignTicket(id, body.assigneeId ?? null, actor, body.assignmentGroupId));
@@ -76,6 +66,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (!can(role, "ticket.resolve")) return fail("Forbidden.", 403);
       return respond(await agentClose(id, actor));
     case "reopen":
+      if (!RATEABLE.has(ticket.status)) return fail("Only a resolved or closed ticket can be reopened.", 409);
       return respond(await reopenTicket(id, actor));
     case "escalate": {
       if (!can(role, "ticket.write")) return fail("Forbidden.", 403);
@@ -88,6 +79,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return respond(await escalateTicket(id, body.reason, actor));
     }
     case "feedback": {
+      if (ticket.workflow && actor.email?.toLowerCase() !== ticket.requesterEmail.toLowerCase()) return fail("Only the requester can confirm resolution.", 403);
       if (!body.satisfaction) return fail("satisfaction is required for feedback.");
       // CSAT is feedback on an outcome; there is no outcome to rate until the
       // ticket has actually been resolved or closed.
@@ -101,9 +93,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       return respond(await resolveTicket(id));
     case "accept_suggestion":
       if (!can(role, "ticket.resolve")) return fail("Forbidden.", 403);
-      return respond(await acceptSuggestion(id, actor.name));
+      return respond(await acceptSuggestion(id, actor.name, actor.id));
     default:
       return fail("Unknown action.");
+  } } catch (error) {
+    if (error instanceof WorkflowError) return fail(error.message, error.status);
+    throw error;
   }
 }
 

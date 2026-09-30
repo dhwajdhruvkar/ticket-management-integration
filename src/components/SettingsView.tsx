@@ -25,6 +25,8 @@ import type { TicketPriority } from "@/server/domain/models";
 import { InfoHint, LabelWithHint, timeAgo } from "@/components/ui";
 import { CloseButton, Modal, PromptDialog } from "@/components/primitives";
 import { customFieldHint, HINTS } from "@/lib/hints";
+import { WorkflowSettings } from "./WorkflowSettings";
+import { AvailabilityPreferences } from "./AvailabilityPreferences";
 
 // =============================================================================
 // SettingsView — the admin/agent configuration surface (route: /settings).
@@ -340,6 +342,8 @@ export default function SettingsView() {
 
           {/* Business calendars ---------------------------------------------- */}
           {isAdmin ? <CalendarsSection onChanged={refresh} /> : null}
+          {isAdmin ? <WorkflowSettings /> : null}
+          <AvailabilityPreferences />
 
           {/* Macros ---------------------------------------------------------- */}
           <MacrosSection isAdmin={isAdmin} />

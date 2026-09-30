@@ -65,6 +65,8 @@ export async function GET(req: Request) {
     permissions,
     // Agent availability for dispatch (defaults available when unset).
     available: user?.available !== false,
+    active: user?.active ?? false,
+    availabilitySettings: user?.availabilitySettings ?? null,
     // Lets the UI hide demo-only affordances (persona switcher) in production.
     demoMode: config.demoMode,
   });

@@ -66,7 +66,7 @@ export default function IconRail({
   const router = useRouter();
   const { persona, ready } = usePersona();
   const isAgent = persona.role === "agent";
-  const canTriage = DISPATCH_ROLES.includes(persona.serverRole);
+  const canTriage = persona.serverRole === "agent" || DISPATCH_ROLES.includes(persona.serverRole);
 
   const groups: RailGroup[] = isAgent
     ? [

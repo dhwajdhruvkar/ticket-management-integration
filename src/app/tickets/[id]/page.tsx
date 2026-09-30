@@ -29,6 +29,7 @@ import {
   timeAgo,
 } from "@/components/ui";
 import { HINTS } from "@/lib/hints";
+import { WORKFLOW_LABELS } from "@/shared/workflow";
 import TicketComposer from "@/components/TicketComposer";
 import TicketProperties from "@/components/TicketProperties";
 import ConversationThread from "@/components/ConversationThread";
@@ -868,6 +869,9 @@ function TicketHeader({ ticket, showSla }: { ticket: TicketView; showSla?: boole
             }}
           >
             <StatusBadge status={ticket.status} />
+            {ticket.workflow && <span className="badge">{WORKFLOW_LABELS[ticket.workflow.phase]}</span>}
+            {ticket.workflow?.closureReason && <span className="badge">{ticket.workflow.closureReason === "requester_confirmed" ? "Requester confirmed" : "No requester response · unconfirmed"}</span>}
+            {ticket.workflow && showSla && <Link href="/triage">Review / accept in bucket board</Link>}
             <PriorityBadge priority={ticket.priority} hint />
             {showSla ? <SlaBadge level={ticket.sla.level} paused={ticket.sla.paused} hint /> : null}
             <span

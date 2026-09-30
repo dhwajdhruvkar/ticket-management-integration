@@ -109,7 +109,7 @@ export default function TicketProperties({
         <select
           className="select"
           value={ticket.assigneeId ?? ""}
-          disabled={busy}
+          disabled={busy || !!ticket.workflow}
           onChange={(e) =>
             commit(
               () =>
@@ -135,7 +135,7 @@ export default function TicketProperties({
         <select
           className="select"
           value={ticket.assignmentGroupId ?? ""}
-          disabled={busy}
+          disabled={busy || !!ticket.workflow}
           onChange={(e) =>
             patch({ assignmentGroupId: e.target.value || null }, "Group updated", "Could not update group")
           }

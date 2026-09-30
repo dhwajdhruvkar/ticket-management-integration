@@ -10,6 +10,7 @@ import { HINTS } from "@/lib/hints";
 import { DISPATCH_ROLES } from "@/shared/rbac";
 import type { AssignmentGroupRow, TicketRow } from "@/server/domain/models";
 import type { TriageAgent, TriageBoard } from "@/server/services/triageService";
+import { BucketWorkspace } from "./BucketWorkspace";
 
 // =============================================================================
 // TriageView — dispatcher queue (manager and above).
@@ -30,6 +31,10 @@ interface BulkAssignResult {
 }
 
 export default function TriageView() {
+  return <BucketWorkspace legacy={<LegacyTriageView />} />;
+}
+
+function LegacyTriageView() {
   const router = useRouter();
   const { persona, ready } = usePersona();
   const toast = useToast();

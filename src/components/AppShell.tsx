@@ -44,7 +44,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   // Sign-in and the public policy pages stand alone — no workspace chrome, and
   // no nav rail for a visitor who has not signed in yet.
-  if (pathname.startsWith("/signin") || pathname.startsWith("/legal")) {
+  if (["/signin", "/legal", "/setup-account", "/ticket-confirmation"].some((path) => pathname.startsWith(path))) {
     return <main style={{ height: "100vh", overflow: "auto" }}>{children}</main>;
   }
 

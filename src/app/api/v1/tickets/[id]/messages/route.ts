@@ -1,8 +1,9 @@
-import { fail, ok, readJson } from "@/server/http";
+import { fail, ok, parseBody } from "@/server/http";
 import { isResponse, loadTicket, requirePermission } from "@/server/guards";
 import { can, isAgentRole, isTicketSubmitterRole } from "@/server/auth/rbac";
 import { agentReply, requesterReply } from "@/server/services/agentActions";
-import type { MessageVisibility } from "@/server/domain/models";
+import { z } from "zod";
+import { WorkflowError } from "@/server/services/workflowService";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,11 +16,7 @@ export const dynamic = "force-dynamic";
 // needed). Routes to agentReply/requesterReply based on the actor's role.
 // =============================================================================
 
-interface MessageBody {
-  body: string;
-  visibility?: MessageVisibility;
-  asRequester?: boolean;
-}
+const MessageBody = z.object({ body: z.string().trim().min(1).max(20000), visibility: z.enum(["public", "internal"]).optional(), asRequester: z.boolean().optional() }).strict();
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -29,15 +26,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return fail("Ticket submitter integrations are read-only after creation.", 403);
   }
 
-  const payload = await readJson<MessageBody>(req);
-  if (!payload?.body?.trim()) return fail("Message body is required.");
+  const payload = await parseBody(req, MessageBody);
+  if (isResponse(payload)) return payload;
 
   // Tenant scope for everyone; requesters additionally only see their own.
   const ticket = await loadTicket(ctx, id);
   if (isResponse(ticket)) return ticket;
 
   // Requesters can only reply publicly on their own tickets.
-  if (payload.asRequester || !isAgentRole(ctx.role)) {
+  if (payload.asRequester && isAgentRole(ctx.role)) return fail("Staff cannot impersonate the requester.", 403);
+  try {
+  if (!isAgentRole(ctx.role)) {
+    if (payload.visibility === "internal") return fail("Requesters can only send public replies.", 403);
     const updated = await requesterReply(id, { name: ctx.actor.name, role: "requester" }, payload.body);
     return updated ? ok(updated) : fail("Ticket not found.", 404);
   }
@@ -45,4 +45,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!can(ctx.role, "ticket.write")) return fail("Forbidden.", 403);
   const updated = await agentReply(id, ctx.actor, payload.body, payload.visibility ?? "public");
   return updated ? ok(updated) : fail("Ticket not found.", 404);
+  } catch (error) {
+    if (error instanceof WorkflowError) return fail(error.message, error.status);
+    throw error;
+  }
 }

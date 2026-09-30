@@ -36,7 +36,7 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
 
     const spec = object(await response.json());
     expect(spec.openapi).toBe("3.1.0");
-    expect(object(spec.info).version).toBe("2.2.0");
+    expect(object(spec.info).version).toBe("2.3.0");
 
     const servers = spec.servers as Array<JsonObject>;
     expect(servers[0]).toMatchObject({
@@ -109,6 +109,10 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     expect(paths).toHaveProperty("/users/{id}/access-link");
     expect(paths).toHaveProperty("/account/setup");
     expect(paths).toHaveProperty("/account/password");
+    for (const route of ["/requesters", "/tickets/classification", "/workflow/settings", "/workflow/board", "/workflow/alerts", "/workflow/retry-emails", "/tickets/{id}/workflow", "/users/{id}/availability", "/metrics/agents", "/account/ticket-confirmation", "/jobs/workflow"]) expect(paths).toHaveProperty(route);
+    expect(operation(paths, "/account/ticket-confirmation", "post").security).toEqual([]);
+    expect(operation(paths, "/jobs/workflow", "post").security).toEqual([{ cronSecret: [] }]);
+    expect(operation(paths, "/tickets/{id}/workflow", "post").security).toEqual([{ sessionCookie: [] }]);
 
     expect(operation(paths, "/health", "get").security).toEqual([]);
     expect(operation(paths, "/tickets", "post")["x-required-permission"]).toBe(

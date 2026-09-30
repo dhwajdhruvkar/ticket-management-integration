@@ -1614,16 +1614,17 @@ function NewTicketForm({
           <div className="label" style={{ marginBottom: 6 }}>What happened?</div>
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <select className="select" value={type} onChange={(e) => setType(e.target.value as typeof type)}>
+              <select className="select" aria-label="Ticket type" value={type} onChange={(e) => setType(e.target.value as typeof type)}>
                 <option value="incident">Incident (something is broken)</option>
                 <option value="service_request">Service request (I need something)</option>
               </select>
-              <input className="input" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
+              <input className="input" aria-label="Subject" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
             <textarea
               className="textarea"
               rows={3}
               placeholder="Describe the issue — error messages and steps to reproduce help"
+              aria-label="Issue description"
               value={body}
               onChange={(e) => setBody(e.target.value)}
             />
@@ -1634,7 +1635,7 @@ function NewTicketForm({
           <div className="label" style={{ marginBottom: 6 }}>Who and where</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             <RequesterPicker value={requester} onChange={setRequester} disabled={lockRequester} />
-            <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <select className="select" aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -1644,6 +1645,7 @@ function NewTicketForm({
             <input
               className="input"
               placeholder="Subcategory (e.g. VPN)"
+              aria-label="Subcategory"
               value={subcategory}
               onChange={(e) => setSubcategory(e.target.value)}
             />
