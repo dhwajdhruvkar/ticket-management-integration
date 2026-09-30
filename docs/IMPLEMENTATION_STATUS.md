@@ -20,8 +20,21 @@ external scheduler account. On Vercel, enable the authenticated minute trigger
 before opting in an organization; outbound email requires its provider setup.
 Next.js and affected transitive/development dependencies were security-patched.
 
-The phase history below describes earlier releases, not this release's deployment
-status. Exact commit and deployment results are reported at delivery time.
+Application commit `1295849e8a6fcec20cbfad460259542330fae101` was pushed to
+`origin/main` and verified Ready in Vercel production, deployment
+`dpl_FGoKxdqPsLnASmg6ZQ3aUFi5oET2`, at https://netlink-support.vercel.app.
+Production migration `20260930150000_service_desk_workflow` is applied; counts
+remained 2 organizations, 13 users, 26 tickets and 205 audit records.
+Health/sign-in and unauthenticated endpoint guards passed. Isolated browser
+verification passed intake, human review, routing, acceptance, public resolution,
+live workload, custom-date performance and mobile layout checks.
+
+Local verification passed: 287 tests in 47 files, Prisma validation/generation,
+typecheck, lint, agent-tool checks, production environment/security checks,
+production build and dependency audit (zero vulnerabilities). GitHub Actions
+run 36734339632 did **not** execute: GitHub reports an account billing lock.
+Do not describe CI as green until the owner resolves that lock and reruns it.
+The phase history below describes earlier releases, not this release's status.
 
 ## Project Objective
 Safely evolve the existing Netlink Support application from its current local/memory persistence to production PostgreSQL while preserving all existing functionality and adding external API-key integration support for a third-party Support Management System.
