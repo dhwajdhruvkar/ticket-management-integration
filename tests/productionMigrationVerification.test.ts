@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildSeed } from "@/server/data/seed";
 
 interface VerificationResult {
   sql: string;
@@ -17,15 +18,13 @@ const { buildJsonIdVerification } = require(
   ) => VerificationResult;
 };
 
-function sourceData() {
-  return JSON.parse(
-    readFileSync(resolve(process.cwd(), ".data", "store.json"), "utf8")
-  ) as Record<string, Array<{ id: string }>>;
+async function sourceData() {
+  return { ...await buildSeed(), resolutions: [], citations: [], attachments: [], emails: [], audit: [{ id: "synthetic-audit" }] } as unknown as Record<string, Array<{ id: string }>>;
 }
 
 describe("Phase 11 production migration verification", () => {
-  it("builds a read-only assertion for every source JSON id", () => {
-    const data = sourceData();
+  it("builds a read-only assertion for every source JSON id", async () => {
+    const data = await sourceData();
     const expected = Object.values(data)
       .filter(Array.isArray)
       .reduce((total, rows) => total + rows.length, 0);
@@ -39,14 +38,14 @@ describe("Phase 11 production migration verification", () => {
     );
   });
 
-  it("fails before querying when source collections or ids are invalid", () => {
-    const missingCollection = sourceData();
+  it("fails before querying when source collections or ids are invalid", async () => {
+    const missingCollection = await sourceData();
     delete missingCollection.tickets;
     expect(() => buildJsonIdVerification(missingCollection)).toThrow(
       "Missing JSON collection: tickets"
     );
 
-    const duplicateId = sourceData();
+    const duplicateId = await sourceData();
     const tenant = duplicateId.tenants[0];
     if (!tenant) throw new Error("Expected source tenant fixture.");
     duplicateId.tenants = [tenant, tenant];
