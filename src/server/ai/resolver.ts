@@ -61,6 +61,7 @@ function decide(
   hasHits: boolean,
   th: Thresholds
 ): { decision: ResolutionDecision; reasoning: string } {
+  if (ticket.workflow) return { decision: "suggest", reasoning: "Mandatory human review: this answer is a draft only, not an automatic resolution." };
   if (!hasHits) return { decision: "escalate", reasoning: "No knowledge base matches were found for this request." };
   if (modelEscalated)
     return { decision: "escalate", reasoning: "The assistant judged the retrieved context insufficient to answer safely." };
@@ -173,6 +174,7 @@ export async function resolveTicket(ticketId: string): Promise<TicketRow | null>
   });
 
   // 5. Act
+  if (ticket.workflow) return ticket;
   if (decision === "auto_resolve") {
     await addMessage(ticketId, {
       authorKind: "assistant",
@@ -205,7 +207,7 @@ export async function resolveTicket(ticketId: string): Promise<TicketRow | null>
 }
 
 /** Agent accepts the drafted suggestion: deliver it and resolve. */
-export async function acceptSuggestion(ticketId: string, agentName: string): Promise<TicketRow | null> {
+export async function acceptSuggestion(ticketId: string, agentName: string, agentId?: string): Promise<TicketRow | null> {
   const ticket = await getTicket(ticketId);
   if (!ticket) return null;
   // Sending the draft would post a public reply and resolve the ticket again.
@@ -213,6 +215,11 @@ export async function acceptSuggestion(ticketId: string, agentName: string): Pro
   const store = await getStore();
   const resolution = (await store.resolutions.list({ ticketId }))[0];
   if (!resolution) return null;
+
+  if (ticket.workflow || agentId) {
+    const { agentResolve } = await import("../services/agentActions");
+    return agentResolve(ticketId, { id: agentId, name: agentName }, resolution.answer);
+  }
 
   await addMessage(ticketId, {
     authorKind: "assistant",

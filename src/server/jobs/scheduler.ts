@@ -23,6 +23,7 @@ import { buildReportPdf } from "../services/reportPdfService";
 import { runWithRetry, withJobLock } from "./lock";
 import { logger } from "../observability/logger";
 import { retryPendingWebhookDeliveries } from "../services/integrationWebhookService";
+import { runWorkflowMaintenance } from "./workflowMaintenance";
 import type { Role, TicketRow, UserRow } from "../domain/models";
 
 const OPEN = ["new", "open", "in_progress", "pending", "pending_agent", "escalated", "reopened"];
@@ -55,6 +56,7 @@ export async function slaSweep(): Promise<void> {
   for (const tenant of await store.tenants.list()) {
     const { data: tickets } = await listTickets(tenant.id);
     for (const ticket of tickets) {
+      if (ticket.workflow) continue; // Durable workflow monitor owns its queue and resolution escalations.
       if (!OPEN.includes(ticket.status)) continue;
       const status = slaStatus(ticket);
       if (status.paused) continue; // clock stopped while pending
@@ -132,6 +134,7 @@ export async function autoCloseStale(): Promise<void> {
   for (const tenant of await store.tenants.list()) {
     const { data: tickets } = await listTickets(tenant.id);
     for (const ticket of tickets) {
+      if (ticket.workflow) continue; // Confirmation/reminder/no-response closure is transactional.
       if (!RESOLVED.includes(ticket.status)) continue;
       const resolvedMs = ticket.resolvedAt ? new Date(ticket.resolvedAt).getTime() : null;
       if (resolvedMs && resolvedMs < cutoff) {
@@ -280,6 +283,13 @@ export function startScheduler(): void {
   // First run shortly after boot, then on the interval.
   setTimeout(() => void tick(), 15_000);
   setInterval(() => void tick(), intervalMs);
+  // Serverless deployments need the authenticated external minute trigger.
+  // Local long-running processes get the same cadence independently of legacy jobs.
+  if (!process.env.VERCEL) {
+    const workflowTick = () => void runWorkflowMaintenance("local_scheduler").catch(() => undefined);
+    setTimeout(workflowTick, 15_000);
+    setInterval(workflowTick, 60_000);
+  }
   logger.info("scheduler started", {
     intervalMs,
     lock: config.dataDriver === "prisma" ? "pg-advisory" : "in-process",

@@ -20,6 +20,7 @@ describe("PrismaStore transactions", () => {
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
       maxWait: 10_000,
       timeout: 30_000,
+      isolationLevel: "Serializable",
     });
   });
 });

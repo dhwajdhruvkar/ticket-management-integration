@@ -117,6 +117,10 @@ export async function bulkAssignTickets(
       result.skipped.push({ ticketId, reason: "Not found." });
       continue;
     }
+    if (ticket.workflow) {
+      result.skipped.push({ ticketId, reason: "Use the bucket board to offer or accept this workflow ticket." });
+      continue;
+    }
 
     const updated = assigneeId
       ? await assignTicket(ticketId, assigneeId, by, ticket.assignmentGroupId)

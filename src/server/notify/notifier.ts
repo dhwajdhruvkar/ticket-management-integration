@@ -135,6 +135,7 @@ export async function sendSensitiveEmail(
 async function graphToken(): Promise<string> {
   const { tenantId, clientId, clientSecret } = config.graph;
   const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    signal: AbortSignal.timeout(5_000), redirect: "error",
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -149,7 +150,7 @@ async function graphToken(): Promise<string> {
   return json.access_token;
 }
 
-async function sendGraphMail(
+export async function sendGraphMail(
   to: string,
   subject: string,
   body: string,
@@ -171,6 +172,7 @@ async function sendGraphMail(
     }));
   }
   const res = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(from ?? "")}/sendMail`, {
+    signal: AbortSignal.timeout(10_000), redirect: "error",
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ message }),

@@ -7,6 +7,9 @@
 // store, the REST API, and the UI without conversion surprises.
 // =============================================================================
 
+import type { TicketWorkflow, WorkflowSettings } from "@/shared/workflow";
+import type { AvailabilitySettings, PresenceSnapshot } from "../services/availabilityService";
+
 export type Role =
   | "super_admin"
   | "tenant_admin"
@@ -79,6 +82,7 @@ export interface Entity {
 }
 
 export interface TenantRow extends Entity {
+  workflowSettings?: WorkflowSettings | null;
   name: string;
   slug: string;
   brand?: string | null;
@@ -106,6 +110,8 @@ export interface UserPreferences {
 }
 
 export interface UserRow extends Entity {
+  availabilitySettings?: AvailabilitySettings | null;
+  presenceSnapshot?: PresenceSnapshot | null;
   tenantId: string;
   email: string;
   name: string;
@@ -151,6 +157,9 @@ export interface UserInvitationRow extends Entity {
 }
 
 export interface TicketRow extends Entity {
+  workflow?: TicketWorkflow | null;
+  workflowVersion?: number;
+  resolvedById?: string | null;
   reference: string;
   tenantId: string;
   type: TicketType;
@@ -235,6 +244,8 @@ export interface TicketMessageRow extends Entity {
 }
 
 export interface TicketEventRow extends Entity {
+  tenantId?: string | null;
+  resolverId?: string | null;
   ticketId: string;
   type: string;
   message: string;
@@ -460,6 +471,41 @@ export interface AttachmentRow extends Entity {
   sizeBytes: number;
   blobUrl: string;
   createdAt: string;
+}
+
+export interface PublicRateLimitRow extends Entity { count: number; resetAt: string }
+export interface JobLeaseRow extends Entity {
+  owner: string;
+  leaseUntil: string;
+  cursor: string | null;
+  lastSuccessAt: string | null;
+  lastRunAt: string | null;
+  lastError: string | null;
+}
+
+export interface TicketAcknowledgementRow extends Entity {
+  tenantId: string;
+  ticketId: string;
+  tokenHash: string;
+  resolvedAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationDeliveryRow extends Entity {
+  tenantId: string;
+  ticketId: string;
+  notificationId: string;
+  acknowledgementId: string | null;
+  status: "pending" | "sending" | "sent" | "failed" | "suppressed";
+  attempts: number;
+  nextAttemptAt: string;
+  leaseUntil: string | null;
+  owner: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface NotificationRow extends Entity {

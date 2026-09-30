@@ -45,6 +45,7 @@ export class PrismaCollection<T extends Entity> implements Collection<T> {
 
   async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
     const args: any = { where: where ?? undefined };
+    if (options?.afterId) args.where = { ...where, id: { gt: options.afterId } };
     if (options?.skip !== undefined) args.skip = options.skip;
     if (options?.take !== undefined) args.take = options.take;
     if (options?.orderBy) {
@@ -67,16 +68,18 @@ export class PrismaCollection<T extends Entity> implements Collection<T> {
     try {
       const row = await this.delegate.update({ where: { id }, data: stripUndefined(patch) });
       return serialize<T>(row);
-    } catch {
-      return null;
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2025") return null;
+      throw error;
     }
   }
   async remove(id: string): Promise<boolean> {
     try {
       await this.delegate.delete({ where: { id } });
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2025") return false;
+      throw error;
     }
   }
   async updateIf(id: string, expected: Partial<T>, patch: Partial<T>): Promise<T | null> {
@@ -128,6 +131,10 @@ export class PrismaStore implements DataStore {
   readonly emails: PrismaCollection<any>;
   readonly calendars: PrismaCollection<any>;
   readonly webhookDeliveries: PrismaCollection<any>;
+  readonly jobLeases: PrismaCollection<any>;
+  readonly publicRateLimits: PrismaCollection<any>;
+  readonly acknowledgements: PrismaCollection<any>;
+  readonly notificationDeliveries: PrismaCollection<any>;
 
   constructor(
     private readonly p: any = prismaClient(),
@@ -162,6 +169,10 @@ export class PrismaStore implements DataStore {
     this.emails = new PrismaCollection<any>(p.emailMessage);
     this.calendars = new PrismaCollection<any>(p.businessCalendar);
     this.webhookDeliveries = new PrismaCollection<any>(p.webhookDelivery);
+    this.jobLeases = new PrismaCollection<any>(p.jobLease);
+    this.publicRateLimits = new PrismaCollection<any>(p.publicRateLimit);
+    this.acknowledgements = new PrismaCollection<any>(p.ticketAcknowledgement);
+    this.notificationDeliveries = new PrismaCollection<any>(p.notificationDelivery);
   }
 
   async ready(): Promise<void> {
@@ -170,7 +181,8 @@ export class PrismaStore implements DataStore {
 
   async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
     if (this.transactionScoped) return work(this);
-    return this.p.$transaction(
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.p.$transaction(
       (tx: any) => work(new PrismaStore(tx, true)),
       {
         // Neon's compute can need a few seconds to wake and PgBouncer may queue
@@ -178,7 +190,13 @@ export class PrismaStore implements DataStore {
         // default is too short for otherwise healthy production operations.
         maxWait: 10_000,
         timeout: 30_000,
+        isolationLevel: "Serializable",
       }
-    );
+      ); } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (attempt >= 3 || (code !== "P2034" && code !== "P2002")) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20 * 2 ** attempt));
+      }
+    }
   }
 }

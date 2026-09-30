@@ -111,9 +111,10 @@ function ticketPayload(ticket: TicketRow, event: TicketWebhookEvent): Record<str
 
 export async function queueTicketWebhookEvent(
   ticket: TicketRow,
-  event: TicketWebhookEvent
+  event: TicketWebhookEvent,
+  transactionStore?: import("../data/store").DataStore
 ): Promise<void> {
-  const store = await getStore();
+  const store = transactionStore ?? await getStore();
   const keys = await store.apiKeys.list({ tenantId: ticket.tenantId, active: true });
   const subscribers = keys.filter(
     (key) =>
@@ -138,6 +139,8 @@ export async function queueTicketWebhookEvent(
       updatedAt: ts,
     };
     await store.webhookDeliveries.create(delivery);
+    // Workflow transitions commit the callback with the ticket; the minute job sends it after commit.
+    if (transactionStore) continue;
     await deliverWebhookDelivery(delivery.id).catch((error) =>
       logger.warn("integration webhook delivery failed", {
         deliveryId: delivery.id,

@@ -45,6 +45,10 @@ import type {
   UserRow,
   UserInvitationRow,
   WebhookDeliveryRow,
+  JobLeaseRow,
+  PublicRateLimitRow,
+  TicketAcknowledgementRow,
+  NotificationDeliveryRow,
 } from "../domain/models";
 
 // Bump when the row shapes change incompatibly (e.g. the P1-P5 priority
@@ -92,6 +96,10 @@ interface MemDb {
   emails: EmailMessageRow[];
   calendars: BusinessCalendarRow[];
   webhookDeliveries: WebhookDeliveryRow[];
+  jobLeases: JobLeaseRow[];
+  publicRateLimits: PublicRateLimitRow[];
+  acknowledgements: TicketAcknowledgementRow[];
+  notificationDeliveries: NotificationDeliveryRow[];
 }
 
 function emptyDb(): MemDb {
@@ -101,7 +109,7 @@ function emptyDb(): MemDb {
     resolutions: [], citations: [], articles: [], problems: [], changes: [],
     approvals: [], assets: [], cis: [], ciRelationships: [], catalogItems: [],
     slaPolicies: [], automations: [], macros: [], customFieldDefs: [], attachments: [], notifications: [], audit: [],
-    apiKeys: [], emails: [], calendars: [], webhookDeliveries: [],
+    apiKeys: [], emails: [], calendars: [], webhookDeliveries: [], jobLeases: [], publicRateLimits: [], acknowledgements: [], notificationDeliveries: [],
   };
 }
 
@@ -136,6 +144,7 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
 
   async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
     let result = this.rows().filter((r) => matchesWhere(r, where));
+    if (options?.afterId) result = result.filter((row) => row.id > options.afterId!);
     if (options?.orderBy) {
       const { field, dir } = options.orderBy;
       result.sort((a, b) => {
@@ -159,6 +168,7 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
     return this.update(id, patch);
   }
   async create(value: T): Promise<T> {
+    if (this.rows().some((row) => row.id === value.id)) throw new Error("Unique constraint failed on id.");
     if (this.uniqueBy) {
       const key = this.uniqueBy;
       const candidate = value[key];
@@ -200,7 +210,18 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
 
 export class MemoryStore implements DataStore {
   readonly driver = "memory" as const;
-  constructor(private readonly persistToDisk = true) {}
+  constructor(private readonly persistToDisk = true) {
+    // Readers and standalone writes also wait for transactions, so rollback
+    // cannot erase a concurrent write or expose uncommitted rows.
+    for (const collection of Object.values(this)) {
+      if (!(collection instanceof MemoryCollection)) continue;
+      for (const method of ["list", "get", "count", "create", "update", "updateIf", "remove"] as const) {
+        const original = collection[method].bind(collection);
+        Object.defineProperty(collection, method, { writable: true, configurable: true, value: (...args: unknown[]) =>
+          this.exclusive(() => (original as (...values: unknown[]) => Promise<unknown>)(...args)) });
+      }
+    }
+  }
 
   private db: MemDb = emptyDb();
   private initPromise: Promise<void> | null = null;
@@ -272,6 +293,10 @@ export class MemoryStore implements DataStore {
     () => this.db.webhookDeliveries,
     () => this.persist()
   );
+  jobLeases = new MemoryCollection<JobLeaseRow>(() => this.db.jobLeases, () => this.persist());
+  publicRateLimits = new MemoryCollection<PublicRateLimitRow>(() => this.db.publicRateLimits, () => this.persist());
+  acknowledgements = new MemoryCollection<TicketAcknowledgementRow>(() => this.db.acknowledgements, () => this.persist(), undefined, "tokenHash");
+  notificationDeliveries = new MemoryCollection<NotificationDeliveryRow>(() => this.db.notificationDeliveries, () => this.persist());
 
   ready(): Promise<void> {
     this.initPromise ??= this.init();
@@ -280,12 +305,17 @@ export class MemoryStore implements DataStore {
 
   async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
     if (this.transactionContext.getStore()) return work(this);
+    return this.exclusive(() => this.runTransaction(work));
+  }
+
+  private async exclusive<T>(work: () => Promise<T>): Promise<T> {
+    if (this.transactionContext.getStore()) return work();
     const previous = this.transactionTail;
     let release!: () => void;
     this.transactionTail = new Promise<void>((resolve) => { release = resolve; });
     await previous;
     try {
-      return await this.transactionContext.run(true, () => this.runTransaction(work));
+      return await this.transactionContext.run(true, work);
     } finally { release(); }
   }
 
@@ -317,6 +347,8 @@ export class MemoryStore implements DataStore {
     this.db.approvals = this.db.approvals.filter((a) => a.ticketId !== ticketId);
     this.db.attachments = this.db.attachments.filter((a) => a.ticketId !== ticketId);
     this.db.webhookDeliveries = this.db.webhookDeliveries.filter((row) => row.ticketId !== ticketId);
+    this.db.acknowledgements = this.db.acknowledgements.filter((row) => row.ticketId !== ticketId);
+    this.db.notificationDeliveries = this.db.notificationDeliveries.filter((row) => row.ticketId !== ticketId);
     for (const t of this.db.tickets) {
       if (t.mergedIntoId === ticketId) t.mergedIntoId = null;
       if (t.linkedTicketIds?.includes(ticketId)) {
@@ -362,12 +394,15 @@ export class MemoryStore implements DataStore {
     this.db.audit = owned(this.db.audit);
     this.db.apiKeys = owned(this.db.apiKeys);
     this.db.webhookDeliveries = owned(this.db.webhookDeliveries);
+    this.db.acknowledgements = owned(this.db.acknowledgements);
+    this.db.notificationDeliveries = owned(this.db.notificationDeliveries);
     this.db.emails = owned(this.db.emails);
     this.db.calendars = owned(this.db.calendars);
   }
 
   // Load persisted data if present and version-compatible; otherwise seed fresh.
   private async init(): Promise<void> {
+    if (!this.persistToDisk) return;
     if (this.loadFromDisk()) return;
     const seed = await buildSeed();
     this.db = { ...emptyDb(), ...seed };

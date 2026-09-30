@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { config } from "../config";
+import { createHash } from "node:crypto";
 import { defaultTenantId } from "../data";
 import { logger } from "../observability/logger";
 import {
@@ -183,7 +184,8 @@ export async function sendBrevoMail(
   to: string,
   subject: string,
   body: string,
-  attachments?: EmailAttachment[]
+  attachments?: EmailAttachment[],
+  idempotencyKey?: string
 ): Promise<void> {
   const { apiKey, sender } = config.brevo;
   if (!apiKey) throw new Error("BREVO_API_KEY not configured");
@@ -198,11 +200,23 @@ export async function sendBrevoMail(
   if (attachments?.length) {
     message.attachment = attachments.map((a) => ({ name: a.filename, content: a.contentBase64 }));
   }
+  if (idempotencyKey) {
+    // Brevo requires UUID syntax; derive a stable UUID-shaped key from our job ID.
+    const hash = createHash("sha256").update(idempotencyKey).digest("hex");
+    message.headers = { idempotencyKey: `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}` };
+  }
 
   const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: { "api-key": apiKey, "Content-Type": "application/json", accept: "application/json" },
     body: JSON.stringify(message),
+    signal: AbortSignal.timeout(10_000),
+    redirect: "error",
   });
-  if (!res.ok) throw new Error(`Brevo sendEmail ${res.status}: ${await res.text()}`);
+  if (!res.ok) {
+    // Do not expose provider bodies: they can echo recipient data or message links.
+    const error = await res.json().catch(() => null) as { code?: unknown } | null;
+    if (idempotencyKey && error?.code === "duplicate_parameter") return;
+    throw new Error(`Brevo sendEmail ${res.status}`);
+  }
 }

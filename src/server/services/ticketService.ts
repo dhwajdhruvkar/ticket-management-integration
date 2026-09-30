@@ -11,12 +11,14 @@ import { getStore } from "../data";
 import { newId, now, ticketReference } from "../domain/ids";
 import { derivePriority } from "../domain/priority";
 import { publishEvent } from "../events/bus";
+import { queueLifecycle } from "../notify/workflowOutbox";
 import { logger } from "../observability/logger";
 import {
   queueTicketWebhookEvent,
   type TicketWebhookEvent,
 } from "./integrationWebhookService";
 import { slaPausePatch, slaStatus, type SlaStatus } from "./slaService";
+import { workflowMutationPatch, WorkflowError } from "./workflowService";
 import type {
   ApprovalRow,
   AssignmentGroupRow,
@@ -72,7 +74,7 @@ export interface NewTicketInput {
   integrationKeyId?: string;
 }
 
-import { pageCollection, type ListOptions, type PageResult } from "../data/store";
+import { pageCollection, type DataStore, type ListOptions, type PageResult } from "../data/store";
 
 export async function listTickets(
   tenantId: string,
@@ -236,8 +238,17 @@ export async function createTicket(
     updatedAt: ts,
     deletedAt: null,
   };
-  await store.tickets.create(ticket);
-  await recordEvent(ticket.id, "created", `Ticket ingested via ${ticket.channel}.`);
+  const workflowSettings = (await store.tenants.get(tenantId))?.workflowSettings;
+  if (workflowSettings?.enabled && ["incident", "service_request"].includes(ticket.type)) {
+    ticket.workflow = { phase: "service_desk", queuedAt: ts, visitId: newId("visit") };
+    ticket.workflowVersion = 1;
+    ticket.assignmentGroupId = workflowSettings.serviceDeskGroupId;
+    ticket.assigneeId = null;
+  }
+  await store.transaction(async (tx) => {
+  await tx.tickets.create(ticket);
+  const event = await recordEvent(ticket.id, "created", `Ticket ingested via ${ticket.channel}.`, undefined, tx);
+  await queueLifecycle(tx, ticket, event.id, event.type);
   await appendAudit({
     tenantId,
     actor,
@@ -251,6 +262,7 @@ export async function createTicket(
       channel: ticket.channel,
       priority: ticket.priority,
     },
+  }, tx);
   });
   await queueTicketWebhookEvent(ticket, "ticket.created").catch((error) =>
     logger.warn("could not queue ticket.created callback", {
@@ -269,7 +281,8 @@ export async function createTicket(
 export async function mutateTicket(
   id: string,
   patch: Partial<TicketRow>,
-  event?: { type: string; message: string; meta?: Record<string, unknown> }
+  event?: { type: string; message: string; meta?: Record<string, unknown> },
+  message?: { authorKind: TicketMessageRow["authorKind"]; authorName: string; visibility: MessageVisibility; body: string }
 ): Promise<TicketRow | null> {
   const store = await getStore();
   const current = await store.tickets.get(id);
@@ -295,10 +308,31 @@ export async function mutateTicket(
     }
   }
 
-  const updated = await store.tickets.update(id, { ...full, updatedAt: now() });
-  if (updated && event) {
-    await recordEvent(id, event.type, event.message, event.meta);
-  }
+  full = await workflowMutationPatch(current, full, event?.meta);
+  const persist = async (tx: DataStore) => {
+    if (full.status === "resolved") {
+      // Read inside the serializable transaction: retries must not reuse stale resolution eligibility.
+      const fresh = await tx.tickets.get(id);
+      if (!fresh || fresh.status !== current.status || fresh.resolvedAt !== current.resolvedAt || fresh.status === "resolved") throw new WorkflowError("Ticket changed or is already resolved. Refresh and try again.");
+    }
+    const row = current.workflow
+      ? await tx.tickets.updateIf(id, { tenantId: current.tenantId, workflowVersion: current.workflowVersion }, { ...full, updatedAt: now() })
+      : await tx.tickets.update(id, { ...full, updatedAt: now() });
+    if (!row && current.workflow) throw new WorkflowError("Ticket changed. Refresh and try again.");
+    if (row && message) await tx.messages.create({ id: newId("msg"), ticketId: id, ...message, body: message.body.trim(), createdAt: now() });
+    if (row && event) {
+      const recorded = await recordEvent(id, event.type, event.message, event.meta, tx);
+      const lifecycle = full.status && full.status !== current.status && ["closed", "reopened", "resolved", "pending"].includes(full.status) ? full.status : event.type;
+      await queueLifecycle(tx, { ...row, assigneeId: row.assigneeId ?? current.assigneeId }, recorded.id, lifecycle, message?.visibility === "public" ? message.body : undefined);
+      if (row.workflow) await appendAudit({ tenantId: row.tenantId, ticketId: id, actor: typeof event.meta?.actorId === "string" ? event.meta.actorId : "workflow", action: `ticket.${lifecycle}` }, tx);
+      if (row.status === "resolved" && current.status !== "resolved" && row.resolvedById && event.meta?.actorId === row.resolvedById) {
+        await tx.events.create({ id: newId("evt"), ticketId: id, tenantId: row.tenantId, resolverId: row.resolvedById, type: "resolution_recorded",
+          message: "Agent resolution recorded for performance reporting.", createdAt: row.resolvedAt ?? now() });
+      }
+    }
+    return row;
+  };
+  const updated = current.workflow || message || full.status === "resolved" ? await store.transaction(persist) : await persist(store);
   if (updated) {
     publishEvent({
       type: "ticket.updated",
@@ -386,9 +420,10 @@ export async function recordEvent(
   ticketId: string,
   type: string,
   message: string,
-  meta?: Record<string, unknown>
+  meta?: Record<string, unknown>,
+  storeOverride?: DataStore
 ): Promise<TicketEventRow> {
-  const store = await getStore();
+  const store = storeOverride ?? await getStore();
   const event: TicketEventRow = {
     id: newId("evt"),
     ticketId,

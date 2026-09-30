@@ -57,16 +57,12 @@ export async function appendAudit(
 ): Promise<AuditRow> {
   const store = storeOverride ?? (await getStore());
 
-  // Index allocation is read-then-write; under concurrent writers on Postgres
-  // two appends can race for the same index. The @@unique([tenantId, index])
-  // constraint rejects the loser, and this bounded retry re-reads and re-links
-  // the chain — a lock-free optimistic append.
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const existing = await store.audit.list({ tenantId: input.tenantId });
-    const index = existing.length;
-    const prevHash =
-      index === 0 ? GENESIS_HASH : existing.sort((a, b) => a.index - b.index)[index - 1].hash;
+  // Retry the WHOLE transaction on conflict. Retrying SQL within an aborted
+  // PostgreSQL transaction cannot recover an audit-index collision.
+  return store.transaction(async (tx) => {
+    const [previous] = await tx.audit.list({ tenantId: input.tenantId }, { take: 1, orderBy: { field: "index", dir: "desc" } });
+    const index = previous ? previous.index + 1 : 0;
+    const prevHash = previous?.hash ?? GENESIS_HASH;
 
     const timestamp = now();
     const payload = input.payload ?? {};
@@ -86,13 +82,8 @@ export async function appendAudit(
       prevHash,
       hash,
     };
-    try {
-      return await store.audit.create(record);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("audit append failed after retries");
+    return tx.audit.create(record);
+  });
 }
 
 export interface AuditVerification {

@@ -16,6 +16,8 @@ import { derivePriority, priorityCode } from "../domain/priority";
 import { notifyTemplate } from "../notify/templates";
 import { addMessage, getTicket, mutateTicket } from "./ticketService";
 import { applySla } from "./slaService";
+import { transitionWorkflow, WorkflowError } from "./workflowService";
+import { z } from "zod";
 import type {
   ImpactLevel,
   MessageVisibility,
@@ -46,18 +48,17 @@ export async function agentReply(
   if (!ctx || !body.trim()) return null;
   const isPublic = visibility === "public";
 
-  await addMessage(ticketId, { authorKind: "agent", authorName: agent.name, visibility, body });
-
   const patch: Partial<TicketRow> = {};
   if (isPublic && !ctx.ticket.firstRespondedAt) patch.firstRespondedAt = now();
   // A public reply on a fresh or reopened ticket means an agent is actively
   // working it — move it to in_progress so queues and metrics reflect that.
-  if (isPublic && ["open", "new", "reopened"].includes(ctx.ticket.status)) patch.status = "in_progress";
+  if (isPublic && (!ctx.ticket.workflow || ctx.ticket.workflow.acceptedAt) && ["open", "new", "reopened"].includes(ctx.ticket.status)) patch.status = "in_progress";
 
   const updated = await mutateTicket(ticketId, patch, {
     type: isPublic ? "reply_sent" : "note_added",
     message: isPublic ? `${agent.name} replied to the requester.` : `${agent.name} added an internal note.`,
-  });
+    meta: { actorId: agent.id ?? null },
+  }, { authorKind: "agent", authorName: agent.name, visibility, body });
   await appendAudit({
     tenantId: ctx.tenantId,
     actor: `agent:${agent.name}`,
@@ -77,23 +78,23 @@ export async function agentResolve(
   const ctx = await tenantOf(ticketId);
   if (!ctx) return null;
   const ts = now();
+  if (ctx.ticket.workflow && !ctx.ticket.workflow.acceptedAt) throw new WorkflowError("Accept the ticket before resolving it.");
   const patch: Partial<TicketRow> = { status: "resolved", resolvedAt: ts };
+  if (agent.id) {
+    const resolver = await (await getStore()).users.get(agent.id);
+    if (resolver?.active && resolver.tenantId === ctx.tenantId && ["agent", "manager", "tenant_admin", "super_admin"].includes(resolver.role)) patch.resolvedById = resolver.id;
+  }
   if (resolutionNotes?.trim()) patch.resolutionNotes = resolutionNotes.trim();
 
   if (replyBody && replyBody.trim()) {
-    await addMessage(ticketId, {
-      authorKind: "agent",
-      authorName: agent.name,
-      visibility: "public",
-      body: replyBody,
-    });
     if (!ctx.ticket.firstRespondedAt) patch.firstRespondedAt = ts;
   }
 
   const updated = await mutateTicket(ticketId, patch, {
     type: "resolved",
     message: `${agent.name} resolved the ticket.`,
-  });
+    meta: { actorId: agent.id ?? null },
+  }, replyBody?.trim() ? { authorKind: "agent", authorName: agent.name, visibility: "public", body: replyBody } : undefined);
   await appendAudit({
     tenantId: ctx.tenantId,
     actor: `agent:${agent.name}`,
@@ -101,7 +102,7 @@ export async function agentResolve(
     ticketId,
     payload: { withReply: !!(replyBody && replyBody.trim()) },
   });
-  await notifyTemplate({
+  if (!ctx.ticket.workflow) await notifyTemplate({
     tenantId: ctx.tenantId,
     to: ctx.ticket.requesterEmail,
     key: "ticket_resolved",
@@ -119,6 +120,7 @@ export async function agentResolve(
 export async function agentClose(ticketId: string, agent: Actor): Promise<TicketRow | null> {
   const ctx = await tenantOf(ticketId);
   if (!ctx) return null;
+  if (ctx.ticket.workflow) throw new WorkflowError("Await requester confirmation or the seven-day no-response closure.");
   const updated = await mutateTicket(
     ticketId,
     { status: "closed", resolvedAt: ctx.ticket.resolvedAt ?? now() },
@@ -160,7 +162,7 @@ export async function reopenTicket(ticketId: string, actor: Actor): Promise<Tick
     ticketId,
     payload: {},
   });
-  if (ctx.ticket.assigneeId) {
+  if (ctx.ticket.assigneeId && !ctx.ticket.workflow) {
     const store = await getStore();
     const assignee = await store.users.get(ctx.ticket.assigneeId);
     if (assignee) {
@@ -245,6 +247,11 @@ export async function assignTicket(
 ): Promise<TicketRow | null> {
   const ctx = await tenantOf(ticketId);
   if (!ctx) return null;
+  if (ctx.ticket.workflow) {
+    if (assignmentGroupId && assignmentGroupId !== ctx.ticket.assignmentGroupId) return transitionWorkflow(ctx.tenantId, ticketId, by, { action: "route", groupId: assignmentGroupId });
+    if (!assigneeId) throw new WorkflowError("Use Decline or Release with a reason to return this ticket to its bucket.");
+    return transitionWorkflow(ctx.tenantId, ticketId, by, { action: "offer", userId: assigneeId });
+  }
   const store = await getStore();
 
   let assigneeName = "Unassigned";
@@ -304,6 +311,17 @@ export async function assignTicket(
   return updated;
 }
 
+export const TicketFieldPatchSchema = z.object({
+  priority: z.enum(["critical", "high", "medium", "low", "very_low"]).optional(),
+  priorityJustification: z.string().trim().max(500).optional(),
+  impact: z.enum(["low", "medium", "high"]).optional(), urgency: z.enum(["low", "medium", "high"]).optional(),
+  category: z.enum(["IT", "HR", "Access", "Software", "Hardware", "Network", "Billing", "Other"]).optional(),
+  subcategory: z.string().max(160).nullish(), tags: z.array(z.string().max(80)).max(50).optional(),
+  status: z.enum(["new", "open", "in_progress", "pending", "auto_resolved", "pending_agent", "escalated", "resolved", "reopened", "closed", "cancelled"]).optional(),
+  assignmentGroupId: z.string().max(100).nullish(), resolutionNotes: z.string().max(10000).nullish(),
+  ciIds: z.array(z.string().max(100)).max(100).optional(), customFields: z.record(z.string().max(100), z.unknown()).optional(),
+}).strict();
+
 export interface TicketFieldPatch {
   priority?: TicketPriority;
   /** Required when manually overriding the derived priority. */
@@ -328,8 +346,13 @@ export async function updateTicketFields(
 ): Promise<TicketRow | null> {
   const ctx = await tenantOf(ticketId);
   if (!ctx) return null;
+  if (ctx.ticket.workflow && patch.status && ["resolved", "closed", "auto_resolved"].includes(patch.status)) throw new WorkflowError("Use the resolution and requester-confirmation actions.");
   const { priorityJustification, ...fields } = patch;
   const next: Partial<TicketRow> = { ...fields };
+  if (patch.status === "resolved" && by.id) {
+    const resolver = await (await getStore()).users.get(by.id);
+    if (resolver?.active && resolver.tenantId === ctx.tenantId && ["agent", "manager", "tenant_admin", "super_admin"].includes(resolver.role)) next.resolvedById = resolver.id;
+  }
   const changes: string[] = [];
 
   // ITIL: impact/urgency edits recompute the priority via the matrix; an
@@ -369,6 +392,7 @@ export async function updateTicketFields(
   let updated = await mutateTicket(ticketId, next, {
     type: "agent_action",
     message: `${by.name} updated ${changes.join(", ")}.`,
+    meta: { actorId: by.id ?? null },
   });
   // SLA targets are per priority, so an escalation has to move the deadlines
   // with it; otherwise a P3-turned-P1 keeps a 24-hour window and reports green
@@ -392,7 +416,7 @@ export async function updateTicketFields(
   });
 
   // Requester-facing "waiting on you" notice when an agent parks the ticket.
-  if (patch.status === "pending" && ctx.ticket.status !== "pending") {
+  if (!ctx.ticket.workflow && patch.status === "pending" && ctx.ticket.status !== "pending") {
     await notifyTemplate({
       tenantId: ctx.tenantId,
       to: ctx.ticket.requesterEmail,
@@ -413,13 +437,6 @@ export async function requesterReply(ticketId: string, requester: Actor, body: s
   if (!ctx || !body.trim()) return null;
   const wasResolved = ["closed", "auto_resolved", "resolved"].includes(ctx.ticket.status);
 
-  await addMessage(ticketId, {
-    authorKind: "requester",
-    authorName: requester.name,
-    visibility: "public",
-    body,
-  });
-
   const patch: Partial<TicketRow> = {};
   if (wasResolved) {
     patch.status = "reopened";
@@ -430,12 +447,12 @@ export async function requesterReply(ticketId: string, requester: Actor, body: s
     const store = await getStore();
     const approvals = await store.approvals.list({ ticketId });
     const heldForApproval = approvals.some((a) => a.state === "pending");
-    if (!heldForApproval) patch.status = "in_progress";
+    if (!heldForApproval) patch.status = ctx.ticket.workflow && !ctx.ticket.workflow.acceptedAt ? "open" : "in_progress";
   }
   const updated = await mutateTicket(ticketId, patch, {
     type: wasResolved ? "reopened" : "reply_sent",
     message: wasResolved ? `${requester.name} replied and reopened the ticket.` : `${requester.name} added a reply.`,
-  });
+  }, { authorKind: "requester", authorName: requester.name, visibility: "public", body });
   await appendAudit({
     tenantId: ctx.tenantId,
     actor: `requester:${requester.name}`,
@@ -462,7 +479,7 @@ export async function submitFeedback(
       message: satisfied
         ? "Requester confirmed the resolution solved their issue."
         : "Requester was unsatisfied; ticket reopened for an agent.",
-      meta: { comment: comment ?? null },
+      meta: { comment: comment ?? null, ...(satisfied ? { closureReason: "requester_confirmed" } : {}) },
     }
   );
   await appendAudit({

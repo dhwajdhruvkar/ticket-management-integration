@@ -42,9 +42,15 @@ import type {
   UserRow,
   UserInvitationRow,
   WebhookDeliveryRow,
+  JobLeaseRow,
+  PublicRateLimitRow,
+  TicketAcknowledgementRow,
+  NotificationDeliveryRow,
 } from "../domain/models";
 
 export interface ListOptions<T> {
+  /** Stable ID cursor; use with orderBy id ascending. */
+  afterId?: string;
   skip?: number;
   take?: number;
   orderBy?: { field: keyof T; dir: "asc" | "desc" };
@@ -118,6 +124,10 @@ export interface DataStore {
   emails: Collection<EmailMessageRow>;
   calendars: Collection<BusinessCalendarRow>;
   webhookDeliveries: Collection<WebhookDeliveryRow>;
+  jobLeases: Collection<JobLeaseRow>;
+  publicRateLimits: Collection<PublicRateLimitRow>;
+  acknowledgements: Collection<TicketAcknowledgementRow>;
+  notificationDeliveries: Collection<NotificationDeliveryRow>;
 }
 
 /** Shallow equality match used by both drivers' `list`/`count`. */

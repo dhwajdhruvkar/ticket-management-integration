@@ -150,12 +150,13 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
 
   const agentMap = new Map<string, AgentStat>();
   for (const t of tickets) {
-    if (!t.assigneeId) continue;
-    const name = users.find((u) => u.id === t.assigneeId)?.name ?? t.assigneeId;
-    const stat = agentMap.get(t.assigneeId) ?? { id: t.assigneeId, name, resolved: 0, open: 0 };
+    const id = OPEN.includes(t.status) ? t.assigneeId : RESOLVED.includes(t.status) ? t.resolvedById : null;
+    if (!id) continue;
+    const name = users.find((u) => u.id === id)?.name ?? "Former staff member";
+    const stat = agentMap.get(id) ?? { id, name, resolved: 0, open: 0 };
     if (OPEN.includes(t.status)) stat.open++;
     else stat.resolved++;
-    agentMap.set(t.assigneeId, stat);
+    agentMap.set(id, stat);
   }
 
   const minutesSaved = autoResolved * ROI_MINUTES_PER_TICKET + suggested * ROI_MINUTES_PER_TICKET * 0.6;

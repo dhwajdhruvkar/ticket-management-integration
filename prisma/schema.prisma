@@ -181,6 +181,7 @@ enum NotificationChannel {
 // ---------------------------------------------------------------------------
 
 model Tenant {
+  workflowSettings Json?
   id         String   @id @default(cuid())
   name       String
   slug       String   @unique
@@ -210,11 +211,15 @@ model Tenant {
   notifications     Notification[]
   emails            EmailMessage[]
   calendars         BusinessCalendar[]
+  acknowledgements TicketAcknowledgement[]
+  notificationDeliveries NotificationDelivery[]
 
   @@index([slug])
 }
 
 model User {
+  availabilitySettings Json?
+  presenceSnapshot Json?
   id                  String    @id @default(cuid())
   tenantId            String
   email               String
@@ -327,6 +332,9 @@ model AssignmentGroup {
 // ---------------------------------------------------------------------------
 
 model Ticket {
+  workflow Json?
+  workflowVersion Int @default(0)
+  resolvedById String?
   id           String         @id @default(cuid())
   reference    String         @unique
   tenantId     String
@@ -397,6 +405,8 @@ model Ticket {
   approvals         Approval[]
   attachments       Attachment[]
   webhookDeliveries WebhookDelivery[]
+  acknowledgements TicketAcknowledgement[]
+  notificationDeliveries NotificationDelivery[]
 
   @@index([tenantId, status])
   @@index([tenantId, type])
@@ -422,6 +432,8 @@ model TicketMessage {
 }
 
 model TicketEvent {
+  tenantId String?
+  resolverId String?
   id        String   @id @default(cuid())
   ticketId  String
   type      String
@@ -431,6 +443,7 @@ model TicketEvent {
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId, type, createdAt])
   @@index([ticketId])
 }
 
@@ -766,6 +779,58 @@ model Attachment {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
+}
+
+model PublicRateLimit {
+  id String @id
+  count Int
+  resetAt DateTime
+  @@index([resetAt])
+}
+
+model JobLease {
+  id String @id
+  owner String
+  leaseUntil DateTime
+  cursor String?
+  lastSuccessAt DateTime?
+  lastRunAt DateTime?
+  lastError String?
+}
+
+model TicketAcknowledgement {
+  id String @id
+  tenantId String
+  ticketId String
+  tokenHash String @unique
+  resolvedAt DateTime
+  expiresAt DateTime
+  usedAt DateTime?
+  createdAt DateTime @default(now())
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  @@index([tenantId, ticketId])
+  @@index([expiresAt])
+}
+
+model NotificationDelivery {
+  id String @id
+  tenantId String
+  ticketId String
+  notificationId String
+  acknowledgementId String?
+  status String @default("pending")
+  attempts Int @default(0)
+  nextAttemptAt DateTime
+  leaseUntil DateTime?
+  owner String?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  @@index([status, nextAttemptAt])
+  @@index([tenantId, createdAt])
 }
 
 model Notification {

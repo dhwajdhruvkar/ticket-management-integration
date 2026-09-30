@@ -250,6 +250,21 @@ export interface CalendarSpec {
   holidays: string[];
 }
 
+/** Calendar intersection for a completed hold; never treat weekends as working pause credit. */
+export function calendarMinutesBetween(from: Date, to: Date, calendar: CalendarSpec): number {
+  const holidays = new Set(calendar.holidays);
+  let cursor = from.getTime(), minutes = 0, steps = 0;
+  while (cursor < to.getTime()) {
+    if (++steps > 24 * 366 * 5) throw new Error("Calendar interval exceeds five years.");
+    const date = new Date(cursor);
+    const z = zonedParts(date, calendar.timezone);
+    const next = Math.min(to.getTime(), cursor + (60 - z.minute) * 60000 - date.getUTCSeconds() * 1000 - date.getUTCMilliseconds());
+    if (calendar.workDays.includes(z.weekday) && !holidays.has(z.ymd) && z.hour >= calendar.startHour && z.hour < calendar.endHour) minutes += (next - cursor) / 60000;
+    cursor = next;
+  }
+  return minutes;
+}
+
 /**
  * Add working minutes according to a business calendar. Walks the wall clock
  * in chunks (remaining minutes inside the current window hour, or a jump to

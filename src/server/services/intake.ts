@@ -70,7 +70,7 @@ export async function intakeTicket(
   }
   await applySla(created);
 
-  await notifyTemplate({
+  if (!created.workflow) await notifyTemplate({
     tenantId,
     to: created.requesterEmail,
     key: "ticket_created",
