@@ -35,3 +35,8 @@ yarn-error.log*
 # prisma generated client
 /src/generated
 .vercel
+
+# Local agent runtimes and regenerated analysis (skills themselves are tracked)
+/.tools/
+/graphify-out/
+/.archify/

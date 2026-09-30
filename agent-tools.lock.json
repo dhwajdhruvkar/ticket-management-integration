@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "repository": "https://github.com/tt-a1i/archify",
+      "revision": "d5a1333d7447c866a765adac7d4d062f2f02e4d2",
+      "version": "3.0.1",
+      "license": "MIT",
+      "upstreamPath": "archify",
+      "skills": [
+        "archify"
+      ]
+    },
+    {
+      "repository": "https://github.com/DietrichGebert/ponytail",
+      "revision": "e3ba2aa6f1e6f0bc4d69eb09c9f0d0a93af56156",
+      "license": "MIT",
+      "upstreamPath": "skills/ponytail",
+      "skills": [
+        "ponytail"
+      ]
+    },
+    {
+      "repository": "https://github.com/Graphify-Labs/graphify",
+      "revision": "1cd9a36c0c57a661d2d2234bc3207e887e1ba104",
+      "package": "graphifyy==0.9.72",
+      "license": "Apache-2.0; retained MIT notices",
+      "installation": "Project skill installed from the pinned Python package using --project --platform agents",
+      "skills": [
+        "graphify"
+      ]
+    },
+    {
+      "repository": "https://github.com/addyosmani/agent-skills",
+      "revision": "2686b620fc1fed2e8f60c704839c766b8594c6b6",
+      "license": "MIT",
+      "upstreamPath": "skills",
+      "skills": [
+        "api-and-interface-design",
+        "browser-testing-with-devtools",
+        "ci-cd-and-automation",
+        "code-review-and-quality",
+        "code-simplification",
+        "constraint-driven-development",
+        "context-engineering",
+        "debugging-and-error-recovery",
+        "deprecation-and-migration",
+        "documentation-and-adrs",
+        "doubt-driven-development",
+        "frontend-ui-engineering",
+        "git-workflow-and-versioning",
+        "idea-refine",
+        "incremental-implementation",
+        "interview-me",
+        "observability-and-instrumentation",
+        "performance-optimization",
+        "planning-and-task-breakdown",
+        "security-and-hardening",
+        "shipping-and-launch",
+        "source-driven-development",
+        "spec-driven-development",
+        "test-driven-development",
+        "using-agent-skills"
+      ]
+    }
+  ],
+  "directories": {
+    ".agents/references": "84b05582f63a3240638cf99ff1b2d43bd7f74d073d179d15038e6017f6782c67",
+    ".agents/skills/archify": "afd3faf3d93adba87f3187cb2bfc5aac04e6999c156cac3c8f3105dfc76a6766",
+    ".agents/skills/ponytail": "98d05c14c7bdfac08410052eb095e1131fc2d967e70ebbd78d98764338c2bf23",
+    ".agents/skills/graphify": "dfedadf06bfc9eada3f4dde9cef2f945df2daf5cb62d609895d9253c1d8d8942",
+    ".agents/skills/api-and-interface-design": "dab793d277984a88ccdb56cfa2abf8ea38b37afe5a601a6005055f18aaa71e7e",
+    ".agents/skills/browser-testing-with-devtools": "68d682e0ce5142d3a75f1bb8320ef2308c200272b1524c7f6d78caf0eb0d09a8",
+    ".agents/skills/ci-cd-and-automation": "483bd838c62e5b35da8ff34e9d2ef1bee7a3adb94a4adbfb3a8656ec810beddf",
+    ".agents/skills/code-review-and-quality": "44a3beaee5170abf2b75086e2697bd51f373592412fff1dd1fbeee70b40f6938",
+    ".agents/skills/code-simplification": "5cb288668707479057796f29164a132413981ecee91c2bb9d381cc4d6ec6e06c",
+    ".agents/skills/constraint-driven-development": "ff5aa5107b15059912c52435795d4231f77a294841dae3fd889220222dce7357",
+    ".agents/skills/context-engineering": "d89f5e68a2b6b731824ad2e64a561f51df607abebea068541c7765389e6dc4c9",
+    ".agents/skills/debugging-and-error-recovery": "8006283c42c17cda58c785613d925d166e24eb2da60889c450072dd14bcc5f8b",
+    ".agents/skills/deprecation-and-migration": "70929a69a9352bd38ce85c416b1ca292b5237de93259259a53a57d405c3381fc",
+    ".agents/skills/documentation-and-adrs": "b67a9f07ed1057963d3d8ab04bb070ee74d93174eee48b563aa235057005c158",
+    ".agents/skills/doubt-driven-development": "0a37344f128b67047e060f799c6a1b7ec0f9a7a5c8f81f1995352be068a7a32f",
+    ".agents/skills/frontend-ui-engineering": "cc78494e6d3b39eb5ce299110deaee6b160595e35c873933425fe0ee7854c7ec",
+    ".agents/skills/git-workflow-and-versioning": "91c8c72654ee6ef163e49df26d1810cb7a6a91a4d8dee5b9f1bc03fd1fb8ec3a",
+    ".agents/skills/idea-refine": "b03a57cc9d5c20a6a2f6714c86b77ef05d99e557638ec59eb3d25d2f4e8f88a9",
+    ".agents/skills/incremental-implementation": "9c717c7dd541eb6a91e705c665dd35921295308568a684625006609d66af5c61",
+    ".agents/skills/interview-me": "0b2d005c06a0060945926468373b13097d09a545a7106b5b9da5efb33d30e9eb",
+    ".agents/skills/observability-and-instrumentation": "f9f0f7174b1a677cbd9735a5940401766ff76544b771c56c289942c3ddbc7797",
+    ".agents/skills/performance-optimization": "36ef84de86a21147c44be6f881808b0ba4cc54a717928fa8852bced31a10a96a",
+    ".agents/skills/planning-and-task-breakdown": "f9de8730b88bbc3be25a3c75090a49c12c1ed6bf6f173b528fd6a296db192b16",
+    ".agents/skills/security-and-hardening": "3ae732109a2794dd7854c802d3ad7d9b942476acca506bf0e30ce0aa0f07c5bb",
+    ".agents/skills/shipping-and-launch": "ebd5985b5f369a8c5eea27a4824779acb212c4400c79d4a44929e81e5aa1ed62",
+    ".agents/skills/source-driven-development": "cc1b0589dad63690cd6c380c13fdc771defe73eefcaa22630b80e7097aec9a87",
+    ".agents/skills/spec-driven-development": "0a583cd1ff29dcd54264bf38e21d78ee8fb52eeca586af8681339792806394ac",
+    ".agents/skills/test-driven-development": "47e240fa636836d19623364a88a6737b033042be80961c3ae9c516f78a979f9e",
+    ".agents/skills/using-agent-skills": "41927b79f274a2a4eac841895bb1c75f7a1c37af2748a6a89e13bce13ff79bbd"
+  }
+}

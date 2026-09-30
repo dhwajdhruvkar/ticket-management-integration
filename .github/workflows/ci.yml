@@ -18,6 +18,8 @@ jobs:
         run: npm ci
       - name: Generate Prisma client
         run: npx prisma generate
+      - name: Verify project agent tools
+        run: npm run agent-tools:check
       - name: Type check
         run: npm run typecheck
       - name: Lint

@@ -1,0 +1,7 @@
+.agents/
+.tools/
+.archify/
+graphify-out/
+agent-tools.lock.json
+requirements-agent-tools.txt
+AGENTS.md

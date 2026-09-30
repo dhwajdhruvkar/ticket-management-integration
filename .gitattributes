@@ -1,0 +1,2 @@
+# Preserve exact vendored bytes used by agent-tools.lock.json on every OS.
+.agents/** -text

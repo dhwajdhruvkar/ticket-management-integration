@@ -6,6 +6,8 @@ A service-desk application for tracking support requests, assigning work, managi
 
 [Live application](https://netlink-support.vercel.app/) · [API integration guide](docs/EXTERNAL_API_GUIDE.md) · [Implementation notes](docs/IMPLEMENTATION_STATUS.md)
 
+Development agents can use the [agent tooling guide](docs/AGENT_TOOLING.md) for Archify diagrams, Ponytail simplicity guidance, Graphify code maps and Addy Osmani's engineering skills.
+
 ## Project highlights
 
 - Ticket lifecycle, assignment, conversation threads and role-based access.

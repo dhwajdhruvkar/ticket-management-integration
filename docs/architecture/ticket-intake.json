@@ -1,0 +1,74 @@
+{
+  "schema_version": 1, "diagram_type": "architecture",
+  "meta": {
+    "title": "Netlink Support Ticket Intake and Tenant Security",
+    "output": ".archify/architecture-ticket-intake/ticket-intake.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration.git",
+      "revision": "c07cc6df5373e02e1bd483ade1a5e6d1fd54f6a5", "provider": "github"
+    }
+  },
+  "components": [
+    {
+      "id": "portal", "type": "frontend", "label": "Service Desk UI",
+      "sublabel": "React + session cookies", "pos": [40, 70], "size": [180, 78],
+      "sources": [{ "path": "src/lib/api.ts", "line": 109, "end_line": 124 }]
+    },
+    {
+      "id": "integration", "type": "external", "label": "External Integration",
+      "sublabel": "Bearer nlk_ API key", "pos": [350, 70], "size": [180, 78],
+      "sources": [{ "path": "src/server/auth/apiKeys.ts", "line": 24, "end_line": 33 }]
+    },
+    {
+      "id": "api", "type": "security", "label": "Tenant Ticket API",
+      "sublabel": "Identity + RBAC + validation", "pos": [350, 300], "size": [180, 88],
+      "sources": [
+        { "path": "src/app/api/v1/tickets/route.ts", "line": 82, "end_line": 144 },
+        { "path": "src/server/guards.ts", "line": 29, "end_line": 51 },
+        { "path": "src/server/context.ts", "line": 62, "end_line": 83 }
+      ]
+    },
+    {
+      "id": "intake", "type": "backend", "label": "Unified Intake",
+      "sublabel": "Triage, SLA, routing, AI", "pos": [690, 300], "size": [180, 88],
+      "sources": [{ "path": "src/server/services/intake.ts", "line": 27, "end_line": 132 }]
+    },
+    {
+      "id": "services", "type": "backend", "label": "Ticket and Audit Services",
+      "sublabel": "Tenant records + hash chain", "pos": [690, 530], "size": [190, 88],
+      "sources": [
+        { "path": "src/server/services/ticketService.ts", "line": 237, "end_line": 252 },
+        { "path": "src/server/audit/auditChain.ts", "line": 54, "end_line": 105 }
+      ]
+    },
+    {
+      "id": "store", "type": "backend", "label": "DataStore Adapter",
+      "sublabel": "Prisma or local memory", "pos": [350, 530], "size": [180, 88],
+      "sources": [
+        { "path": "src/server/data/index.ts", "line": 13, "end_line": 29 },
+        { "path": "src/server/data/prismaStore.ts", "line": 43, "end_line": 64 }
+      ]
+    },
+    {
+      "id": "database", "type": "database", "label": "PostgreSQL",
+      "sublabel": "Production persistence", "pos": [40, 530], "size": [180, 88],
+      "sources": [
+        { "path": "src/server/data/prismaStore.ts", "line": 87, "end_line": 92 },
+        { "path": "prisma/schema.prisma", "line": 20, "end_line": 24 }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "portal-api", "from": "portal", "to": "api", "label": "POST /api/v1/tickets" },
+    { "id": "integration-api", "from": "integration", "to": "api", "label": "Key-bound tenant", "variant": "security" },
+    { "id": "authorized-intake", "from": "api", "to": "intake", "label": "Authorized tenant", "variant": "security" },
+    { "id": "intake-create", "from": "intake", "to": "services", "label": "Create + audit" },
+    { "id": "services-store", "from": "services", "to": "store", "label": "Scoped writes" },
+    { "id": "store-database", "from": "store", "to": "database", "label": "Prisma driver only", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Access checks", "items": ["Session tenant or verified API-key tenant is resolved on the server.", "Creation checks permission, requester identity and request validation."] },
+    { "dot": "emerald", "title": "Configured capabilities", "items": ["Memory mode replaces PostgreSQL for local demos and tests.", "AI resolution requires eligible tickets and autoResolve not false; external providers are optional."] }
+  ]
+}
