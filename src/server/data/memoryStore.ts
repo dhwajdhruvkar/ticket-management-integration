@@ -9,6 +9,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { config } from "../config";
 import { logger } from "../observability/logger";
 import { buildSeed } from "./seed";
@@ -151,6 +152,12 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
     const found = this.rows().find((r) => r.id === id);
     return found ? clone(found) : null;
   }
+  async updateIf(id: string, expected: Partial<T>, patch: Partial<T>): Promise<T | null> {
+    const current = this.rows().find((row) => row.id === id);
+    if (!current || !matchesWhere(current, expected)) return null;
+    // update mutates synchronously before its promise resolves, so the check and write cannot interleave.
+    return this.update(id, patch);
+  }
   async create(value: T): Promise<T> {
     if (this.uniqueBy) {
       const key = this.uniqueBy;
@@ -193,10 +200,13 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
 
 export class MemoryStore implements DataStore {
   readonly driver = "memory" as const;
+  constructor(private readonly persistToDisk = true) {}
 
   private db: MemDb = emptyDb();
   private initPromise: Promise<void> | null = null;
   private transactionDepth = 0;
+  private transactionTail: Promise<void> = Promise.resolve();
+  private transactionContext = new AsyncLocalStorage<boolean>();
   private readonly filePath = path.join(process.cwd(), config.dataDir, "store.json");
 
   tenants = new MemoryCollection<TenantRow>(() => this.db.tenants, () => this.persist(), (id) =>
@@ -269,6 +279,17 @@ export class MemoryStore implements DataStore {
   }
 
   async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
+    if (this.transactionContext.getStore()) return work(this);
+    const previous = this.transactionTail;
+    let release!: () => void;
+    this.transactionTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await this.transactionContext.run(true, () => this.runTransaction(work));
+    } finally { release(); }
+  }
+
+  private async runTransaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {
     const snapshot = clone(this.db);
     this.transactionDepth += 1;
     try {
@@ -382,7 +403,7 @@ export class MemoryStore implements DataStore {
   // Flush the entire DB to store.json. Best-effort: a read-only FS (e.g.
   // serverless) is tolerated and the app keeps running in memory only.
   private persist(): void {
-    if (this.transactionDepth > 0) return;
+    if (!this.persistToDisk || this.transactionDepth > 0) return;
     try {
       fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
       fs.writeFileSync(this.filePath, JSON.stringify(this.db, null, 2), "utf8");

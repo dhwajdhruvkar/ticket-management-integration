@@ -61,6 +61,8 @@ export interface Collection<T extends Entity> {
   get(id: string): Promise<T | null>;
   create(value: T): Promise<T>;
   update(id: string, patch: Partial<T>): Promise<T | null>;
+  /** Atomic compare-and-set; null means another writer changed the expected fields. */
+  updateIf(id: string, expected: Partial<T>, patch: Partial<T>): Promise<T | null>;
   remove(id: string): Promise<boolean>;
   count(where?: Partial<T>): Promise<number>;
 }

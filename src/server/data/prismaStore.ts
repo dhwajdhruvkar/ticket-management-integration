@@ -79,6 +79,10 @@ export class PrismaCollection<T extends Entity> implements Collection<T> {
       return false;
     }
   }
+  async updateIf(id: string, expected: Partial<T>, patch: Partial<T>): Promise<T | null> {
+    const result = await this.delegate.updateMany({ where: { ...stripUndefined(expected), id }, data: stripUndefined(patch) });
+    return result.count === 1 ? this.get(id) : null;
+  }
   async count(where?: Partial<T>): Promise<number> {
     return this.delegate.count({ where: where ?? undefined });
   }
