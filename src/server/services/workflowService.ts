@@ -28,6 +28,7 @@ export const WorkflowSettingsSchema = z.object({
 export const WorkflowActionSchema = z.object({
   action: z.enum(["claim_review", "route", "pickup", "offer", "accept", "decline", "release", "return_to_service_desk"]),
   groupId: z.string().max(100).optional(), userId: z.string().max(100).optional(), reason: z.string().trim().max(500).optional(),
+  suggestedGroupId: z.string().max(100).optional(),
 });
 export type WorkflowAction = z.infer<typeof WorkflowActionSchema>;
 
@@ -204,7 +205,7 @@ export async function transitionWorkflow(tenantId: string, ticketId: string, act
     }
     const result = await tx.tickets.updateIf(ticket.id, { tenantId, workflowVersion: ticket.workflowVersion }, { ...patch, workflow, workflowVersion: (ticket.workflowVersion ?? 0) + 1, updatedAt: stamp });
     if (!result) throw new WorkflowError("Ticket changed. Refresh and try again.");
-    const event = await tx.events.create({ id: newId("evt"), ticketId, type: `workflow.${input.action}`, message: `${user.name}: ${input.action.replaceAll("_", " ")}${input.reason ? ` — ${input.reason}` : ""}.`, meta: { actorId: user.id, phase: workflow.phase, groupId: result.assignmentGroupId }, createdAt: stamp });
+    const event = await tx.events.create({ id: newId("evt"), ticketId, type: `workflow.${input.action}`, message: `${user.name}: ${input.action.replaceAll("_", " ")}${input.reason ? ` — ${input.reason}` : ""}.`, meta: { actorId: user.id, phase: workflow.phase, groupId: result.assignmentGroupId, ...(input.suggestedGroupId ? { suggestedGroupId: input.suggestedGroupId, followedSuggestion: input.suggestedGroupId === result.assignmentGroupId } : {}) }, createdAt: stamp });
     if (input.action === "return_to_service_desk" && (workflow.returns?.length ?? 0) >= 2) {
       const deskBucket = settings.buckets.find((bucket) => bucket.groupId === settings.serviceDeskGroupId);
       const deskManager = deskBucket ? await tx.users.get(deskBucket.managerId) : null;

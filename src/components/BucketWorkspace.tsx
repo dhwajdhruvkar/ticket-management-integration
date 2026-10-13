@@ -5,6 +5,7 @@ import { apiGet, apiSend } from "@/lib/api";
 import { usePersona } from "./Persona";
 import type { WorkflowBoard } from "@/server/services/workflowBoard";
 import type { WorkflowAction } from "@/server/services/workflowService";
+import type { RoutingRecommendation } from "@/server/services/routingRecommendation";
 import type { TicketRow } from "@/server/domain/models";
 import { WORKFLOW_LABELS } from "@/shared/workflow";
 import { PriorityBadge, timeAgo } from "./ui";
@@ -56,6 +57,9 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
   const [userId, setUserId] = useState("");
   const [reason, setReason] = useState("");
   const [deskReason, setDeskReason] = useState("");
+  const [rec, setRec] = useState<RoutingRecommendation | null>(null);
+  const [recError, setRecError] = useState("");
+  const [recLoading, setRecLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const group = board.groups.find((row) => row.id === ticket.assignmentGroupId);
@@ -63,9 +67,16 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
   const staffName = (id?: string) => board.staff.find((user) => user.id === id)?.name ?? "Former staff member";
   const returns = workflow.returns ?? [];
   const lastReturn = returns[returns.length - 1];
+  async function loadSuggestions() {
+    if (rec || recLoading) return;
+    setRecLoading(true); setRecError("");
+    try { setRec(await apiGet<RoutingRecommendation>(`/tickets/${ticket.id}/workflow`)); }
+    catch (failure) { setRecError(failure instanceof Error ? failure.message : "Could not load suggestions."); }
+    finally { setRecLoading(false); }
+  }
   async function act(action: WorkflowAction["action"], reasonText = reason): Promise<boolean> {
     setBusy(true); setError("");
-    try { await apiSend(`/tickets/${ticket.id}/workflow`, "POST", { action, groupId: groupId || undefined, userId: userId || undefined, reason: reasonText || undefined }); refresh(); return true; }
+    try { await apiSend(`/tickets/${ticket.id}/workflow`, "POST", { action, groupId: groupId || undefined, userId: userId || undefined, reason: reasonText || undefined, suggestedGroupId: action === "route" ? rec?.groups[0]?.groupId : undefined }); refresh(); return true; }
     catch (failure) { setError(failure instanceof Error ? failure.message : "Could not update ticket."); return false; }
     finally { setBusy(false); }
   }
@@ -99,6 +110,24 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
         <button className="btn" disabled={busy || onHold || !deskReason.trim()} onClick={async () => { if (await act("return_to_service_desk", deskReason)) setDeskReason(""); }}>Return to Service Desk</button>
       </>}
     </div>
+    {workflow.phase === "service_desk" && (board.canDispatch || workflow.reviewerId === actorId) && <details style={{ marginTop: 12 }} onToggle={(e) => { if (e.currentTarget.open) void loadSuggestions(); }}>
+      <summary>Suggest department (AI-assisted, advisory)</summary>
+      {recLoading && <p role="status">Checking similar resolutions and knowledge articles…</p>}
+      {recError && <p role="alert">{recError}</p>}
+      {rec && <>
+        {rec.recurring && <p><strong>Recurring issue:</strong> {rec.recurring.count} similar tickets in the last 30 days{rec.recurring.problemId ? " — linked to a problem" : ""}.</p>}
+        {rec.groups.length === 0 && <p className="muted">No confident recommendation — choose manually.</p>}
+        <ul>{rec.groups.map((suggestion) => <li key={suggestion.groupId} style={{ marginBottom: 8 }}>
+          <strong>{suggestion.name}</strong> · {suggestion.confidence} confidence
+          <ul>{suggestion.reasons.map((line, index) => <li key={index}>{line}</li>)}</ul>
+          {suggestion.evidence.tickets.length > 0 && <p className="muted">Similar tickets: {suggestion.evidence.tickets.map((similar, index) => <span key={similar.id}>{index > 0 && ", "}<Link href={`/tickets/${similar.id}`}>{similar.reference}</Link></span>)}</p>}
+          {suggestion.evidence.articles.length > 0 && <p className="muted">Knowledge: {suggestion.evidence.articles.map((article) => article.title).join(", ")}</p>}
+          <button className="btn" onClick={() => setGroupId(suggestion.groupId)}>Use this department</button>
+        </li>)}</ul>
+        {rec.agents.length > 0 && <p className="muted">Agents in {rec.groups[0]?.name}: {rec.agents.map((agent) => `${agent.name} (${agent.availability.status.replaceAll("_", " ")}${agent.similarResolved ? `, ${agent.similarResolved} similar resolved` : ""})`).join("; ")}</p>}
+        <p className="muted">{rec.basis}</p>
+      </>}
+    </details>}
     {error && <p role="alert">{error}</p>}
   </article>;
 }
