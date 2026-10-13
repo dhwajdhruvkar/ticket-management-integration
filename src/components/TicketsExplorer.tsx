@@ -1633,6 +1633,7 @@ function NewTicketForm({
   const [priorityOverrideReason, setPriorityOverrideReason] = useState("");
   const [affectedPeople, setAffectedPeople] = useState<"one" | "team" | "many">("one");
   const [workStopped, setWorkStopped] = useState(false);
+  const [location, setLocation] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
 
@@ -1650,6 +1651,7 @@ function NewTicketForm({
         subcategory: subcategory.trim() || undefined,
         affectedPeople,
         workStopped,
+        requesterLocation: location.trim() || undefined,
         // Requesters don't pick impact/urgency — AI classification fills them.
         ...(isAgent && overridePriority ? { impact, urgency, priorityOverrideReason } : {}),
       });
@@ -1658,6 +1660,7 @@ function NewTicketForm({
       setSubcategory("");
       setAffectedPeople("one");
       setWorkStopped(false);
+      setLocation("");
       onCreated();
       if (ticket.status === "auto_resolved") {
         toast.success({
@@ -1756,7 +1759,21 @@ function NewTicketForm({
         <section>
           <div className="label" style={{ marginBottom: 6 }}>Who and where</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-            <RequesterPicker value={requester} onChange={setRequester} disabled={lockRequester} />
+            <RequesterPicker
+              value={requester}
+              onChange={setRequester}
+              disabled={lockRequester}
+              // Choosing a person pre-fills location; typing a free email keeps what is already entered.
+              onSelect={(choice) => { if (choice) setLocation(choice.location ?? ""); }}
+            />
+            <input
+              className="input"
+              aria-label="Location"
+              placeholder="Location / site"
+              maxLength={160}
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            />
             <select className="select" aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>

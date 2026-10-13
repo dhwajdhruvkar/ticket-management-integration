@@ -118,6 +118,9 @@ export async function POST(req: Request) {
   // Classification hints are optional; malformed values are dropped rather than rejected.
   if (body.affectedPeople !== undefined && !["one", "team", "many"].includes(body.affectedPeople as string)) delete body.affectedPeople;
   if (typeof body.workStopped !== "boolean") delete body.workStopped;
+  // Callers may send a location, never other customFields.
+  if (body.requesterLocation !== undefined && (typeof body.requesterLocation !== "string" || body.requesterLocation.length > 160)) delete body.requesterLocation;
+  delete (body as { customFields?: unknown }).customFields;
   if (body.priorityMode !== undefined && !["automatic", "manual"].includes(body.priorityMode)) return fail("Invalid priority mode.");
   if (!isAgentRole(actor.role as Role)) body.priorityMode = "automatic";
   if (body.priorityMode === "automatic") {

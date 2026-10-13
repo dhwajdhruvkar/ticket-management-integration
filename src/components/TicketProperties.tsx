@@ -105,6 +105,10 @@ export default function TicketProperties({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <Field label="Location">
+        <span style={{ fontSize: "0.86rem" }}>{String(ticket.customFields?.requesterLocation ?? "—")}</span>
+      </Field>
+
       <Field label="Assignee" info={HINTS.assignee}>
         <select
           className="select"

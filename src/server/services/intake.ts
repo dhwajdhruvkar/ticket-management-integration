@@ -36,6 +36,8 @@ export async function intakeTicket(
     (u) => u.email.toLowerCase() === input.requesterEmail.toLowerCase()
   );
   input.requesterId = requesterUser?.id;
+  // Fall back to the requester's profile location when the form did not send one.
+  if (!input.requesterLocation && requesterUser?.location) input.requesterLocation = requesterUser.location;
 
   let cls: Classification | null = null;
   if (!input.category || !(input.priority || (input.impact && input.urgency))) {

@@ -67,6 +67,8 @@ export interface NewTicketInput {
   /** Classification context only; never persisted on the ticket row. */
   affectedPeople?: "one" | "team" | "many";
   workStopped?: boolean;
+  /** Where the requester is; stored as a snapshot in customFields.requesterLocation. */
+  requesterLocation?: string;
   tags?: string[];
   source?: string;
   catalogItemId?: string;
@@ -218,7 +220,8 @@ export async function createTicket(
     channel: input.channel ?? "portal",
     source: input.source ?? null,
     tags: input.tags ?? [],
-    customFields: null,
+    // The requester's location snapshot; the only customFields a new ticket starts with.
+    customFields: input.requesterLocation?.trim() ? { requesterLocation: input.requesterLocation.trim().slice(0, 160) } : null,
     requesterEmail: input.requesterEmail.trim(),
     requesterId: input.requesterId ?? null,
     externalTicketId: input.externalTicketId?.trim() || null,
