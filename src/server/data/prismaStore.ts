@@ -91,7 +91,7 @@ export class PrismaCollection<T extends Entity> implements Collection<T> {
   }
 }
 
-function prismaClient(): PrismaClient {
+export function prismaClient(): PrismaClient {
   const g = globalThis as unknown as { __netlinkPrisma?: PrismaClient };
   g.__netlinkPrisma ??= new PrismaClient(
     config.databaseUrl ? { datasources: { db: { url: config.databaseUrl } } } : undefined

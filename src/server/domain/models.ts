@@ -466,6 +466,8 @@ export interface CustomFieldDefRow extends Entity {
 
 export interface AttachmentRow extends Entity {
   ticketId: string;
+  /** Message the file was attached to; null for ticket-level files. */
+  messageId?: string | null;
   fileName: string;
   mimeType: string;
   sizeBytes: number;

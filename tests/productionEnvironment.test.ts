@@ -88,6 +88,25 @@ describe("Phase 10 production environment", () => {
     expect(validate()).toEqual({ ok: true, errors: [] });
   });
 
+  it("selects database attachment storage only with Postgres and never over Azure", () => {
+    expect(resolveAttachmentStorage(false, false, "database", true)).toBe("database");
+    expect(resolveAttachmentStorage(false, false, "database", false)).toBe("disabled");
+    expect(resolveAttachmentStorage(true, false, "database", false)).toBe("local");
+    expect(resolveAttachmentStorage(false, true, "database", true)).toBe("azure");
+  });
+
+  it("validates ATTACHMENT_STORAGE and caps database uploads at 4 MB in the production check", () => {
+    const noAzure = { AZURE_STORAGE_CONNECTION_STRING: undefined };
+    expect(validate({ ...noAzure, ATTACHMENT_STORAGE: "database", ATTACHMENT_MAX_BYTES: "4194304" })).toEqual({ ok: true, errors: [] });
+    expect(validate({ ...noAzure, ATTACHMENT_STORAGE: "local" }).errors).toContain("ATTACHMENT_STORAGE must be 'database' when provided.");
+    expect(validate({ ...noAzure, ATTACHMENT_STORAGE: "database", ATTACHMENT_MAX_BYTES: "5000000" }).errors).toContain(
+      "ATTACHMENT_MAX_BYTES must not exceed 4194304 when ATTACHMENT_STORAGE=database."
+    );
+    expect(validate({ ...noAzure, ATTACHMENT_STORAGE: "database", DATA_DRIVER: "memory" }).errors).toContain(
+      "ATTACHMENT_STORAGE=database requires DATA_DRIVER=prisma and a PostgreSQL DATABASE_URL."
+    );
+  });
+
   it("accepts an intentional API-only profile with attachments disabled", () => {
     expect(
       validate({

@@ -460,7 +460,7 @@ const CORE_SCHEMAS = {
           },
           attachmentStorage: {
             type: "string",
-            enum: ["local", "azure", "disabled"],
+            enum: ["local", "azure", "database", "disabled"],
           },
         },
       },

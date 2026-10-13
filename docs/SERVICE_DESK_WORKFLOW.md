@@ -172,6 +172,17 @@ performance dates, public confirmation and the scheduler endpoint. Root `/api`
 operations override the normal `/api/v1` server base. Never include live keys in
 exported Postman collections.
 
+## Attachments without Azure
+
+Set `ATTACHMENT_STORAGE=database` to keep attachment bytes in the `AttachmentBlob`
+Postgres table, so no object-storage account is needed. Requirements and limits:
+
+- Requires `DATA_DRIVER=prisma` and a PostgreSQL `DATABASE_URL`. Azure takes precedence if both are configured.
+- Each file is capped at 4 MB (`ATTACHMENT_MAX_BYTES` is clamped to 4194304). Vercel request bodies are about 4.5 MB.
+- Neon's free tier has limited storage. Watch the quota, because files are stored in the database.
+- No virus scanning is performed. The seam is documented in `attachmentService.ts`.
+- Apply the additive migration `20261014090000_attachment_message_and_blob` to an isolated Neon branch, then production, before deploying.
+
 ## Data safety, rollout and rollback
 
 The additive migration is

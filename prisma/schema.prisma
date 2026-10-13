@@ -770,6 +770,7 @@ model CustomFieldDef {
 model Attachment {
   id        String   @id @default(cuid())
   ticketId  String
+  messageId String?
   fileName  String
   mimeType  String
   sizeBytes Int
@@ -779,6 +780,14 @@ model Attachment {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
+  @@index([messageId])
+}
+
+/// Database-backed attachment bytes (ATTACHMENT_STORAGE=database). Capped at 4 MB per file.
+model AttachmentBlob {
+  id        String   @id
+  data      Bytes
+  createdAt DateTime @default(now())
 }
 
 model PublicRateLimit {

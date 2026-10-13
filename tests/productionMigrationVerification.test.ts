@@ -83,6 +83,7 @@ describe("Phase 11 production migration verification", () => {
       "Macro",
       "CustomFieldDef",
       "Attachment",
+      "AttachmentBlob",
       "Notification",
       "ApiKey",
       "EmailMessage",

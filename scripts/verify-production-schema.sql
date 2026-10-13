@@ -13,7 +13,7 @@ BEGIN
     'Problem', 'Change', 'Approval', 'Asset', 'ConfigurationItem',
     'CIRelationship', 'ServiceRequestCatalogItem', 'SlaPolicy',
     'BusinessCalendar', 'AutomationRule', 'Macro', 'CustomFieldDef',
-    'Attachment', 'Notification', 'ApiKey', 'EmailMessage', 'AuditRecord'
+    'Attachment', 'AttachmentBlob', 'Notification', 'ApiKey', 'EmailMessage', 'AuditRecord'
   ]::text[]) AS expected(name)
   WHERE to_regclass(format('%I.%I', 'public', expected.name)) IS NULL;
 
@@ -29,7 +29,7 @@ BEGIN
     'Problem', 'Change', 'Approval', 'Asset', 'ConfigurationItem',
     'CIRelationship', 'ServiceRequestCatalogItem', 'SlaPolicy',
     'BusinessCalendar', 'AutomationRule', 'Macro', 'CustomFieldDef',
-    'Attachment', 'Notification', 'ApiKey', 'EmailMessage', 'AuditRecord'
+    'Attachment', 'AttachmentBlob', 'Notification', 'ApiKey', 'EmailMessage', 'AuditRecord'
   ]::text[]) AS expected(name)
   WHERE NOT EXISTS (
     SELECT 1

@@ -22,7 +22,10 @@ export type AuthMode =
   | "entra"
   | "entra+organization"
   | "api-key-only";
-export type AttachmentStorageMode = "local" | "azure" | "disabled";
+export type AttachmentStorageMode = "local" | "azure" | "database" | "disabled";
+
+/** Vercel request bodies are about 4.5 MB, so database-backed attachments are capped here. */
+export const DATABASE_ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
 
 export function resolveAuthMode(
   demoMode: boolean,
@@ -38,9 +41,13 @@ export function resolveAuthMode(
 
 export function resolveAttachmentStorage(
   demoMode: boolean,
-  blobConfigured: boolean
+  blobConfigured: boolean,
+  requested?: string,
+  postgres = false
 ): AttachmentStorageMode {
-  return blobConfigured ? "azure" : demoMode ? "local" : "disabled";
+  if (blobConfigured) return "azure";
+  if (requested === "database" && postgres) return "database";
+  return demoMode ? "local" : "disabled";
 }
 
 function val(name: string): string | undefined {
@@ -92,7 +99,6 @@ const auth = {
 
 const redisUrl = val("REDIS_URL");
 const blobConnString = val("AZURE_STORAGE_CONNECTION_STRING");
-const attachmentMaxBytes = positiveInteger("ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024);
 
 const entraConfigured = allSet(
   "AUTH_MICROSOFT_ENTRA_ID_ID",
@@ -116,7 +122,11 @@ const authMode = resolveAuthMode(
   publicDemoAuth,
   localAccountAuth
 );
-const attachmentStorage = resolveAttachmentStorage(demoMode, !!blobConnString);
+const attachmentStorage = resolveAttachmentStorage(demoMode, !!blobConnString, val("ATTACHMENT_STORAGE"), dataDriver === "prisma");
+// Database mode is capped at 4 MB whatever the configured limit says.
+const attachmentMaxBytes = attachmentStorage === "database"
+  ? Math.min(positiveInteger("ATTACHMENT_MAX_BYTES", DATABASE_ATTACHMENT_MAX_BYTES), DATABASE_ATTACHMENT_MAX_BYTES)
+  : positiveInteger("ATTACHMENT_MAX_BYTES", 10 * 1024 * 1024);
 
 // Shared secret(s) for inbound webhook HMAC (x-webhook-signature). A per-source
 // secret overrides the generic one. Absent secrets: webhooks are open in demo

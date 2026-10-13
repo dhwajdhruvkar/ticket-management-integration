@@ -13,6 +13,7 @@ import path from "node:path";
 import { config } from "../config";
 import { logger } from "../observability/logger";
 import { azureBlobFromConfig } from "./azureBlob";
+import { DatabaseBlobStore } from "./databaseBlob";
 import {
   validateBlobKey,
   type BlobPutOptions,
@@ -72,6 +73,10 @@ export function getBlobStore(): BlobStore {
     if (config.attachmentStorage === "azure") {
       instance = azureBlobFromConfig();
       if (instance) logger.info("attachments storage: azure-blob", { container: config.attachmentsContainer });
+    }
+    if (!instance && config.attachmentStorage === "database") {
+      instance = new DatabaseBlobStore();
+      logger.info("attachments storage: database");
     }
     if (!instance && config.attachmentStorage === "local") {
       instance = new LocalDiskStore();

@@ -176,6 +176,25 @@ function validateAzureStorage(env, errors) {
   }
 }
 
+// Database-backed attachments are capped at 4 MB per file on Vercel request limits.
+const DATABASE_ATTACHMENT_MAX_BYTES = 4_194_304;
+
+function validateAttachmentStorage(env, errors) {
+  const requested = value(env, "ATTACHMENT_STORAGE");
+  if (!requested) return;
+  if (requested !== "database") {
+    errors.push("ATTACHMENT_STORAGE must be 'database' when provided.");
+    return;
+  }
+  if (value(env, "DATA_DRIVER") !== "prisma" || !value(env, "DATABASE_URL")) {
+    errors.push("ATTACHMENT_STORAGE=database requires DATA_DRIVER=prisma and a PostgreSQL DATABASE_URL.");
+  }
+  const maxBytes = value(env, "ATTACHMENT_MAX_BYTES");
+  if (maxBytes && Number(maxBytes) > DATABASE_ATTACHMENT_MAX_BYTES) {
+    errors.push(`ATTACHMENT_MAX_BYTES must not exceed ${DATABASE_ATTACHMENT_MAX_BYTES} when ATTACHMENT_STORAGE=database.`);
+  }
+}
+
 function validateProductionEnvironmentEnv(env) {
   const errors = [...validateProductionSecurityEnv(env).errors];
 
@@ -210,6 +229,7 @@ function validateProductionEnvironmentEnv(env) {
   validatePublicDemoAuth(env, errors);
   validateLocalAccountAuth(env, errors);
   validateAzureStorage(env, errors);
+  validateAttachmentStorage(env, errors);
 
   return { ok: errors.length === 0, errors };
 }
@@ -229,7 +249,9 @@ function main() {
   const authMode = browserProviders.join("+") || "api-key-only";
   const attachmentStorage = value(process.env, "AZURE_STORAGE_CONNECTION_STRING")
     ? "azure"
-    : "disabled";
+    : value(process.env, "ATTACHMENT_STORAGE") === "database"
+      ? "database"
+      : "disabled";
   console.log(
     `[environment] Production configuration passed (authentication=${authMode}, attachments=${attachmentStorage}).`
   );
