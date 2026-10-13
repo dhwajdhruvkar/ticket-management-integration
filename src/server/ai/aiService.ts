@@ -13,7 +13,7 @@
 
 import { complete } from "./llm";
 import { cosineSimilarity, embed } from "./embeddings";
-import { derivePriority } from "../domain/priority";
+import { derivePriority, PRIORITY_ORDER } from "../domain/priority";
 import type {
   ImpactLevel,
   TicketCategory,
@@ -22,7 +22,7 @@ import type {
   TicketRow,
 } from "../domain/models";
 
-const CATEGORIES: TicketCategory[] = [
+export const CATEGORIES: TicketCategory[] = [
   "IT", "HR", "Access", "Software", "Hardware", "Network", "Billing", "Other",
 ];
 
@@ -37,29 +37,95 @@ export interface Classification {
   /** Derived from impact x urgency via the ITIL matrix. */
   priority: TicketPriority;
   sentiment: "positive" | "neutral" | "negative";
+  /** Human-readable reasons behind any impact/urgency floor the rules applied. */
+  factors: string[];
 }
 
-export async function classifyTicket(subject: string, body: string): Promise<Classification> {
+/** Requester-supplied facts the text alone may not show. Floors only raise; they never lower. */
+export interface ClassificationContext {
+  category?: TicketCategory;
+  type?: "incident" | "service_request";
+  affectedPeople?: "one" | "team" | "many";
+  workStopped?: boolean;
+  vip?: boolean;
+}
+
+export async function classifyTicket(subject: string, body: string, context?: ClassificationContext): Promise<Classification> {
   const text = `${subject}\n${body}`;
   const llm = await complete(
     "You classify IT/HR support tickets following ITIL. Respond ONLY with compact JSON.",
     `Classify this ticket. "impact" is the scope of business effect; "urgency" is the time sensitivity. Return JSON {"category": one of ${JSON.stringify(CATEGORIES)}, "impact": one of ["low","medium","high"], "urgency": one of ["low","medium","high"], "sentiment": one of ["positive","neutral","negative"]}.\n\nTICKET:\n${text}`
   );
   const parsed = safeJson(llm);
-  if (parsed && isClassification(parsed)) {
-    const impact = parsed.impact as ImpactLevel;
-    const urgency = parsed.urgency as ImpactLevel;
-    return {
-      source: "ai",
-      explanation: `AI assessed ${impact} impact and ${urgency} urgency; priority follows the ITIL matrix.`,
-      category: parsed.category as TicketCategory,
-      impact,
-      urgency,
-      priority: derivePriority(impact, urgency),
-      sentiment: parsed.sentiment as Classification["sentiment"],
-    };
+  const base: Classification = parsed && isClassification(parsed)
+    ? {
+        source: "ai",
+        explanation: `AI assessed ${parsed.impact} impact and ${parsed.urgency} urgency; priority follows the ITIL matrix.`,
+        category: parsed.category as TicketCategory,
+        impact: parsed.impact as ImpactLevel,
+        urgency: parsed.urgency as ImpactLevel,
+        priority: derivePriority(parsed.impact as ImpactLevel, parsed.urgency as ImpactLevel),
+        sentiment: parsed.sentiment as Classification["sentiment"],
+        factors: [],
+      }
+    : heuristicClassify(text);
+  return applyBusinessRules(base, text, context);
+}
+
+const RANK: Record<ImpactLevel, number> = { low: 0, medium: 1, high: 2 };
+const SECURITY_WORDS = /(phish|malware|ransomware|breach|compromis|virus|unauthori[sz]ed access|data leak)/i;
+const OUTAGE_WORDS = /(outage|down for (everyone|all)|all users|entire (office|company))/i;
+
+/**
+ * Context and text rules applied after the LLM or heuristic result. They raise
+ * impact/urgency to a floor and recompute priority from the ITIL matrix, so the
+ * outcome matches with or without an LLM. The requester's category is kept.
+ */
+export function applyBusinessRules(base: Classification, text: string, context: ClassificationContext = {}): Classification {
+  let { impact, urgency } = base;
+  const factors = [...base.factors];
+  const raise = (level: ImpactLevel, floor: ImpactLevel): ImpactLevel => (RANK[level] >= RANK[floor] ? level : floor);
+  const addFactor = (factor: string) => { if (!factors.includes(factor)) factors.push(factor); };
+
+  if (context.workStopped === true) {
+    urgency = raise(urgency, "high");
+    addFactor("Requester cannot work");
   }
-  return heuristicClassify(text);
+  if (context.affectedPeople === "many") {
+    impact = raise(impact, "high");
+    addFactor("Many people affected");
+  } else if (context.affectedPeople === "team") {
+    impact = raise(impact, "medium");
+    addFactor("Whole team affected");
+  }
+  const security = SECURITY_WORDS.test(text);
+  if (security) {
+    impact = raise(impact, "high");
+    urgency = raise(urgency, "medium");
+    addFactor("Possible security incident");
+  }
+  if (OUTAGE_WORDS.test(text)) {
+    impact = raise(impact, "high");
+    addFactor("Service outage wording");
+  }
+  if (context.vip === true) {
+    urgency = raise(urgency, "high");
+    addFactor("VIP requester");
+  }
+
+  let priority = derivePriority(impact, urgency);
+  // Security wording is never lower than P2, whatever the matrix says.
+  if (security && PRIORITY_ORDER.indexOf(priority) > PRIORITY_ORDER.indexOf("high")) priority = "high";
+
+  return {
+    ...base,
+    category: context.category ?? base.category,
+    impact,
+    urgency,
+    priority,
+    factors,
+    explanation: base.explanation + (factors.length ? ` Factors: ${factors.join("; ")}.` : ""),
+  };
 }
 
 /** Suggest short topical tags for a ticket (used for auto-tagging on intake). */
@@ -203,7 +269,7 @@ function heuristicClassify(text: string): Classification {
     ? "positive"
     : "neutral";
 
-  return { category, impact, urgency, priority: derivePriority(impact, urgency), sentiment,
+  return { category, impact, urgency, priority: derivePriority(impact, urgency), sentiment, factors: [],
     source: "rules", explanation: `Rules-based fallback assessed ${impact} impact and ${urgency} urgency; priority follows the ITIL matrix.` };
 }
 

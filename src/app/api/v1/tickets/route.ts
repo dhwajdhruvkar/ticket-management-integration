@@ -115,6 +115,9 @@ export async function POST(req: Request) {
   const email = z.string().trim().email().max(254).safeParse(body.requesterEmail);
   if (!email.success) return fail("A valid requester email is required.");
   body.requesterEmail = email.data.toLowerCase();
+  // Classification hints are optional; malformed values are dropped rather than rejected.
+  if (body.affectedPeople !== undefined && !["one", "team", "many"].includes(body.affectedPeople as string)) delete body.affectedPeople;
+  if (typeof body.workStopped !== "boolean") delete body.workStopped;
   if (body.priorityMode !== undefined && !["automatic", "manual"].includes(body.priorityMode)) return fail("Invalid priority mode.");
   if (!isAgentRole(actor.role as Role)) body.priorityMode = "automatic";
   if (body.priorityMode === "automatic") {

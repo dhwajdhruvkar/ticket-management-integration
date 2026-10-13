@@ -64,6 +64,9 @@ export interface NewTicketInput {
   impact?: ImpactLevel;
   urgency?: ImpactLevel;
   priority?: TicketPriority;
+  /** Classification context only; never persisted on the ticket row. */
+  affectedPeople?: "one" | "team" | "many";
+  workStopped?: boolean;
   tags?: string[];
   source?: string;
   catalogItemId?: string;

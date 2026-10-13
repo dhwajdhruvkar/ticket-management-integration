@@ -1631,6 +1631,8 @@ function NewTicketForm({
   const [urgency, setUrgency] = useState<ImpactLevel>("medium");
   const [overridePriority, setOverridePriority] = useState(false);
   const [priorityOverrideReason, setPriorityOverrideReason] = useState("");
+  const [affectedPeople, setAffectedPeople] = useState<"one" | "team" | "many">("one");
+  const [workStopped, setWorkStopped] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
 
@@ -1646,12 +1648,16 @@ function NewTicketForm({
         priorityMode: isAgent && overridePriority ? "manual" : "automatic",
         category: category as TicketCategory,
         subcategory: subcategory.trim() || undefined,
+        affectedPeople,
+        workStopped,
         // Requesters don't pick impact/urgency — AI classification fills them.
         ...(isAgent && overridePriority ? { impact, urgency, priorityOverrideReason } : {}),
       });
       setSubject("");
       setBody("");
       setSubcategory("");
+      setAffectedPeople("one");
+      setWorkStopped(false);
       onCreated();
       if (ticket.status === "auto_resolved") {
         toast.success({
@@ -1727,6 +1733,23 @@ function NewTicketForm({
               value={body}
               onChange={(e) => setBody(e.target.value)}
             />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+              <select
+                className="select"
+                aria-label="People affected"
+                style={{ width: "auto" }}
+                value={affectedPeople}
+                onChange={(e) => setAffectedPeople(e.target.value as "one" | "team" | "many")}
+              >
+                <option value="one">Just me</option>
+                <option value="team">My team</option>
+                <option value="many">Many people</option>
+              </select>
+              <label className="flex items-center" style={{ gap: 8, fontSize: "0.85rem" }}>
+                <input type="checkbox" checked={workStopped} onChange={(e) => setWorkStopped(e.target.checked)} />
+                I cannot work because of this
+              </label>
+            </div>
           </div>
         </section>
 
@@ -1751,7 +1774,14 @@ function NewTicketForm({
           </div>
         </section>
 
-        <PriorityPreview subject={subject} body={body} />
+        <PriorityPreview
+          subject={subject}
+          body={body}
+          category={category as TicketCategory}
+          type={type}
+          affectedPeople={affectedPeople}
+          workStopped={workStopped}
+        />
         {isAgent && <label className="flex items-center" style={{ gap: 8 }}>
           <input type="checkbox" checked={overridePriority} onChange={(e) => setOverridePriority(e.target.checked)} />Override automatic priority
         </label>}

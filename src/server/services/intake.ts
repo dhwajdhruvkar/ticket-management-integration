@@ -10,7 +10,7 @@
 // identically.
 // =============================================================================
 
-import { classifyTicket, suggestTags } from "../ai/aiService";
+import { classifyTicket, suggestTags, type Classification } from "../ai/aiService";
 import { resolveTicket } from "../ai/resolver";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
@@ -28,8 +28,24 @@ export async function intakeTicket(
   tenantId: string,
   input: NewTicketInput & { autoResolve?: boolean }
 ): Promise<TicketRow> {
+  // Resolve the requester first: VIP status is a classification input.
+  // Resolve the relation server-side; API callers can choose an email only
+  // when their acting role allows it, never an arbitrary user id.
+  const store0 = await getStore();
+  const requesterUser = (await store0.users.list({ tenantId })).find(
+    (u) => u.email.toLowerCase() === input.requesterEmail.toLowerCase()
+  );
+  input.requesterId = requesterUser?.id;
+
+  let cls: Classification | null = null;
   if (!input.category || !(input.priority || (input.impact && input.urgency))) {
-    const cls = await classifyTicket(input.subject, input.body);
+    cls = await classifyTicket(input.subject, input.body, {
+      category: input.category,
+      type: input.type === "incident" || input.type === "service_request" ? input.type : undefined,
+      affectedPeople: input.affectedPeople,
+      workStopped: input.workStopped,
+      vip: !!requesterUser?.vip,
+    });
     input.category = input.category ?? cls.category;
     input.impact = input.impact ?? cls.impact;
     input.urgency = input.urgency ?? cls.urgency;
@@ -38,13 +54,6 @@ export async function intakeTicket(
 
   // VIP requesters get an urgency floor (=> priority bump via the ITIL matrix)
   // and a "vip" tag so queues and automations can single them out.
-  const store0 = await getStore();
-  const requesterUser = (await store0.users.list({ tenantId })).find(
-    (u) => u.email.toLowerCase() === input.requesterEmail.toLowerCase()
-  );
-  // Resolve the relation server-side; API callers can choose an email only
-  // when their acting role allows it, never an arbitrary user id.
-  input.requesterId = requesterUser?.id;
   if (requesterUser?.vip) {
     input.urgency = "high";
     input.priority = derivePriority(input.impact ?? "medium", "high");
@@ -59,6 +68,15 @@ export async function intakeTicket(
   }
 
   const created = await createTicket(tenantId, input, input.source ?? "system");
+  if (cls) {
+    await appendAudit({
+      tenantId,
+      actor: "classifier",
+      action: "ticket.priority_assessed",
+      ticketId: created.id,
+      payload: { source: cls.source, impact: cls.impact, urgency: cls.urgency, priority: cls.priority, factors: cls.factors },
+    });
+  }
   if (requesterUser?.vip) {
     await appendAudit({
       tenantId,
