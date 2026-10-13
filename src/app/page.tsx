@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiGetAll } from "@/lib/api";
 import type { Metrics } from "@/server/services/metricsService";
+import type { AgentPerformanceReport } from "@/server/services/agentPerformance";
 import type { TicketRow, UserRow } from "@/server/domain/models";
 import {
   Avatar,
@@ -193,7 +194,7 @@ export default function DashboardPage() {
           <GroupBacklog metrics={metrics} />
         </div>
 
-        <AgentPerformance key={`performance-${persona.id}`}>{(report) => <AgentLeaderboard metrics={{ ...metrics, leaderboard: report.rows.map((row) => ({ id: row.id, name: row.name, resolved: row.resolutions, open: row.liveOpen })) }} users={users} />}</AgentPerformance>
+        <AgentPerformance key={`performance-${persona.id}`}>{(report) => <AgentLeaderboard metrics={{ ...metrics, leaderboard: report.rows.map((row) => ({ id: row.id, name: row.name, resolved: row.resolutions, open: row.liveOpen })) }} users={users} report={report} />}</AgentPerformance>
       </div>
 
       <style jsx>{`
@@ -1281,7 +1282,14 @@ function GroupBacklog({ metrics }: { metrics: Metrics }) {
    Agent leaderboard
    ========================================================================= */
 
-function AgentLeaderboard({ metrics, users }: { metrics: Metrics; users: UserRow[] }) {
+function formatMinutes(mins: number | null) {
+  if (mins === null) return "—";
+  const total = Math.round(mins);
+  const hours = Math.floor(total / 60);
+  return hours ? `${hours}h ${total % 60}m` : `${total % 60}m`;
+}
+
+function AgentLeaderboard({ metrics, users, report }: { metrics: Metrics; users: UserRow[]; report?: AgentPerformanceReport }) {
   const board = metrics.leaderboard;
   const maxTotal = Math.max(1, ...board.map((a) => a.resolved + a.open));
 
@@ -1403,6 +1411,62 @@ function AgentLeaderboard({ metrics, users }: { metrics: Metrics; users: UserRow
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {report && (
+        <div style={{ margin: "1rem -1.2rem 0" }}>
+          <div className="table-scroll">
+            <table className="data-table" style={{ minWidth: 820 }}>
+              <thead>
+                <tr>
+                  <th style={{ paddingLeft: "1.2rem" }}>Agent</th>
+                  <th style={{ textAlign: "right" }}>Today</th>
+                  <th style={{ textAlign: "right" }}>Week</th>
+                  <th style={{ textAlign: "right" }}>Month</th>
+                  <th style={{ textAlign: "right" }}>In period</th>
+                  <th style={{ textAlign: "right" }}>Avg resolution</th>
+                  <th style={{ textAlign: "right" }}>SLA met</th>
+                  <th style={{ textAlign: "right" }}>Reopened</th>
+                  <th style={{ textAlign: "right" }}>Backlog</th>
+                  <th style={{ textAlign: "right", paddingRight: "1.2rem" }}>Oldest open</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.rows.map((row) => (
+                  <tr key={row.id} className="row-hover">
+                    <td style={{ paddingLeft: "1.2rem" }}>{row.name}</td>
+                    <td style={{ textAlign: "right" }}>{row.resolvedToday}</td>
+                    <td style={{ textAlign: "right" }}>{row.resolvedThisWeek}</td>
+                    <td style={{ textAlign: "right" }}>{row.resolvedThisMonth}</td>
+                    <td style={{ textAlign: "right" }}>{row.resolutions}</td>
+                    <td style={{ textAlign: "right" }}>{formatMinutes(row.avgResolutionMins)}</td>
+                    <td style={{ textAlign: "right" }}>{row.slaCompliance === null ? "—" : `${Math.round(row.slaCompliance * 100)}%`}</td>
+                    <td style={{ textAlign: "right" }}>{row.reopened}</td>
+                    <td style={{ textAlign: "right" }}>{row.liveOpen}</td>
+                    <td style={{ textAlign: "right", paddingRight: "1.2rem" }}>{formatMinutes(row.oldestOpenAgeMins)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="table-scroll" style={{ marginTop: 16, padding: "0 1.2rem" }}>
+            <table className="data-table" style={{ minWidth: 320 }}>
+              <thead>
+                <tr>
+                  <th>Resolved per {report.granularity}</th>
+                  <th style={{ textAlign: "right" }}>Resolved</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.series.map((point) => (
+                  <tr key={point.bucket} className="row-hover">
+                    <td>{point.bucket}</td>
+                    <td style={{ textAlign: "right" }}>{point.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </section>
