@@ -23,6 +23,8 @@ import { usePersona } from "@/components/Persona";
 import { AlertTriangle } from "lucide-react";
 import { WorkflowDashboardAlerts } from "@/components/WorkflowAlerts";
 import { AgentPerformance } from "@/components/AgentPerformance";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { WORKFLOW_LABELS } from "@/shared/workflow";
 
 // =============================================================================
 // DashboardPage — the workspace home for agents/managers/admins.
@@ -121,6 +123,18 @@ export default function DashboardPage() {
     if (ready && persona.role !== "requester") void refresh();
   }, [ready, persona.role, persona.id, refresh]);
 
+  // Lighter than refresh(): metrics and recent tickets only, no audit verify or user list, and no skeleton.
+  const refreshLive = useCallback(async () => {
+    try {
+      const [m, rows] = await Promise.all([apiGet<Metrics>("/metrics"), apiGetAll<TicketRow>("/tickets").catch(() => null)]);
+      setMetrics(m);
+      if (rows) setRecent(rows.slice(0, 6));
+    } catch {
+      // Keep the last good numbers; the manual refresh reports errors.
+    }
+  }, []);
+  useLiveRefresh(refreshLive, { enabled: ready && persona.role !== "requester" });
+
   if (!ready) {
     return (
       <div className="page-pad">
@@ -182,6 +196,11 @@ export default function DashboardPage() {
         <WorkflowDashboardAlerts key={persona.id} />
 
         <SlaHealthStrip metrics={metrics} chainValid={chainValid} />
+
+        <p className="muted" role="status" style={{ fontSize: "0.76rem", margin: "0 0 8px" }}>
+          Live · refreshes every 60 s as a fallback
+        </p>
+        <StatusBoard metrics={metrics} />
 
         <PrimaryKpis metrics={metrics} />
 
@@ -668,6 +687,41 @@ function greetingForNow(): string {
 /* =========================================================================
    Primary KPI spotlight
    ========================================================================= */
+
+/** Live counts that link into filtered ticket lists. */
+function StatusBoard({ metrics }: { metrics: Metrics }) {
+  const tiles: { label: string; value: number; href: string }[] = [
+    { label: "Open", value: metrics.openCount, href: "/tickets?view=all_unsolved" },
+    { label: "Assigned", value: metrics.assigned, href: "/tickets?view=all_unsolved&assigned=1" },
+    { label: "In progress", value: metrics.inProgress, href: "/tickets?view=all_unsolved" },
+    { label: "Pending", value: metrics.pending, href: "/tickets?view=pending" },
+    { label: "Resolved", value: metrics.resolvedCount, href: "/tickets?view=recently_solved" },
+    { label: "Overdue", value: metrics.overdue, href: "/tickets?view=all_unsolved&overdue=1" },
+    { label: "Escalated", value: metrics.escalatedTickets, href: "/tickets?view=all_unsolved&escalated=1" },
+  ];
+  const phases = Object.entries(metrics.byWorkflowPhase);
+  return (
+    <section aria-label="Ticket status" style={{ marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+        {tiles.map((tile) => (
+          <Link key={tile.label} href={tile.href} className="panel hover-lift" style={{ padding: "0.75rem 0.9rem", textDecoration: "none", color: "inherit" }}>
+            <div className="muted" style={{ fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>{tile.label}</div>
+            <div style={{ fontSize: "1.6rem", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>{tile.value}</div>
+          </Link>
+        ))}
+      </div>
+      {phases.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+          {phases.map(([phase, count]) => (
+            <Link key={phase} href={`/tickets?view=all_unsolved&phase=${encodeURIComponent(phase)}`} className="badge" style={{ textDecoration: "none" }}>
+              {WORKFLOW_LABELS[phase as keyof typeof WORKFLOW_LABELS] ?? phase}: {count}
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 
 function PrimaryKpis({ metrics }: { metrics: Metrics }) {
   const pct = (n: number) => `${Math.round(n * 100)}%`;

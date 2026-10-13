@@ -13,6 +13,9 @@ import type {
   UserRow,
 } from "@/server/domain/models";
 import { PRIORITY_ORDER } from "@/shared/priority";
+import { WORKFLOW_LABELS } from "@/shared/workflow";
+import { applyTicketFilters, filtersFromParams, SLA_STATE_LABELS, TICKET_CATEGORIES, type SlaState, type TicketFilters } from "@/lib/ticketFilters";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import {
   Avatar,
   IMPACT_LEVELS,
@@ -188,6 +191,9 @@ export default function TicketsExplorer() {
   const newFlag = searchParams.get("new") === "1";
 
   const [tickets, setTickets] = useState<TicketRow[] | null>(null);
+  // Dashboard tiles deep-link here with ?view=, ?overdue=1 and similar filters.
+  const initialFilters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
+  const initialView = searchParams.get("view");
 
   const refresh = useCallback(() => {
     apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
@@ -211,6 +217,8 @@ export default function TicketsExplorer() {
       query={q}
       openFormOnMount={newFlag}
       refresh={refresh}
+      initialFilters={initialFilters}
+      initialView={initialView}
     />
   );
 }
@@ -224,18 +232,32 @@ function AgentExplorer({
   query,
   openFormOnMount,
   refresh,
+  initialFilters,
+  initialView,
 }: {
   tickets: TicketRow[] | null;
   query: string;
   openFormOnMount: boolean;
   refresh: () => void;
+  initialFilters: TicketFilters;
+  initialView: string | null;
 }) {
   const router = useRouter();
   const { persona, ready } = usePersona();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [groups, setGroups] = useState<AssignmentGroupRow[]>([]);
-  const [activeView, setActiveView] = useState("your_unsolved");
+  const startView = VIEWS.some((v) => v.id === initialView) ? (initialView as string) : "your_unsolved";
+  const [activeView, setActiveView] = useState(startView);
+  const [filters, setFilters] = useState<TicketFilters>(initialFilters);
   const [showForm, setShowForm] = useState(openFormOnMount);
+
+  // Follow in-app navigation to a new deep link while this page stays mounted.
+  useEffect(() => {
+    setFilters(initialFilters);
+    setActiveView(startView);
+  }, [initialFilters, startView]);
+
+  useLiveRefresh(refresh, { enabled: ready });
 
   useEffect(() => {
     if (!ready) return;
@@ -266,7 +288,7 @@ function AgentExplorer({
   }, [tickets, persona.id]);
 
   const rows = useMemo(() => {
-    let list = (tickets ?? []).filter((t) => view.predicate(t, persona.id));
+    let list = applyTicketFilters((tickets ?? []).filter((t) => view.predicate(t, persona.id)), filters);
     if (view.sort) list = [...list].sort(view.sort);
     if (query) {
       const needle = query.toLowerCase();
@@ -278,7 +300,7 @@ function AgentExplorer({
       );
     }
     return list;
-  }, [tickets, persona.id, view, query]);
+  }, [tickets, persona.id, view, query, filters]);
 
   if (tickets === null || !ready)
     return (
@@ -422,6 +444,15 @@ function AgentExplorer({
           </div>
         ) : null}
 
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          groups={groups}
+          users={users}
+          shown={rows.length}
+          total={counts[view.id] ?? 0}
+        />
+
         <div className="table-scroll anim-fade-in" style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
           {rows.length === 0 ? (
             <AgentEmptyState
@@ -543,6 +574,74 @@ function AgentExplorer({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const labelOf = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
+
+function FilterBar({
+  filters,
+  onChange,
+  groups,
+  users,
+  shown,
+  total,
+}: {
+  filters: TicketFilters;
+  onChange: (next: TicketFilters) => void;
+  groups: AssignmentGroupRow[];
+  users: UserRow[];
+  shown: number;
+  total: number;
+}) {
+  const active = Object.values(filters).some((value) => value !== undefined && value !== false);
+  const set = (patch: Partial<TicketFilters>) => onChange({ ...filters, ...patch });
+  const pick = (key: keyof TicketFilters, label: string, options: { value: string; label: string }[]) => (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}>
+      <span className="muted">{label}</span>
+      <select
+        className="select"
+        style={{ width: "auto", maxWidth: 180 }}
+        value={(filters[key] as string | undefined) ?? ""}
+        onChange={(event) => set({ [key]: event.target.value || undefined } as Partial<TicketFilters>)}
+      >
+        <option value="">All</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+  const check = (key: "overdue" | "escalated", label: string) => (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}>
+      <input type="checkbox" checked={!!filters[key]} onChange={(event) => set({ [key]: event.target.checked || undefined })} />
+      {label}
+    </label>
+  );
+  return (
+    <div
+      role="group"
+      aria-label="Ticket filters"
+      style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", padding: "0.6rem 1.25rem", borderBottom: "1px solid var(--border)", flexShrink: 0 }}
+    >
+      {pick("priority", "Priority", PRIORITY_ORDER.map((p) => ({ value: p, label: labelOf(p) })))}
+      {pick("groupId", "Technical group", groups.map((g) => ({ value: g.id, label: g.name })))}
+      {pick("assigneeId", "Assignee", [
+        { value: "unassigned", label: "Unassigned" },
+        ...users.filter((u) => u.role !== "requester").map((u) => ({ value: u.id, label: u.name })),
+      ])}
+      {pick("category", "Category", TICKET_CATEGORIES.map((c) => ({ value: c, label: c })))}
+      {pick("slaState", "SLA status", (Object.keys(SLA_STATE_LABELS) as SlaState[]).map((s) => ({ value: s, label: SLA_STATE_LABELS[s] })))}
+      {pick("phase", "Workflow phase", Object.entries(WORKFLOW_LABELS).map(([value, label]) => ({ value, label })))}
+      {check("overdue", "Overdue only")}
+      {check("escalated", "Escalated only")}
+      <button type="button" className="btn" disabled={!active} onClick={() => onChange({})}>
+        Clear filters
+      </button>
+      <span className="muted" role="status" aria-live="polite" style={{ fontSize: "0.78rem", marginLeft: "auto" }}>
+        {shown} of {total} tickets
+      </span>
     </div>
   );
 }

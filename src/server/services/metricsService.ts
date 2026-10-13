@@ -67,6 +67,17 @@ export interface Metrics {
   agentHoursSaved: number;
   costSaved: number;
   leaderboard: AgentStat[];
+  /** Open tickets that have an assignee. */
+  assigned: number;
+  inProgress: number;
+  /** pending + pending_agent. */
+  pending: number;
+  /** Open tickets that are escalated (status or workflow escalation marker). Not the AI escalation count above. */
+  escalatedTickets: number;
+  /** Open tickets past their resolution SLA (same count as slaBreached). */
+  overdue: number;
+  /** Open workflow tickets grouped by their bucket phase. */
+  byWorkflowPhase: Record<string, number>;
 }
 
 const PRIORITY_ORDER = ["critical", "high", "medium", "low", "very_low"];
@@ -159,6 +170,15 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
     agentMap.set(id, stat);
   }
 
+  const openTickets = tickets.filter((t) => OPEN.includes(t.status));
+  const escalatedTickets = openTickets.filter((t) =>
+    t.status === "escalated" || !!(t.workflow?.managerEscalatedAt || t.workflow?.rmEscalatedAt || t.workflow?.resolutionEscalatedAt)
+  ).length;
+  const byWorkflowPhase = countBy(
+    tickets.filter((t) => t.workflow && !["closed", "cancelled"].includes(t.status)),
+    (t) => t.workflow?.phase ?? "unknown"
+  );
+
   const minutesSaved = autoResolved * ROI_MINUTES_PER_TICKET + suggested * ROI_MINUTES_PER_TICKET * 0.6;
   const agentHoursSaved = minutesSaved / 60;
 
@@ -190,6 +210,12 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
     agentHoursSaved,
     costSaved: agentHoursSaved * ROI_AGENT_HOURLY_COST,
     leaderboard: [...agentMap.values()].sort((a, b) => b.resolved - a.resolved || b.open - a.open),
+    assigned: openTickets.filter((t) => !!t.assigneeId).length,
+    inProgress: byStatus.in_progress ?? 0,
+    pending: (byStatus.pending ?? 0) + (byStatus.pending_agent ?? 0),
+    escalatedTickets,
+    overdue: slaBreached,
+    byWorkflowPhase,
   };
 }
 

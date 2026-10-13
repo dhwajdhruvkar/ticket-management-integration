@@ -10,25 +10,34 @@ import type { TicketRow } from "@/server/domain/models";
 import { WORKFLOW_LABELS } from "@/shared/workflow";
 import { PriorityBadge, timeAgo } from "./ui";
 import { WorkflowAlertSummary } from "./WorkflowAlerts";
+import { applyTicketFilters, TICKET_CATEGORIES, type TicketFilters } from "@/lib/ticketFilters";
+import { useLiveRefresh } from "@/lib/useLiveRefresh";
+
+const HEALTH_LABELS: Record<string, string> = {
+  on_track: "On track", warning: "Warning", manager: "Manager due", senior_rm: "Senior RM due", paused: "Paused", accepted: "Accepted",
+};
 
 export function BucketWorkspace({ legacy }: { legacy: ReactNode }) {
   const { persona, ready } = usePersona();
   const [board, setBoard] = useState<WorkflowBoard | null>(null);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState<TicketFilters>({});
+  const [health, setHealth] = useState("");
   const refresh = useCallback(() => {
     apiGet<WorkflowBoard>("/workflow/board").then((value) => { setBoard(value); setError(""); }).catch((failure: Error) => setError(failure.message));
   }, []);
   useEffect(() => {
     if (!ready || persona.role !== "agent") return;
     refresh();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 15000);
     const visible = () => { if (document.visibilityState === "visible") refresh(); };
     document.addEventListener("visibilitychange", visible);
-    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", visible); };
+    return () => { document.removeEventListener("visibilitychange", visible); };
   }, [ready, persona.role, refresh]);
+  useLiveRefresh(refresh, { enabled: ready && persona.role === "agent", pollMs: 30000 });
   if (ready && persona.role !== "agent") return <p>Staff access is required for ticket buckets.</p>;
   if (!board) return <div className="panel" style={{ padding: 20 }} role="status">{error || "Loading ticket buckets…"}{error && <button className="btn" onClick={refresh}>Retry</button>}</div>;
   if (!board.settings.enabled && !board.hasWorkflowTickets) return board.canDispatch ? legacy : <div className="panel" style={{ padding: 20 }}>Your organization’s bucket workflow has not been enabled yet.</div>;
+  const shownTickets = applyTicketFilters(board.tickets, filters).filter((ticket) => !health || board.queueHealth[ticket.id]?.level === health);
   return <main style={{ display: "grid", gap: 16, padding: "clamp(12px, 2vw, 28px)", minWidth: 0 }}>
     <header><h1>Triage &amp; department buckets</h1><p className="muted">Review at the service desk, route to a department, then accept responsibility. Assignment alone is not acceptance.</p></header>
     {error && <p role="alert">Refresh failed: {error}. Showing the last successful update.</p>}
@@ -37,9 +46,16 @@ export function BucketWorkspace({ legacy }: { legacy: ReactNode }) {
     <section className="panel" style={{ padding: 16 }}><h2>Team workload</h2><p className="muted">{board.teamsConfigured ? "Teams connection configured; stale results fall back to in-app availability." : "Teams is not configured. Using in-app working hours and capacity."} <Link href="/settings">Manage availability</Link></p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>{board.staff.map((user) => <div key={user.id}><strong>{user.name}</strong><p>{user.availability.status.replaceAll("_", " ")} · {user.availability.openCount}/{user.availability.capacity} active · {user.availability.source === "teams" ? "Teams" : "In-app"}</p><p className="muted">{user.availability.reason}{user.availability.until ? ` Until ${new Date(user.availability.until).toLocaleString()}.` : ""}</p></div>)}</div>
     </section>
+    <div role="group" aria-label="Bucket filters" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", fontSize: "0.8rem" }}>
+      <label>Priority <select className="select" style={{ width: "auto" }} value={filters.priority ?? ""} onChange={(e) => setFilters({ ...filters, priority: e.target.value || undefined })}><option value="">All</option>{["critical", "high", "medium", "low", "very_low"].map((p) => <option key={p} value={p}>{p.replace("_", " ")}</option>)}</select></label>
+      <label>Assignee <select className="select" style={{ width: "auto" }} value={filters.assigneeId ?? ""} onChange={(e) => setFilters({ ...filters, assigneeId: e.target.value || undefined })}><option value="">All</option><option value="unassigned">Unassigned</option>{board.staff.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>
+      <label>Category <select className="select" style={{ width: "auto" }} value={filters.category ?? ""} onChange={(e) => setFilters({ ...filters, category: e.target.value || undefined })}><option value="">All</option>{TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+      <label>Queue health <select className="select" style={{ width: "auto" }} value={health} onChange={(e) => setHealth(e.target.value)}><option value="">All</option>{Object.entries(HEALTH_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <span className="muted" role="status">{shownTickets.length} of {board.tickets.length} tickets</span>
+    </div>
     {board.settings.buckets.map((bucket) => {
       const group = board.groups.find((row) => row.id === bucket.groupId);
-      const tickets = board.tickets.filter((ticket) => ticket.assignmentGroupId === bucket.groupId);
+      const tickets = shownTickets.filter((ticket) => ticket.assignmentGroupId === bucket.groupId);
       if (!board.canDispatch && !group?.memberIds.includes(persona.id) && !tickets.length) return null;
       return <section className="panel" key={bucket.groupId} style={{ padding: 16 }}>
         <h2>{group?.name ?? "Bucket unavailable"} <span className="muted">({tickets.length})</span></h2>
