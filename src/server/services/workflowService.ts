@@ -6,7 +6,7 @@ import { newId, now } from "../domain/ids";
 import { appendAudit } from "../audit/auditChain";
 import { defaultWorkflowSettings, type TicketWorkflow, type WorkflowSettings } from "@/shared/workflow";
 import { publishEvent } from "../events/bus";
-import { queueLifecycle } from "../notify/workflowOutbox";
+import { queueLifecycle, queueWorkflowNotice } from "../notify/workflowOutbox";
 import { calendarMinutesBetween, type CalendarSpec } from "./slaService";
 import { queueTicketWebhookEvent } from "./integrationWebhookService";
 
@@ -26,7 +26,7 @@ export const WorkflowSettingsSchema = z.object({
     departmentId: z.string().max(100).optional(), managerId: z.string().min(1).max(100), seniorRmId: z.string().min(1).max(100) })).max(100),
 });
 export const WorkflowActionSchema = z.object({
-  action: z.enum(["claim_review", "route", "pickup", "offer", "accept", "decline", "release"]),
+  action: z.enum(["claim_review", "route", "pickup", "offer", "accept", "decline", "release", "return_to_service_desk"]),
   groupId: z.string().max(100).optional(), userId: z.string().max(100).optional(), reason: z.string().trim().max(500).optional(),
 });
 export type WorkflowAction = z.infer<typeof WorkflowActionSchema>;
@@ -159,6 +159,10 @@ export async function transitionWorkflow(tenantId: string, ticketId: string, act
         if (workflow.phase !== "service_desk" || (!manager && workflow.reviewerId !== user.id)) throw new WorkflowError("Claim the service-desk review before routing.", 403);
         const target = settings.buckets.find((bucket) => bucket.groupId === input.groupId && bucket.kind === "department");
         if (!target) throw new WorkflowError("Choose a configured department bucket.", 400);
+        const returned = workflow.returns ?? [];
+        const repeat = returned.some((entry) => entry.fromGroupId === target.groupId) || returned.length >= 2;
+        if (repeat && !manager) throw new WorkflowError("This ticket was returned from that group or has been returned repeatedly. A manager must route it.", 403);
+        if (repeat && !input.reason?.trim()) throw new WorkflowError("Give a reason for routing a ticket that was previously returned.", 400);
         Object.assign(workflow, { phase: "department", reviewerId: workflow.reviewerId ?? user.id, reviewedAt: stamp, queuedAt: stamp, queuedPauseMins: ticket.slaPausedMins ?? 0, queueWorkingPauseMins: 0, visitId: newId("visit") });
         delete workflow.warningAt; delete workflow.managerEscalatedAt; delete workflow.rmEscalatedAt;
         patch.assignmentGroupId = target.groupId; patch.assigneeId = null; patch.status = "open";
@@ -186,10 +190,26 @@ export async function transitionWorkflow(tenantId: string, ticketId: string, act
         delete workflow.acceptedAt; delete workflow.acceptedById;
         patch.assigneeId = null; patch.status = "open";
         break;
+      case "return_to_service_desk": {
+        if (!input.reason?.trim()) throw new WorkflowError("A reason is required.", 400);
+        if (!["department", "awaiting_acceptance", "in_progress"].includes(workflow.phase)) throw new WorkflowError("Only a ticket in a department bucket can be returned to the Service Desk.");
+        if (!manager && !member && ticket.assigneeId !== user.id) throw new WorkflowError("Only a member of the current group, its assignee or a manager can return this ticket.", 403);
+        if (!settings.serviceDeskGroupId) throw new WorkflowError("The Service Desk bucket is not configured.", 400);
+        const returns = [...(workflow.returns ?? []), { at: stamp, byId: user.id, fromGroupId: ticket.assignmentGroupId ?? "", reason: input.reason.trim() }];
+        Object.assign(workflow, { phase: "service_desk", returns, queuedAt: stamp, queuedPauseMins: ticket.slaPausedMins ?? 0, queueWorkingPauseMins: 0, visitId: newId("visit") });
+        for (const key of ["reviewerId", "reviewedAt", "acceptedAt", "acceptedById", "warningAt", "managerEscalatedAt", "rmEscalatedAt", "resolutionEscalatedAt", "resolutionRmEscalatedAt"] as const) delete workflow[key];
+        patch.assignmentGroupId = settings.serviceDeskGroupId; patch.assigneeId = null; patch.status = "open";
+        break;
+      }
     }
     const result = await tx.tickets.updateIf(ticket.id, { tenantId, workflowVersion: ticket.workflowVersion }, { ...patch, workflow, workflowVersion: (ticket.workflowVersion ?? 0) + 1, updatedAt: stamp });
     if (!result) throw new WorkflowError("Ticket changed. Refresh and try again.");
     const event = await tx.events.create({ id: newId("evt"), ticketId, type: `workflow.${input.action}`, message: `${user.name}: ${input.action.replaceAll("_", " ")}${input.reason ? ` — ${input.reason}` : ""}.`, meta: { actorId: user.id, phase: workflow.phase, groupId: result.assignmentGroupId }, createdAt: stamp });
+    if (input.action === "return_to_service_desk" && (workflow.returns?.length ?? 0) >= 2) {
+      const deskBucket = settings.buckets.find((bucket) => bucket.groupId === settings.serviceDeskGroupId);
+      const deskManager = deskBucket ? await tx.users.get(deskBucket.managerId) : null;
+      if (deskManager?.active && deskManager.tenantId === tenantId) await queueWorkflowNotice(tx, result, event.id, deskManager.email, `[${result.reference}] Ticket returned to the Service Desk ${workflow.returns!.length} times`, `${result.reference}: ${result.subject}\nThis ticket keeps being misrouted. Please review and route it.`);
+    }
     await queueLifecycle(tx, { ...result, assigneeId: result.assigneeId ?? ticket.assigneeId }, event.id, event.type);
     await queueTicketWebhookEvent(result, "ticket.updated", tx);
     await appendAudit({ tenantId, ticketId, actor: user.name, action: `workflow.${input.action}`, payload: { phase: workflow.phase, groupId: result.assignmentGroupId } }, tx);

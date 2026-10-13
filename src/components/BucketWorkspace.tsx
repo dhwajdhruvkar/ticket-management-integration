@@ -55,14 +55,18 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
   const [groupId, setGroupId] = useState("");
   const [userId, setUserId] = useState("");
   const [reason, setReason] = useState("");
+  const [deskReason, setDeskReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const group = board.groups.find((row) => row.id === ticket.assignmentGroupId);
   const onHold = ticket.status === "pending" || !!ticket.slaPausedAt;
-  async function act(action: WorkflowAction["action"]) {
+  const staffName = (id?: string) => board.staff.find((user) => user.id === id)?.name ?? "Former staff member";
+  const returns = workflow.returns ?? [];
+  const lastReturn = returns[returns.length - 1];
+  async function act(action: WorkflowAction["action"], reasonText = reason): Promise<boolean> {
     setBusy(true); setError("");
-    try { await apiSend(`/tickets/${ticket.id}/workflow`, "POST", { action, groupId: groupId || undefined, userId: userId || undefined, reason: reason || undefined }); refresh(); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : "Could not update ticket."); }
+    try { await apiSend(`/tickets/${ticket.id}/workflow`, "POST", { action, groupId: groupId || undefined, userId: userId || undefined, reason: reasonText || undefined }); refresh(); return true; }
+    catch (failure) { setError(failure instanceof Error ? failure.message : "Could not update ticket."); return false; }
     finally { setBusy(false); }
   }
   const button = (label: string, action: WorkflowAction["action"], disabled = false) => <button className="btn" disabled={busy || onHold || disabled} onClick={() => act(action)}>{label}</button>;
@@ -71,6 +75,7 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
     <p>{WORKFLOW_LABELS[workflow.phase]} · Entered {timeAgo(workflow.queuedAt)}{onHold ? " · On hold" : ""}</p>
     {board.queueHealth[ticket.id]?.managerDueAt && <p className="muted">Review/pickup due: {new Date(board.queueHealth[ticket.id].managerDueAt!).toLocaleString()} · {board.queueHealth[ticket.id].level.replaceAll("_", " ")}</p>}
     {workflow.reviewerId && <p className="muted">Reviewer: {board.staff.find((user) => user.id === workflow.reviewerId)?.name ?? "Former staff member"}</p>}
+    {lastReturn && <p className="muted">Returned to Service Desk {returns.length}× — last by {staffName(lastReturn.byId)}: &ldquo;{lastReturn.reason}&rdquo;</p>}
     {ticket.assigneeId && <p className="muted">Agent: {board.staff.find((user) => user.id === ticket.assigneeId)?.name ?? "Unavailable"}{workflow.acceptedAt ? ` · Accepted ${timeAgo(workflow.acceptedAt)}` : " · Not yet accepted"}</p>}
     {board.suggestions[ticket.id]?.length > 0 && <details><summary>Suggested agents · recent similar resolutions</summary><ul>{board.suggestions[ticket.id].slice(0, 5).map((suggestion) => <li key={suggestion.id}><strong>{suggestion.name}</strong> — {suggestion.reason} {suggestion.availability.status.replaceAll("_", " ")} · {suggestion.availability.openCount}/{suggestion.availability.capacity} active.</li>)}</ul></details>}
     <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -88,6 +93,10 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
       {["in_progress", "awaiting_acceptance"].includes(workflow.phase) && (ticket.assigneeId === actorId || board.canDispatch) && <>
         <input className="input" style={{ width: "auto", maxWidth: "100%" }} aria-label={`Return reason for ${ticket.reference}`} value={reason} maxLength={500} placeholder="Reason for returning to bucket" onChange={(e) => setReason(e.target.value)} />
         {button(workflow.phase === "in_progress" ? "Release to bucket" : "Decline assignment", workflow.phase === "in_progress" ? "release" : "decline", !reason.trim())}
+      </>}
+      {["department", "awaiting_acceptance", "in_progress"].includes(workflow.phase) && (board.canDispatch || ticket.assigneeId === actorId || group?.memberIds.includes(actorId)) && <>
+        <input className="input" style={{ width: "auto", maxWidth: "100%" }} aria-label={`Reason for returning ${ticket.reference} to the Service Desk`} value={deskReason} maxLength={500} placeholder="Wrong group? Explain why" onChange={(e) => setDeskReason(e.target.value)} />
+        <button className="btn" disabled={busy || onHold || !deskReason.trim()} onClick={async () => { if (await act("return_to_service_desk", deskReason)) setDeskReason(""); }}>Return to Service Desk</button>
       </>}
     </div>
     {error && <p role="alert">{error}</p>}

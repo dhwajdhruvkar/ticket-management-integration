@@ -32,6 +32,8 @@ export interface TicketWorkflow {
   rmEscalatedAt?: string;
   resolutionEscalatedAt?: string;
   resolutionRmEscalatedAt?: string;
+  /** Misrouting history; every Service Desk return is appended and never removed. */
+  returns?: { at: string; byId: string; fromGroupId: string; reason: string }[];
   resolvedById?: string;
   confirmedAt?: string;
   closureReason?: "requester_confirmed" | "no_response" | "staff_closed";

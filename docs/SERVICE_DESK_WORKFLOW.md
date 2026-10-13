@@ -18,6 +18,11 @@ settings are copied or reassigned.
    an assignment. An offer is not acceptance. The agent must accept before
    progressing/resolving. Decline/release requires a reason and returns work to
    the bucket. Concurrent pickup has one winner.
+   Members of a department bucket (or the assignee or a manager) can return a
+   wrongly routed ticket to the Service Desk with a reason. The pickup clock
+   restarts and a return count is shown. After two returns, or a re-route to a
+   group that already returned it, only a manager can route the ticket, and only
+   with a reason.
 4. **Availability:** working-hours calendar, active accepted workload and timed
    Busy/Away determine availability. Capacity defaults to five tickets. Clearing
    an override does not bypass hours/capacity. Unconfigured hours are shown
