@@ -106,6 +106,17 @@ export async function apiGetAll<T>(path: string): Promise<T[]> {
   }
 }
 
+/** POST multipart form data. The browser sets the Content-Type boundary, so no header is passed. */
+export async function apiSendForm<T>(path: string, form: FormData): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1${path}`, { method: "POST", body: form });
+  } catch {
+    throw new ApiError("Could not reach the server. Check your connection and try again.", 0);
+  }
+  return handle<T>(res);
+}
+
 export async function apiSend<T>(
   path: string,
   method: "POST" | "PATCH" | "DELETE",

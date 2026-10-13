@@ -13,6 +13,7 @@ import { config } from "@/server/config";
 import {
   AttachmentError,
   listAttachments,
+  listVisibleAttachments,
   saveAttachments,
 } from "@/server/services/attachmentService";
 import type { AttachmentRow } from "@/server/domain/models";
@@ -48,7 +49,7 @@ async function guard(req: Request, ticketId: string, write: boolean) {
     }
   }
   // Requesters may read and upload on their own tickets.
-  return { ok: true as const, actor: ctx.actor, ticket };
+  return { ok: true as const, actor: ctx.actor, role: ctx.role, ticket };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -62,6 +63,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   });
   if (!parsed.ok) return parsed.response;
   const pagination = parsed.value;
+  // Requesters never see files attached to internal notes.
+  if (!isAgentRole(res.role)) {
+    const visible = await listVisibleAttachments(res.ticket.tenantId, id, false);
+    return paginated(visible, visible.length, pagination);
+  }
   const result = await listAttachments(
     res.ticket.tenantId,
     id,

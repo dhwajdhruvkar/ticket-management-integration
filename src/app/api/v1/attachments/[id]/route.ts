@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { fail } from "@/server/http";
 import { actorContext, isResponse, loadTicket, requirePermission } from "@/server/guards";
-import { can } from "@/server/auth/rbac";
+import { can, isAgentRole } from "@/server/auth/rbac";
 import {
   AttachmentError,
   deleteAttachment,
   getAttachmentMetadata,
+  isAttachmentInternal,
   readAttachment,
 } from "@/server/services/attachmentService";
 
@@ -32,6 +33,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   // Access follows the parent ticket, which carries the tenant and the owner.
   const ticket = await loadTicket(ctx, metadata.ticketId);
   if (isResponse(ticket)) return fail("Attachment not found.", 404);
+
+  // Requesters get the same 404 as a missing file for internal-note attachments.
+  if (!isAgentRole(ctx.role) && (await isAttachmentInternal(ctx.tenantId, metadata))) {
+    return fail("Attachment not found.", 404);
+  }
 
   // Fetch the binary only after tenant and requester ownership checks pass.
   let found: Awaited<ReturnType<typeof readAttachment>>;

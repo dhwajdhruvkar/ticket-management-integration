@@ -43,6 +43,10 @@ const ALLOWED_MIME = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-powerpoint",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "image/heic",
+  "image/bmp",
+  "video/mp4",
+  "application/vnd.ms-outlook",
   "application/octet-stream", // catch-all for email-extracted files; extension still checked
 ]);
 
@@ -126,6 +130,11 @@ function prepareAttachment(input: AttachmentInput): AttachmentInput {
   return { fileName, mimeType, bytes: input.bytes };
 }
 
+/** Checks every file without storing anything, so callers can reject a request before posting its message. */
+export function validateAttachmentFiles(inputs: AttachmentInput[]): void {
+  inputs.forEach(prepareAttachment);
+}
+
 async function rollbackCreated(
   rows: AttachmentRow[],
   blobs: BlobStore
@@ -162,7 +171,8 @@ export async function saveAttachments(
   ticketId: string,
   inputs: AttachmentInput[],
   actor = "system",
-  dependencies: AttachmentDependencies = {}
+  dependencies: AttachmentDependencies = {},
+  options: { messageId?: string; internal?: boolean } = {}
 ): Promise<AttachmentRow[]> {
   if (inputs.length === 0) return [];
   const store = await getStore();
@@ -186,6 +196,7 @@ export async function saveAttachments(
         mimeType: input.mimeType,
         sizeBytes: input.bytes.length,
         blobUrl,
+        messageId: options.messageId ?? null,
         createdAt: now(),
       };
       try {
@@ -210,10 +221,11 @@ export async function saveAttachments(
   }
 
   for (const record of saved) {
+    // Internal-note files keep their name out of the ticket timeline, which requesters can read.
     await recordEvent(
       ticketId,
       "agent_action",
-      `Attachment "${record.fileName}" added by ${actor}.`
+      options.internal ? `An internal attachment was added by ${actor}.` : `Attachment "${record.fileName}" added by ${actor}.`
     );
     await appendAudit({
       tenantId: ticket.tenantId,
@@ -224,10 +236,34 @@ export async function saveAttachments(
         fileName: record.fileName,
         mimeType: record.mimeType,
         sizeBytes: record.sizeBytes,
+        messageId: record.messageId ?? null,
       },
     });
   }
   return saved;
+}
+
+/** Attachments the viewer may see: staff see everything; requesters lose files on internal notes. */
+export async function listVisibleAttachments(tenantId: string, ticketId: string, includeInternal: boolean): Promise<AttachmentRow[]> {
+  if (!(await getTicket(ticketId, tenantId))) return [];
+  const store = await getStore();
+  const [attachments, messages] = await Promise.all([
+    store.attachments.list({ ticketId }),
+    store.messages.list({ ticketId }),
+  ]);
+  const internalMessageIds = new Set(messages.filter((m) => m.visibility === "internal").map((m) => m.id));
+  return attachments
+    .filter((a) => includeInternal || !a.messageId || !internalMessageIds.has(a.messageId))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** True when the file belongs to an internal note. Unknown tickets count as hidden. */
+export async function isAttachmentInternal(tenantId: string, record: AttachmentRow): Promise<boolean> {
+  if (!(await getTicket(record.ticketId, tenantId))) return true;
+  if (!record.messageId) return false;
+  const store = await getStore();
+  const message = await store.messages.get(record.messageId);
+  return message?.visibility === "internal";
 }
 
 export async function saveAttachment(

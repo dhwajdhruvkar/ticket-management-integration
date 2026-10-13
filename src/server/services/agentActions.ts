@@ -42,7 +42,8 @@ export async function agentReply(
   ticketId: string,
   agent: Actor,
   body: string,
-  visibility: MessageVisibility
+  visibility: MessageVisibility,
+  messageId?: string
 ): Promise<TicketRow | null> {
   const ctx = await tenantOf(ticketId);
   if (!ctx || !body.trim()) return null;
@@ -58,7 +59,7 @@ export async function agentReply(
     type: isPublic ? "reply_sent" : "note_added",
     message: isPublic ? `${agent.name} replied to the requester.` : `${agent.name} added an internal note.`,
     meta: { actorId: agent.id ?? null },
-  }, { authorKind: "agent", authorName: agent.name, visibility, body });
+  }, { ...(messageId ? { id: messageId } : {}), authorKind: "agent", authorName: agent.name, visibility, body });
   await appendAudit({
     tenantId: ctx.tenantId,
     actor: `agent:${agent.name}`,
@@ -432,7 +433,7 @@ export async function updateTicketFields(
   return updated;
 }
 
-export async function requesterReply(ticketId: string, requester: Actor, body: string): Promise<TicketRow | null> {
+export async function requesterReply(ticketId: string, requester: Actor, body: string, messageId?: string): Promise<TicketRow | null> {
   const ctx = await tenantOf(ticketId);
   if (!ctx || !body.trim()) return null;
   const wasResolved = ["closed", "auto_resolved", "resolved"].includes(ctx.ticket.status);
@@ -452,7 +453,7 @@ export async function requesterReply(ticketId: string, requester: Actor, body: s
   const updated = await mutateTicket(ticketId, patch, {
     type: wasResolved ? "reopened" : "reply_sent",
     message: wasResolved ? `${requester.name} replied and reopened the ticket.` : `${requester.name} added a reply.`,
-  }, { authorKind: "requester", authorName: requester.name, visibility: "public", body });
+  }, { ...(messageId ? { id: messageId } : {}), authorKind: "requester", authorName: requester.name, visibility: "public", body });
   await appendAudit({
     tenantId: ctx.tenantId,
     actor: `requester:${requester.name}`,

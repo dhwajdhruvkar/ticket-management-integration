@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiGetAll, apiSend } from "@/lib/api";
+import { apiGetAll, apiSend, apiSendForm } from "@/lib/api";
+import { AttachmentPicker } from "./AttachmentPicker";
 import { useTypingPing } from "@/lib/liveTicket";
 import type { TicketView } from "@/server/services/ticketService";
 import type { MacroRow, MessageVisibility, TicketRow } from "@/server/domain/models";
@@ -36,6 +37,7 @@ export default function TicketComposer({
 }) {
   const [tab, setTab] = useState<MessageVisibility>("public");
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [macros, setMacros] = useState<MacroRow[]>([]);
   const [showMacros, setShowMacros] = useState(false);
@@ -97,12 +99,33 @@ export default function TicketComposer({
   const action = (payload: Record<string, unknown>) =>
     apiSend<TicketRow>(`/tickets/${ticket.id}/actions`, "POST", payload);
 
+  // Files go as multipart. If the message posted but its files did not save, clear the
+  // box anyway so the text is not resent and duplicated.
+  async function sendMessage() {
+    try {
+      if (files.length === 0) return await apiSend(`/tickets/${ticket.id}/messages`, "POST", { body, visibility: tab });
+      const form = new FormData();
+      form.append("body", body);
+      form.append("visibility", tab);
+      for (const file of files) form.append("file", file);
+      return await apiSendForm(`/tickets/${ticket.id}/messages`, form);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Your message was sent")) {
+        setBody("");
+        setFiles([]);
+        onChanged();
+      }
+      throw err;
+    }
+  }
+
   function send() {
     run(
       "send",
-      () => apiSend(`/tickets/${ticket.id}/messages`, "POST", { body, visibility: tab }),
+      sendMessage,
       () => {
         setBody("");
+        setFiles([]);
         toast.success({
           title: tab === "public" ? "Reply sent" : "Note added",
           description: tab === "public" ? (ticket.workflow ? "Saved; email notification queued." : "Your reply was saved.") : "Saved as an internal note.",
@@ -159,6 +182,12 @@ export default function TicketComposer({
           }}
           disabled={isResolved && !active}
         />
+
+        {active ? (
+          <div style={{ marginTop: 10 }}>
+            <AttachmentPicker files={files} onChange={setFiles} disabled={!!busy} />
+          </div>
+        ) : null}
 
         <div className="flex items-center justify-between" style={{ gap: 10, marginTop: 10, flexWrap: "wrap" }}>
           <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -346,7 +375,7 @@ export default function TicketComposer({
                 <button className="btn btn-ghost" disabled={!!busy || !hasText} onClick={send}>
                   {busy === "send" ? "Sending…" : "Send"}
                 </button>
-                <button className="btn btn-primary" disabled={!!busy || (!!ticket.workflow && !ticket.workflow.acceptedAt)} title={ticket.workflow && !ticket.workflow.acceptedAt ? "Accept this ticket from its department bucket first" : undefined} onClick={submitSolved}>
+                <button className="btn btn-primary" disabled={!!busy || (!!ticket.workflow && !ticket.workflow.acceptedAt) || files.length > 0} title={ticket.workflow && !ticket.workflow.acceptedAt ? "Accept this ticket from its department bucket first" : files.length > 0 ? "Send or remove the attached files first" : undefined} onClick={submitSolved}>
                   {busy === "solve" ? "Submitting…" : "Submit as Solved"}
                 </button>
               </>

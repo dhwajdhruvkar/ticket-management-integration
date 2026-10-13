@@ -22,6 +22,7 @@ import { workflowMutationPatch, WorkflowError } from "./workflowService";
 import type {
   ApprovalRow,
   AssignmentGroupRow,
+  AttachmentRow,
   CIRow,
   CitationRow,
   ImpactLevel,
@@ -45,6 +46,8 @@ export interface TicketView extends TicketRow {
   assignmentGroup: AssignmentGroupRow | null;
   linkedCIs: CIRow[];
   approvals: ApprovalRow[];
+  /** Files visible to the viewer; internal-note files are omitted for requesters. */
+  attachments: AttachmentRow[];
   sla: SlaStatus;
 }
 
@@ -141,11 +144,12 @@ export async function getTicketView(
   if (!ticket || ticket.deletedAt) return null;
   if (options.tenantId && ticket.tenantId !== options.tenantId) return null;
 
-  const [messages, events, resolutions, approvals, assignee, group] = await Promise.all([
+  const [messages, events, resolutions, approvals, attachments, assignee, group] = await Promise.all([
     store.messages.list({ ticketId: id }),
     store.events.list({ ticketId: id }),
     store.resolutions.list({ ticketId: id }),
     store.approvals.list({ ticketId: id }),
+    store.attachments.list({ ticketId: id }),
     ticket.assigneeId ? store.users.get(ticket.assigneeId) : Promise.resolve(null),
     ticket.assignmentGroupId ? store.groups.get(ticket.assignmentGroupId) : Promise.resolve(null),
   ]);
@@ -165,6 +169,10 @@ export async function getTicketView(
   const visibleMessages = options.includeInternal
     ? messages
     : messages.filter((m) => m.visibility !== "internal");
+  const internalMessageIds = new Set(messages.filter((m) => m.visibility === "internal").map((m) => m.id));
+  const visibleAttachments = attachments
+    .filter((a) => options.includeInternal || !a.messageId || !internalMessageIds.has(a.messageId))
+    .sort(byCreatedAtAsc);
 
   return {
     ...ticket,
@@ -174,6 +182,7 @@ export async function getTicketView(
     approvals: approvals.sort(byCreatedAtAsc),
     sla: slaStatus(ticket),
     messages: visibleMessages.sort(byCreatedAtAsc),
+    attachments: visibleAttachments,
     events: events.sort(byCreatedAtAsc),
     resolution,
   };
@@ -282,7 +291,7 @@ export async function mutateTicket(
   id: string,
   patch: Partial<TicketRow>,
   event?: { type: string; message: string; meta?: Record<string, unknown> },
-  message?: { authorKind: TicketMessageRow["authorKind"]; authorName: string; visibility: MessageVisibility; body: string }
+  message?: { id?: string; authorKind: TicketMessageRow["authorKind"]; authorName: string; visibility: MessageVisibility; body: string }
 ): Promise<TicketRow | null> {
   const store = await getStore();
   const current = await store.tickets.get(id);

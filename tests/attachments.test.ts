@@ -15,12 +15,16 @@ import { getStore } from "@/server/data";
 import { now } from "@/server/domain/ids";
 import {
   deleteAttachment,
+  isAttachmentInternal,
   listAttachments,
+  listVisibleAttachments,
+  validateAttachmentFiles,
   readAttachment,
   saveAttachment,
   saveAttachments,
 } from "@/server/services/attachmentService";
-import { createTicket } from "@/server/services/ticketService";
+import { createTicket, getTicketView } from "@/server/services/ticketService";
+import type { TicketMessageRow } from "@/server/domain/models";
 import {
   AzureBlobStore,
   parseConnectionString,
@@ -455,5 +459,85 @@ describe("Phase 9 Azure Blob adapter", () => {
         "DefaultEndpointsProtocol=ftp;AccountName=ACME;AccountKey=not-base64!"
       )
     ).toBeNull();
+  });
+});
+
+describe("Phase E2 conversation attachments", () => {
+  async function conversation(marker: string) {
+    const ticket = await createTicket(TENANT, {
+      subject: `Conversation files ${marker}`,
+      body: "Files on replies and notes.",
+      requesterEmail: `conversation-${marker}@example.test`,
+    });
+    const store = await getStore();
+    const base = { ticketId: ticket.id, authorKind: "agent", authorName: "Agent", body: "Message", createdAt: now() } as const;
+    const publicMessage = { ...base, id: `msg_pub_${marker}`, visibility: "public" } as TicketMessageRow;
+    const internalMessage = { ...base, id: `msg_int_${marker}`, visibility: "internal", body: "Internal note" } as TicketMessageRow;
+    await store.messages.create(publicMessage);
+    await store.messages.create(internalMessage);
+    return { ticket, publicMessage, internalMessage };
+  }
+  const file = (name: string, mimeType: string) => ({ fileName: name, mimeType, bytes: Buffer.from(name) });
+
+  it("stores the message id on attachments and records it in the audit payload", async () => {
+    const marker = Date.now().toString(36);
+    const { ticket, publicMessage } = await conversation(marker);
+    const blobs = new MemoryBlob();
+    const [saved] = await saveAttachments(TENANT, ticket.id, [file(`reply-${marker}.txt`, "text/plain")], "agent-one", { blobStore: blobs }, { messageId: publicMessage.id });
+    expect(saved.messageId).toBe(publicMessage.id);
+    const store = await getStore();
+    const audit = (await store.audit.list({ tenantId: TENANT })).find((row) => row.action === "ticket.attachment.added" && row.payload.fileName === `reply-${marker}.txt`);
+    expect(audit?.payload).toMatchObject({ messageId: publicMessage.id });
+  });
+
+  it("hides files on internal notes from requesters, but keeps public and ticket-level files", async () => {
+    const marker = Date.now().toString(36);
+    const { ticket, publicMessage, internalMessage } = await conversation(marker);
+    const blobs = new MemoryBlob();
+    await saveAttachments(TENANT, ticket.id, [file(`public-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs }, { messageId: publicMessage.id });
+    await saveAttachments(TENANT, ticket.id, [file(`internal-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs }, { messageId: internalMessage.id, internal: true });
+    await saveAttachments(TENANT, ticket.id, [file(`ticket-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs });
+
+    const requesterView = (await listVisibleAttachments(TENANT, ticket.id, false)).map((row) => row.fileName);
+    expect(requesterView).toEqual(expect.arrayContaining([`public-${marker}.txt`, `ticket-${marker}.txt`]));
+    expect(requesterView).not.toContain(`internal-${marker}.txt`);
+    const staffView = (await listVisibleAttachments(TENANT, ticket.id, true)).map((row) => row.fileName);
+    expect(staffView).toEqual(expect.arrayContaining([`internal-${marker}.txt`]));
+  });
+
+  it("classifies internal-note files, and treats another tenant's view as hidden and empty", async () => {
+    const marker = Date.now().toString(36);
+    const { ticket, publicMessage, internalMessage } = await conversation(marker);
+    const blobs = new MemoryBlob();
+    const [onPublic] = await saveAttachments(TENANT, ticket.id, [file(`p-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs }, { messageId: publicMessage.id });
+    const [onInternal] = await saveAttachments(TENANT, ticket.id, [file(`i-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs }, { messageId: internalMessage.id, internal: true });
+    expect(await isAttachmentInternal(TENANT, onInternal)).toBe(true);
+    expect(await isAttachmentInternal(TENANT, onPublic)).toBe(false);
+    expect(await isAttachmentInternal("tenant_other_attachments", onPublic)).toBe(true);
+    expect(await listVisibleAttachments("tenant_other_attachments", ticket.id, true)).toEqual([]);
+  });
+
+  it("accepts the newly allowed file types and still rejects executables and unlisted types", () => {
+    expect(() => validateAttachmentFiles([
+      file("photo.heic", "image/heic"),
+      file("scan.bmp", "image/bmp"),
+      file("clip.mp4", "video/mp4"),
+      file("message.msg", "application/vnd.ms-outlook"),
+    ])).not.toThrow();
+    expect(() => validateAttachmentFiles([file("payload.exe", "application/octet-stream")])).toThrow(".exe files are not allowed");
+    expect(() => validateAttachmentFiles([file("tool.dat", "application/x-msdownload")])).toThrow("is not allowed");
+  });
+
+  it("omits internal-note attachments from the ticket view for requesters", async () => {
+    const marker = Date.now().toString(36);
+    const { ticket, publicMessage, internalMessage } = await conversation(marker);
+    const blobs = new MemoryBlob();
+    await saveAttachments(TENANT, ticket.id, [file(`vp-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs }, { messageId: publicMessage.id });
+    await saveAttachments(TENANT, ticket.id, [file(`vi-${marker}.txt`, "text/plain")], "agent", { blobStore: blobs }, { messageId: internalMessage.id, internal: true });
+
+    const requester = await getTicketView(ticket.id, { tenantId: TENANT, includeInternal: false });
+    expect(requester?.attachments.map((row) => row.fileName)).toEqual([`vp-${marker}.txt`]);
+    const staff = await getTicketView(ticket.id, { tenantId: TENANT, includeInternal: true });
+    expect(staff?.attachments.map((row) => row.fileName)).toEqual(expect.arrayContaining([`vp-${marker}.txt`, `vi-${marker}.txt`]));
   });
 });

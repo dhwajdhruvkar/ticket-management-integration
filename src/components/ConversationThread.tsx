@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
-import type { MessageAuthorKind, MessageVisibility } from "@/server/domain/models";
+import type { AttachmentRow, MessageAuthorKind, MessageVisibility } from "@/server/domain/models";
 import type { TypingUser } from "@/lib/liveTicket";
 import { timeAgo } from "./ui";
+import { formatBytes } from "./AttachmentPicker";
 
 // =============================================================================
 // ConversationThread
@@ -23,6 +24,8 @@ interface Bubble {
   visibility: MessageVisibility;
   body: string;
   at: string;
+  /** Files attached to this message; download links only, never rendered inline. */
+  attachments?: AttachmentRow[];
 }
 
 /** Nearest scrollable ancestor (the conversation pane has overflow:auto). */
@@ -59,6 +62,7 @@ export default function ConversationThread({
     visibility: m.visibility,
     body: m.body,
     at: m.createdAt,
+    attachments: ticket.attachments.filter((a) => a.messageId === m.id),
   }));
 
   const bubbles = [root, ...rest].filter(
@@ -181,6 +185,7 @@ function MessageBubble({ bubble, ticketId, own }: { bubble: Bubble; ticketId: st
         >
           {bubble.body}
         </div>
+        {bubble.attachments?.length ? <AttachmentLinks attachments={bubble.attachments} /> : null}
         <div className="muted" style={{ fontSize: "0.68rem", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
           You · {timeAgo(bubble.at)}
           <TranslateControl ticketId={ticketId} text={bubble.body} align="right" />
@@ -251,11 +256,26 @@ function MessageBubble({ bubble, ticketId, own }: { bubble: Bubble; ticketId: st
         >
           {bubble.body}
         </div>
+        {bubble.attachments?.length ? <AttachmentLinks attachments={bubble.attachments} /> : null}
         <div style={{ marginTop: 4 }}>
           <TranslateControl ticketId={ticketId} text={bubble.body} align="left" />
         </div>
       </div>
     </div>
+  );
+}
+
+/** Download links for a message's files. Served with Content-Disposition: attachment. */
+function AttachmentLinks({ attachments }: { attachments: AttachmentRow[] }) {
+  return (
+    <ul aria-label="Attachments" style={{ listStyle: "none", padding: 0, margin: "6px 0 0", display: "flex", flexDirection: "column", gap: 4, fontSize: "0.8rem" }}>
+      {attachments.map((a) => (
+        <li key={a.id}>
+          <a href={`/api/v1/attachments/${a.id}`} download>{a.fileName}</a>{" "}
+          <span className="muted">· {formatBytes(a.sizeBytes)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

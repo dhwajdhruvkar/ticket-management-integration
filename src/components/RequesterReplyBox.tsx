@@ -9,10 +9,11 @@
 // =============================================================================
 
 import { useState } from "react";
-import { apiSend } from "@/lib/api";
+import { apiSend, apiSendForm } from "@/lib/api";
 import { useTypingPing } from "@/lib/liveTicket";
 import type { TicketView } from "@/server/services/ticketService";
 import { useToast } from "./Toast";
+import { AttachmentPicker } from "./AttachmentPicker";
 
 export default function RequesterReplyBox({
   ticket,
@@ -22,12 +23,33 @@ export default function RequesterReplyBox({
   onChanged: () => void;
 }) {
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const toast = useToast();
   const pingTyping = useTypingPing(ticket.id);
 
   const isResolved = ["closed", "auto_resolved", "resolved"].includes(ticket.status);
   const showCsat = isResolved && !ticket.satisfaction && (!ticket.workflow || ticket.status === "resolved");
+
+  // Files go as multipart. If the message posted but its files did not save, clear the
+  // box anyway so the text is not resent and duplicated.
+  async function sendReply() {
+    try {
+      if (files.length === 0) return await apiSend(`/tickets/${ticket.id}/messages`, "POST", { body, asRequester: true });
+      const form = new FormData();
+      form.append("body", body);
+      form.append("asRequester", "true");
+      for (const file of files) form.append("file", file);
+      return await apiSendForm(`/tickets/${ticket.id}/messages`, form);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Your message was sent")) {
+        setBody("");
+        setFiles([]);
+        onChanged();
+      }
+      throw err;
+    }
+  }
 
   async function run(key: string, fn: () => Promise<unknown>, onOk: () => void, fail: string) {
     setBusy(key);
@@ -101,6 +123,9 @@ export default function RequesterReplyBox({
             if (e.target.value.trim()) pingTyping();
           }}
         />
+        <div style={{ marginTop: 10 }}>
+          <AttachmentPicker files={files} onChange={setFiles} disabled={!!busy} />
+        </div>
         <div className="flex items-center" style={{ gap: 8, marginTop: 10 }}>
           <button
             className="btn btn-primary"
@@ -108,9 +133,10 @@ export default function RequesterReplyBox({
             onClick={() =>
               run(
                 "reply",
-                () => apiSend(`/tickets/${ticket.id}/messages`, "POST", { body, asRequester: true }),
+                sendReply,
                 () => {
                   setBody("");
+                  setFiles([]);
                   toast.success({ title: "Reply sent", description: "Your message was added to the request." });
                 },
                 "Could not send reply"
