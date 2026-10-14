@@ -73,6 +73,7 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
   const [userId, setUserId] = useState("");
   const [reason, setReason] = useState("");
   const [deskReason, setDeskReason] = useState("");
+  const [routeReason, setRouteReason] = useState("");
   const [rec, setRec] = useState<RoutingRecommendation | null>(null);
   const [recError, setRecError] = useState("");
   const [recLoading, setRecLoading] = useState(false);
@@ -83,6 +84,9 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
   const staffName = (id?: string) => board.staff.find((user) => user.id === id)?.name ?? "Former staff member";
   const returns = workflow.returns ?? [];
   const lastReturn = returns[returns.length - 1];
+  // Mirrors the server rule in transitionWorkflow: re-routing to a group that returned the ticket, or after two returns, is manager-only and needs a reason.
+  const repeatRoute = !!groupId && (returns.some((entry) => entry.fromGroupId === groupId) || returns.length >= 2);
+  const routeBlocked = repeatRoute && !board.canDispatch;
   async function loadSuggestions() {
     if (rec || recLoading) return;
     setRecLoading(true); setRecError("");
@@ -109,7 +113,9 @@ function BucketTicket({ ticket, board, actorId, refresh }: { ticket: TicketRow; 
       {workflow.phase === "service_desk" && !workflow.reviewerId && button("Claim review", "claim_review")}
       {workflow.phase === "service_desk" && (board.canDispatch || workflow.reviewerId === actorId) && <>
         <select className="select" style={{ width: "auto", maxWidth: "100%" }} aria-label={`Department for ${ticket.reference}`} value={groupId} onChange={(e) => setGroupId(e.target.value)}><option value="">Choose department bucket</option>{board.settings.buckets.filter((bucket) => bucket.kind === "department").map((bucket) => <option key={bucket.groupId} value={bucket.groupId}>{board.groups.find((row) => row.id === bucket.groupId)?.name}</option>)}</select>
-        {button("Route to department", "route", !groupId)}
+        {returns.length > 0 && <input className="input" style={{ width: "auto", maxWidth: "100%" }} aria-label={`Reason for routing ${ticket.reference} again`} value={routeReason} maxLength={500} placeholder={repeatRoute ? "Reason required: previously returned" : "Reason for routing (optional)"} onChange={(e) => setRouteReason(e.target.value)} />}
+        <button className="btn" disabled={busy || onHold || !groupId || routeBlocked || (repeatRoute && !routeReason.trim())} onClick={async () => { if (await act("route", routeReason)) setRouteReason(""); }}>Route to department</button>
+        {routeBlocked && <span className="muted" role="status">This ticket was returned from that group or returned repeatedly. A manager must route it.</span>}
       </>}
       {workflow.phase === "department" && group?.memberIds.includes(actorId) && button("Pick up ticket", "pickup")}
       {["department", "awaiting_acceptance"].includes(workflow.phase) && board.canDispatch && <>
