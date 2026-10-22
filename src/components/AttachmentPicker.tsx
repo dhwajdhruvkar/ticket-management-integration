@@ -1,17 +1,11 @@
 "use client";
 
 import { useRef } from "react";
-import { CHAT_ATTACHMENT_LIMITS } from "@/shared/attachments";
+import { CHAT_ATTACHMENT_LIMITS, formatBytes } from "@/shared/attachments";
 import { useToast } from "./Toast";
 
 // Pick files for a reply. Checks count and size here for quick feedback; the
 // server still validates type and size and is the authority.
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export function AttachmentPicker({ files, onChange, disabled }: { files: File[]; onChange: (files: File[]) => void; disabled?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);

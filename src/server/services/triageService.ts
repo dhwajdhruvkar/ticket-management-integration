@@ -13,6 +13,7 @@ import { assignTicket, type Actor } from "./agentActions";
 import { reassignToLeastLoaded } from "./groupService";
 import { getTicket, listActiveTickets } from "./ticketService";
 import type { AssignmentGroupRow, TicketRow } from "../domain/models";
+import { initialsOf } from "../../shared/initials";
 
 const OPEN = ["new", "open", "in_progress", "pending", "pending_agent", "escalated", "reopened"];
 const PRIORITY_ORDER = ["critical", "high", "medium", "low", "very_low"];
@@ -39,11 +40,6 @@ export interface TriageBoard {
   escalations: TicketRow[];
   agents: TriageAgent[];
   groups: AssignmentGroupRow[];
-}
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "·";
 }
 
 export async function getTriageBoard(tenantId: string): Promise<TriageBoard> {

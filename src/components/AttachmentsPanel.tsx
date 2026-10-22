@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGetAll } from "@/lib/api";
 import { useToast } from "./Toast";
+import { formatBytes } from "@/shared/attachments";
 import type { AttachmentRow } from "@/server/domain/models";
 
 // =============================================================================
@@ -12,12 +13,6 @@ import type { AttachmentRow } from "@/server/domain/models";
 // Uploads are multipart to /api/v1/tickets/[id]/attachments; downloads go
 // through /api/v1/attachments/[id] (Content-Disposition: attachment).
 // =============================================================================
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export default function AttachmentsPanel({
   ticketId,

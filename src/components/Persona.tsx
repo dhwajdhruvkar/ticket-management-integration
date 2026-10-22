@@ -23,6 +23,7 @@ import {
 import { useRouter } from "next/navigation";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { apiGet, apiGetAll } from "@/lib/api";
+import { initialsOf } from "@/shared/initials";
 import type { Role, UserRow } from "@/server/domain/models";
 
 // =============================================================================
@@ -62,11 +63,6 @@ const FALLBACK: Persona = {
   initials: "·",
   email: "",
 };
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "·";
-}
 
 export function PersonaProvider({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();

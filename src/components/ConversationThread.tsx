@@ -6,7 +6,7 @@ import type { TicketView } from "@/server/services/ticketService";
 import type { AttachmentRow, MessageAuthorKind, MessageVisibility } from "@/server/domain/models";
 import type { TypingUser } from "@/lib/liveTicket";
 import { timeAgo } from "./ui";
-import { formatBytes } from "./AttachmentPicker";
+import { formatBytes } from "@/shared/attachments";
 
 // =============================================================================
 // ConversationThread
