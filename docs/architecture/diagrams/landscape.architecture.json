@@ -1,0 +1,438 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "What is the system, who uses it, and where does data live",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "What is the system, who uses it, and where does…",
+        "focus": [
+          "intake",
+          "store"
+        ],
+        "note": "People use a browser UI and customer systems call a keyed REST API; other tools post signed webhooks. All three paths converge on the unifi…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "proxy",
+          "api",
+          "webhooks",
+          "intake",
+          "store",
+          "prisma"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Browser UI",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "React client components",
+      "sources": [
+        {
+          "path": "src/lib/api.ts",
+          "label": "apiGet / apiSend fetch wrapper"
+        },
+        {
+          "path": "src/components/AppShell.tsx"
+        },
+        {
+          "path": "src/components/TopBar.tsx",
+          "line": 215,
+          "label": "EventSource /api/v1/events"
+        }
+      ]
+    },
+    {
+      "id": "integrator",
+      "type": "external",
+      "label": "API-key integrator",
+      "pos": [
+        60,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "customer back end",
+      "sources": [
+        {
+          "path": "docs/EXTERNAL_API_GUIDE.md",
+          "label": "integration guide"
+        }
+      ]
+    },
+    {
+      "id": "senders",
+      "type": "external",
+      "label": "Webhook senders",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Zendesk, Freshdesk, scripts"
+    },
+    {
+      "id": "proxy",
+      "type": "security",
+      "label": "Edge proxy",
+      "pos": [
+        60,
+        549
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "src/proxy.ts",
+      "sources": [
+        {
+          "path": "src/proxy.ts"
+        },
+        {
+          "path": "src/server/auth/apiGateway.ts",
+          "label": "decideApiV1Access"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1",
+      "pos": [
+        305,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "about 80 route handlers",
+      "sources": [
+        {
+          "path": "src/app/api/v1/tickets/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/intake/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/events/route.ts",
+          "label": "SSE stream"
+        }
+      ]
+    },
+    {
+      "id": "webhooks",
+      "type": "backend",
+      "label": "Inbound webhook routes",
+      "pos": [
+        305,
+        612
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "/api/webhooks/*",
+      "sources": [
+        {
+          "path": "src/app/api/webhooks/generic/route.ts"
+        },
+        {
+          "path": "src/server/channels/webhookSecurity.ts"
+        },
+        {
+          "path": "src/server/channels/webhookAdapters.ts"
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "type": "backend",
+      "label": "Unified intake",
+      "pos": [
+        550,
+        549
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "one pipeline, every channel",
+      "sources": [
+        {
+          "path": "src/server/services/intake.ts",
+          "line": 27,
+          "end_line": 123,
+          "label": "intakeTicket"
+        },
+        {
+          "path": "src/server/services/intake.ts",
+          "line": 125,
+          "end_line": 152,
+          "label": "processTicketPipeline"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port",
+      "pos": [
+        795,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "collections + transactions",
+      "sources": [
+        {
+          "path": "src/server/data/store.ts"
+        },
+        {
+          "path": "src/server/data/index.ts",
+          "line": 13,
+          "end_line": 29
+        }
+      ]
+    },
+    {
+      "id": "prisma",
+      "type": "backend",
+      "label": "Prisma adapter",
+      "pos": [
+        795,
+        612
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "PostgreSQL driver",
+      "sources": [
+        {
+          "path": "src/server/data/prismaStore.ts"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "pos": [
+        1040,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "34 models, pgvector",
+      "sources": [
+        {
+          "path": "prisma/schema.prisma"
+        },
+        {
+          "path": "prisma/sql/001_pgvector.sql"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "proxy",
+        "api",
+        "webhooks",
+        "intake",
+        "store",
+        "prisma"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui--proxy",
+      "from": "ui",
+      "to": "proxy",
+      "label": "browser calls · HTTPS",
+      "labelAt": [
+        202,
+        390
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "api--ui",
+      "from": "api",
+      "to": "ui",
+      "label": "SSE live updates · HTTPS",
+      "labelAt": [
+        295,
+        63
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "integrator--proxy",
+      "from": "integrator",
+      "to": "proxy",
+      "label": "Bearer nlk_ API key · HTTPS",
+      "labelAt": [
+        135,
+        456
+      ]
+    },
+    {
+      "id": "senders--webhooks",
+      "from": "senders",
+      "to": "webhooks",
+      "label": "signed JSON events · HTTPS",
+      "labelAt": [
+        295,
+        189
+      ]
+    },
+    {
+      "id": "proxy--api",
+      "from": "proxy",
+      "to": "api",
+      "label": "admit /api/v1 request",
+      "labelAt": [
+        228,
+        501
+      ]
+    },
+    {
+      "id": "api--intake",
+      "from": "api",
+      "to": "intake",
+      "label": "file a ticket",
+      "labelAt": [
+        540,
+        501
+      ]
+    },
+    {
+      "id": "api--store",
+      "from": "api",
+      "to": "store",
+      "label": "direct reads in routes · SQL",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          380,
+          454
+        ],
+        [
+          870,
+          454
+        ]
+      ],
+      "labelAt": [
+        625,
+        454
+      ]
+    },
+    {
+      "id": "webhooks--intake",
+      "from": "webhooks",
+      "to": "intake",
+      "label": "ticket request",
+      "labelAt": [
+        591,
+        624
+      ]
+    },
+    {
+      "id": "intake--store",
+      "from": "intake",
+      "to": "store",
+      "label": "requester lookups · SQL",
+      "labelAt": [
+        785,
+        561
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "id": "store--prisma",
+      "from": "store",
+      "to": "prisma",
+      "label": "DATA_DRIVER=prisma",
+      "labelAt": [
+        870,
+        580
+      ]
+    },
+    {
+      "id": "prisma--postgres",
+      "from": "prisma",
+      "to": "postgres",
+      "label": "Prisma queries · SQL",
+      "labelAt": [
+        1030,
+        249
+      ],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "People use a browser UI and customer systems call a keyed REST API",
+        "other tools post signed webhooks",
+        "All three paths converge on the unified intake pipeline, which writes through one DataStore port to PostgreSQL, and mail goes out through Graph"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The Notifier and mail providers, Brevo, Slack, Teams, Entra ID, the AI providers, Azure Blob and every background job",
+        "They have their own diagrams",
+        "Connected but out of scope: Auth.js sessions, Brevo, Slack, Microsoft Teams, Context and guards, API key service"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "Only the DataStore port and the database blob store reach the Prisma adapter: services depend on the port so persistence swaps with one environment variable; the one recorded exception is databaseBlob.ts, which imports the Prisma client directly",
+        "The browser never reaches durable state except through the API: authorization, tenant scoping and audit all live server-side"
+      ]
+    }
+  ]
+}

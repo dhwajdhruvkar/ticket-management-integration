@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "How a person or an API key gets authenticated",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1440,
+      702
+    ],
+    "column_fit": "spread",
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "the answer’s path"
+        },
+        "return": {
+          "label": "reply"
+        },
+        "dashed": {
+          "label": "async or planned"
+        },
+        "security": {
+          "label": "crosses a boundary"
+        },
+        "default": {
+          "label": "message"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "proxy",
+          "authjs",
+          "api",
+          "guards",
+          "apikeys",
+          "store"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Browser UI"
+    },
+    {
+      "id": "authjs",
+      "type": "backend",
+      "label": "Auth.js sessions"
+    },
+    {
+      "id": "entra",
+      "type": "external",
+      "label": "Microsoft Entra ID"
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port"
+    },
+    {
+      "id": "proxy",
+      "type": "security",
+      "label": "Edge proxy"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1"
+    },
+    {
+      "id": "guards",
+      "type": "security",
+      "label": "Context and guards"
+    },
+    {
+      "id": "apikeys",
+      "type": "backend",
+      "label": "API key service"
+    }
+  ],
+  "segments": [
+    {
+      "from": 170,
+      "to": 290,
+      "label": "Sign in"
+    },
+    {
+      "from": 316,
+      "to": 396,
+      "label": "Request"
+    },
+    {
+      "from": 422,
+      "to": 622,
+      "label": "Authorise"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "ui",
+      "to": "authjs",
+      "y": 190,
+      "label": "sign in · HTTPS",
+      "variant": "security"
+    },
+    {
+      "id": "s2",
+      "from": "authjs",
+      "to": "entra",
+      "y": 230,
+      "label": "OIDC flow (if configured) · HTTPS"
+    },
+    {
+      "id": "s3",
+      "from": "authjs",
+      "to": "store",
+      "y": 270,
+      "label": "look up user, role, tenant"
+    },
+    {
+      "id": "s4",
+      "from": "ui",
+      "to": "proxy",
+      "y": 336,
+      "label": "request with session cookie",
+      "variant": "security"
+    },
+    {
+      "id": "s5",
+      "from": "proxy",
+      "to": "api",
+      "y": 376,
+      "label": "session or key present"
+    },
+    {
+      "id": "s6",
+      "from": "api",
+      "to": "guards",
+      "y": 442,
+      "label": "requirePermission()"
+    },
+    {
+      "id": "s7",
+      "from": "guards",
+      "to": "authjs",
+      "y": 482,
+      "label": "read session"
+    },
+    {
+      "id": "s8",
+      "from": "guards",
+      "to": "apikeys",
+      "y": 522,
+      "label": "verify nlk_ key"
+    },
+    {
+      "id": "s9",
+      "from": "apikeys",
+      "to": "store",
+      "y": 562,
+      "label": "key hash lookup · SQL"
+    },
+    {
+      "id": "s10",
+      "from": "guards",
+      "to": "api",
+      "y": 602,
+      "label": "actor, role, tenant",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "ui",
+      "from": 185,
+      "to": 342,
+      "type": "frontend"
+    },
+    {
+      "participant": "authjs",
+      "from": 185,
+      "to": 488,
+      "type": "backend"
+    },
+    {
+      "participant": "store",
+      "from": 265,
+      "to": 568,
+      "type": "backend"
+    },
+    {
+      "participant": "proxy",
+      "from": 331,
+      "to": 382,
+      "type": "security"
+    },
+    {
+      "participant": "api",
+      "from": 371,
+      "to": 608,
+      "type": "backend"
+    },
+    {
+      "participant": "guards",
+      "from": 437,
+      "to": 608,
+      "type": "security"
+    },
+    {
+      "participant": "apikeys",
+      "from": 517,
+      "to": 568,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Sign-in produces a signed JWT session carrying user, role and tenant",
+        "Each request then passes the proxy's presence check, and the route's guards read the session or verify the API key hash to obtain the actor, role and tenant before any record is touched"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Organization password sign-in and account setup links, and the record-level tenant check made after authorisation for any record addressed by id",
+        "Connected but out of scope: API-key integrator, Microsoft Teams, Ticket services, Audit chain, Unified intake, Bucket workflow"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "In production an unauthenticated request resolves to an actor with no permissions, and an invalid API key never falls back to a privileged identity: the proxy rejects credential-less /api/v1 traffic first, and context.ts returns the inert anonymous actor otherwise"
+      ]
+    }
+  ]
+}

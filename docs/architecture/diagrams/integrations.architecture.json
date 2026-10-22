@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Which outside services are optional",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "Which outside services are optional",
+        "focus": [
+          "llm",
+          "notifier"
+        ],
+        "note": "Entra ID, Graph, Brevo, Slack, Teams, the LLM providers and Azure Blob are all optional. Without them the app uses demo sign-in, in-app-onl…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "llm",
+          "notifier",
+          "blobs"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "notifier",
+      "type": "backend",
+      "label": "Notifier",
+      "pos": [
+        550,
+        612
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "in-app + email/chat",
+      "sources": [
+        {
+          "path": "src/server/notify/notifier.ts",
+          "line": 52,
+          "label": "notify"
+        },
+        {
+          "path": "src/server/notify/templates.ts"
+        }
+      ]
+    },
+    {
+      "id": "graph",
+      "type": "external",
+      "label": "Microsoft Graph",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "mailbox, optional"
+    },
+    {
+      "id": "brevo",
+      "type": "external",
+      "label": "Brevo",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "email in and out"
+    },
+    {
+      "id": "slackx",
+      "type": "external",
+      "label": "Slack",
+      "pos": [
+        60,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "events + incoming webhook"
+    },
+    {
+      "id": "teamsx",
+      "type": "external",
+      "label": "Microsoft Teams",
+      "pos": [
+        60,
+        426
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "bot + notification webhook"
+    },
+    {
+      "id": "llm",
+      "type": "security",
+      "label": "LLM gateway",
+      "pos": [
+        550,
+        738
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "provider order + fallback",
+      "sources": [
+        {
+          "path": "src/server/ai/llm.ts"
+        },
+        {
+          "path": "src/server/ai/embeddings.ts"
+        }
+      ]
+    },
+    {
+      "id": "llmprov",
+      "type": "external",
+      "label": "LLM providers",
+      "pos": [
+        305,
+        237
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Azure OpenAI, Gemini, Groq"
+    },
+    {
+      "id": "blobs",
+      "type": "backend",
+      "label": "Attachment storage",
+      "pos": [
+        795,
+        675
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "local, Azure or database",
+      "sources": [
+        {
+          "path": "src/server/services/attachmentService.ts"
+        },
+        {
+          "path": "src/server/storage/blobStore.ts"
+        },
+        {
+          "path": "src/server/storage/databaseBlob.ts"
+        }
+      ]
+    },
+    {
+      "id": "azblob",
+      "type": "external",
+      "label": "Azure Blob Storage",
+      "pos": [
+        1040,
+        237
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "attachments, optional",
+      "sources": [
+        {
+          "path": "src/server/storage/azureBlob.ts"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "llm",
+        "notifier",
+        "blobs"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "llm--llmprov",
+      "from": "llm",
+      "to": "llmprov",
+      "label": "embeddings and chat · HTTPS",
+      "labelAt": [
+        540,
+        252
+      ]
+    },
+    {
+      "id": "notifier--graph",
+      "from": "notifier",
+      "to": "graph",
+      "label": "sendMail · HTTPS",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "notifier--brevo",
+      "from": "notifier",
+      "to": "brevo",
+      "label": "transactional email · HTTPS",
+      "labelAt": [
+        295,
+        189
+      ]
+    },
+    {
+      "id": "notifier--slackx",
+      "from": "notifier",
+      "to": "slackx",
+      "label": "incoming webhook post · HTTPS",
+      "labelAt": [
+        295,
+        315
+      ]
+    },
+    {
+      "id": "notifier--teamsx",
+      "from": "notifier",
+      "to": "teamsx",
+      "label": "webhook post · HTTPS",
+      "labelAt": [
+        295,
+        441
+      ]
+    },
+    {
+      "id": "blobs--azblob",
+      "from": "blobs",
+      "to": "azblob",
+      "label": "put and get blobs · HTTPS",
+      "labelAt": [
+        1030,
+        312
+      ],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Entra ID, Graph, Brevo, Slack, Teams, the LLM providers and Azure Blob are all optional",
+        "Without them the app uses demo sign-in, in-app-only notifications, a hashed-embedding offline AI template, and database or local attachment storage"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Sign-in and Entra ID, drawn in the identity diagram, and the inbound direction of each channel (see the inbound diagram)",
+        "Connected but out of scope: Inbound webhook routes, REST API /api/v1, Channel adapters, Unified intake, AI resolver, SLA and routing"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Risks",
+      "items": [
+        "Demo mode is the default and only switches off when Entra ID is configured or DEMO_MODE=false is set: a deployment that sets neither keeps header impersonation (x-actor, x-tenant), passwordless sign-in and open webhooks; the production environment check exists to catch this"
+      ]
+    }
+  ]
+}

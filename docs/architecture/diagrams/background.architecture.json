@@ -1,0 +1,417 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "What runs without a user request",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "What runs without a user request",
+        "focus": [
+          "scheduler",
+          "wfsweep"
+        ],
+        "note": "Two runners exist. A legacy scheduler started at boot runs every five minutes for SLA sweeps, digests, reports, callback retries and mailbo…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "channels",
+          "wf",
+          "outbox",
+          "scheduler",
+          "wfsweep",
+          "store"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "scheduler",
+      "type": "backend",
+      "label": "Legacy scheduler",
+      "pos": [
+        305,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "setInterval every 5 min",
+      "sources": [
+        {
+          "path": "src/instrumentation.ts"
+        },
+        {
+          "path": "src/server/jobs/scheduler.ts",
+          "line": 259,
+          "end_line": 297,
+          "label": "tick, startScheduler"
+        },
+        {
+          "path": "src/server/jobs/lock.ts"
+        }
+      ]
+    },
+    {
+      "id": "wfsweep",
+      "type": "backend",
+      "label": "Workflow maintenance",
+      "pos": [
+        305,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "leased minute sweep",
+      "sources": [
+        {
+          "path": "src/server/jobs/workflowMaintenance.ts"
+        },
+        {
+          "path": "src/server/jobs/durableLease.ts"
+        },
+        {
+          "path": "src/app/api/jobs/workflow/route.ts"
+        }
+      ]
+    },
+    {
+      "id": "cron",
+      "type": "external",
+      "label": "External minute trigger",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "cron-job.org, per docs",
+      "tag": "partial",
+      "sources": [
+        {
+          "path": "docs/SERVICE_DESK_WORKFLOW.md",
+          "line": 108,
+          "end_line": 123,
+          "label": "documents the external schedule"
+        },
+        {
+          "path": "vercel.json",
+          "label": "defines no crons"
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "messagebus",
+      "label": "Redis / BullMQ",
+      "pos": [
+        1040,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "declared, unused",
+      "tag": "planned",
+      "sources": [
+        {
+          "path": "docker-compose.yml"
+        },
+        {
+          "path": "src/server/jobs/lock.ts",
+          "label": "comment names BullMQ as next step"
+        },
+        {
+          "path": "src/server/config.ts",
+          "label": "redisUrl read, never used"
+        }
+      ]
+    },
+    {
+      "id": "wf",
+      "type": "backend",
+      "label": "Bucket workflow",
+      "pos": [
+        305,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Service Desk to department",
+      "sources": [
+        {
+          "path": "src/server/services/workflowService.ts"
+        },
+        {
+          "path": "src/server/services/workflowMonitoring.ts"
+        },
+        {
+          "path": "src/server/services/workflowBoard.ts"
+        }
+      ]
+    },
+    {
+      "id": "outbox",
+      "type": "messagebus",
+      "label": "Email outbox",
+      "pos": [
+        305,
+        612
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "leased, retried",
+      "sources": [
+        {
+          "path": "src/server/notify/workflowOutbox.ts"
+        }
+      ]
+    },
+    {
+      "id": "channels",
+      "type": "backend",
+      "label": "Channel adapters",
+      "pos": [
+        550,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "email, Slack, Teams",
+      "sources": [
+        {
+          "path": "src/server/channels/emailIngest.ts"
+        },
+        {
+          "path": "src/server/channels/graphEmail.ts"
+        },
+        {
+          "path": "src/server/channels/slack.ts"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port",
+      "pos": [
+        795,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "collections + transactions",
+      "sources": [
+        {
+          "path": "src/server/data/store.ts"
+        },
+        {
+          "path": "src/server/data/index.ts",
+          "line": 13,
+          "end_line": 29
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "channels",
+        "wf",
+        "outbox",
+        "scheduler",
+        "wfsweep",
+        "store"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "channels--store",
+      "from": "channels",
+      "to": "store",
+      "label": "email ledger · SQL",
+      "labelAt": [
+        845,
+        498
+      ]
+    },
+    {
+      "id": "scheduler--channels",
+      "from": "scheduler",
+      "to": "channels",
+      "label": "poll Graph mailbox",
+      "labelAt": [
+        230,
+        431
+      ]
+    },
+    {
+      "id": "wf--store",
+      "from": "wf",
+      "to": "store",
+      "label": "versioned updates · SQL",
+      "labelAt": [
+        612,
+        502
+      ]
+    },
+    {
+      "id": "wf--outbox",
+      "from": "wf",
+      "to": "outbox",
+      "label": "queue workflow mail",
+      "labelAt": [
+        380,
+        580
+      ]
+    },
+    {
+      "id": "outbox--store",
+      "from": "outbox",
+      "to": "store",
+      "label": "claim and settle deliveries · SQL",
+      "labelAt": [
+        636,
+        506
+      ]
+    },
+    {
+      "id": "scheduler--store",
+      "from": "scheduler",
+      "to": "store",
+      "label": "tenants, users, advisory lock",
+      "labelAt": [
+        540,
+        249
+      ]
+    },
+    {
+      "id": "scheduler--redis",
+      "from": "scheduler",
+      "to": "redis",
+      "label": "BullMQ (not built) · queue",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          380,
+          16
+        ],
+        [
+          1115,
+          16
+        ]
+      ],
+      "labelAt": [
+        748,
+        16
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "cron--wfsweep",
+      "from": "cron",
+      "to": "wfsweep",
+      "label": "POST with CRON_SECRET · HTTPS",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "wfsweep--wf",
+      "from": "wfsweep",
+      "to": "wf",
+      "label": "monitorWorkflowTicket",
+      "labelAt": [
+        380,
+        454
+      ]
+    },
+    {
+      "id": "wfsweep--outbox",
+      "from": "wfsweep",
+      "to": "outbox",
+      "label": "drain outbox",
+      "labelAt": [
+        426,
+        577
+      ]
+    },
+    {
+      "id": "wfsweep--store",
+      "from": "wfsweep",
+      "to": "store",
+      "label": "lease and ticket cursor · SQL",
+      "labelAt": [
+        627,
+        375
+      ]
+    },
+    {
+      "id": "scheduler--wfsweep",
+      "from": "scheduler",
+      "to": "wfsweep",
+      "label": "local minute trigger",
+      "labelAt": [
+        380,
+        328
+      ],
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Two runners exist",
+        "A legacy scheduler started at boot runs every five minutes for SLA sweeps, digests, reports, callback retries and mailbox polling",
+        "A newer workflow sweep is an authenticated endpoint run each minute by an external trigger that this repository does not define"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "SLA sweeps and notifications (the scheduler calls the SLA, Ticket, Notifier and Audit modules), the Graph mailbox the poll reads, callback retries, and the other domain modules",
+        "Connected but out of scope: Auth.js sessions, Context and guards, API key service, REST API /api/v1, Inbound webhook routes, Unified intake"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Risks",
+      "items": [
+        "The workflow maintenance endpoint has no caller inside this repository, and the legacy scheduler has no HTTP trigger at all: the docs name an external cron-job.org schedule and record that it was not configured at the 2026-09-30 release; vercel.json declares no crons; the legacy sweeps run from a setInterval that only advances while a serverless instance is warm (an inference from the files)",
+        "Redis is provisioned and configured but nothing reads it: config reads REDIS_URL, compose starts a container and next.config lists bullmq and ioredis as external, yet neither package is a dependency and no source file imports them"
+      ]
+    }
+  ]
+}

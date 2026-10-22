@@ -1,0 +1,274 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "What happens when a ticket is filed",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1681,
+      820
+    ],
+    "column_fit": "spread",
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "the answer’s path"
+        },
+        "return": {
+          "label": "reply"
+        },
+        "dashed": {
+          "label": "async or planned"
+        },
+        "security": {
+          "label": "crosses a boundary"
+        },
+        "default": {
+          "label": "message"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "proxy",
+          "api",
+          "guards",
+          "intake",
+          "tickets",
+          "sla",
+          "ai",
+          "store"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Browser UI"
+    },
+    {
+      "id": "proxy",
+      "type": "security",
+      "label": "Edge proxy"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1"
+    },
+    {
+      "id": "guards",
+      "type": "security",
+      "label": "Context and guards"
+    },
+    {
+      "id": "intake",
+      "type": "backend",
+      "label": "Unified intake"
+    },
+    {
+      "id": "ai",
+      "type": "backend",
+      "label": "AI resolver"
+    },
+    {
+      "id": "tickets",
+      "type": "backend",
+      "label": "Ticket services"
+    },
+    {
+      "id": "sla",
+      "type": "backend",
+      "label": "SLA and routing"
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port"
+    }
+  ],
+  "segments": [
+    {
+      "from": 170,
+      "to": 210,
+      "label": "Admit"
+    },
+    {
+      "from": 236,
+      "to": 316,
+      "label": "Authorise"
+    },
+    {
+      "from": 342,
+      "to": 462,
+      "label": "Classify"
+    },
+    {
+      "from": 488,
+      "to": 568,
+      "label": "Persist"
+    },
+    {
+      "from": 594,
+      "to": 674,
+      "label": "Policies"
+    },
+    {
+      "from": 700,
+      "to": 740,
+      "label": "Triage"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "ui",
+      "to": "proxy",
+      "y": 190,
+      "label": "POST /api/v1/tickets · HTTPS",
+      "variant": "security"
+    },
+    {
+      "id": "s2",
+      "from": "api",
+      "to": "guards",
+      "y": 256,
+      "label": "requirePermission()"
+    },
+    {
+      "id": "s3",
+      "from": "guards",
+      "to": "api",
+      "y": 296,
+      "label": "actor, role, tenant",
+      "variant": "return"
+    },
+    {
+      "id": "s4",
+      "from": "api",
+      "to": "intake",
+      "y": 362,
+      "label": "intakeTicket()"
+    },
+    {
+      "id": "s5",
+      "from": "intake",
+      "to": "ai",
+      "y": 402,
+      "label": "classify and auto-tag"
+    },
+    {
+      "id": "s6",
+      "from": "ai",
+      "to": "intake",
+      "y": 442,
+      "label": "classification",
+      "variant": "return"
+    },
+    {
+      "id": "s7",
+      "from": "intake",
+      "to": "tickets",
+      "y": 508,
+      "label": "createTicket()"
+    },
+    {
+      "id": "s8",
+      "from": "tickets",
+      "to": "store",
+      "y": 548,
+      "label": "ticket + event rows · SQL"
+    },
+    {
+      "id": "s9",
+      "from": "intake",
+      "to": "sla",
+      "y": 614,
+      "label": "apply SLA due dates"
+    },
+    {
+      "id": "s10",
+      "from": "intake",
+      "to": "sla",
+      "y": 654,
+      "label": "SLA, routing and rules"
+    },
+    {
+      "id": "s11",
+      "from": "intake",
+      "to": "ai",
+      "y": 720,
+      "label": "AI triage"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "api",
+      "from": 251,
+      "to": 368,
+      "type": "backend"
+    },
+    {
+      "participant": "guards",
+      "from": 251,
+      "to": 302,
+      "type": "security"
+    },
+    {
+      "participant": "intake",
+      "from": 357,
+      "to": 726,
+      "type": "backend"
+    },
+    {
+      "participant": "ai",
+      "from": 397,
+      "to": 726,
+      "type": "backend"
+    },
+    {
+      "participant": "tickets",
+      "from": 503,
+      "to": 554,
+      "type": "backend"
+    },
+    {
+      "participant": "sla",
+      "from": 609,
+      "to": 660,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The proxy admits the request, the guards resolve the actor and tenant, and intake classifies the ticket, stores it with its event and audit block, then applies SLA, sends the acknowledgement, routes it and finally asks the AI to triage"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The guards' own tenant and user lookup in the store, the audit block written with the insert, the acknowledgement email, idempotency-key handling and approval holds",
+        "A catalog item that needs approval stops after the acknowledgement and resumes the routing and triage steps once approved",
+        "Connected but out of scope: Auth.js sessions, API-key integrator, Microsoft Teams, API key service, Bucket workflow, Other domain services"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "A row in another tenant answers 404, never 403: confirming that an id exists elsewhere is itself a disclosure",
+        "AI confidence of 0.78 or more auto-resolves, 0.55 or more drafts for an agent, anything lower escalates; critical (P1) tickets never auto-resolve: thresholds are environment-tunable and the P1 guardrail keeps a person in the loop"
+      ]
+    }
+  ]
+}

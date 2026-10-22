@@ -1,0 +1,369 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How tickets arrive from email, chat and other tools",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "How tickets arrive from email, chat and other t…",
+        "focus": [
+          "channels",
+          "intake"
+        ],
+        "note": "Zendesk, Freshdesk and scripts post signed JSON to webhook routes; Brevo pushes parsed mail and Slack posts signed events to the same route…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "api",
+          "webhooks",
+          "channels",
+          "intake",
+          "scheduler"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "senders",
+      "type": "external",
+      "label": "Webhook senders",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "Zendesk, Freshdesk, scripts"
+    },
+    {
+      "id": "brevo",
+      "type": "external",
+      "label": "Brevo",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "email in and out"
+    },
+    {
+      "id": "slackx",
+      "type": "external",
+      "label": "Slack",
+      "pos": [
+        305,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "events + incoming webhook"
+    },
+    {
+      "id": "teamsx",
+      "type": "external",
+      "label": "Microsoft Teams",
+      "pos": [
+        305,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "bot + notification webhook"
+    },
+    {
+      "id": "webhooks",
+      "type": "backend",
+      "label": "Inbound webhook routes",
+      "pos": [
+        550,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "/api/webhooks/*",
+      "sources": [
+        {
+          "path": "src/app/api/webhooks/generic/route.ts"
+        },
+        {
+          "path": "src/server/channels/webhookSecurity.ts"
+        },
+        {
+          "path": "src/server/channels/webhookAdapters.ts"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1",
+      "pos": [
+        550,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "about 80 route handlers",
+      "sources": [
+        {
+          "path": "src/app/api/v1/tickets/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/intake/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/events/route.ts",
+          "label": "SSE stream"
+        }
+      ]
+    },
+    {
+      "id": "channels",
+      "type": "backend",
+      "label": "Channel adapters",
+      "pos": [
+        795,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "email, Slack, Teams",
+      "sources": [
+        {
+          "path": "src/server/channels/emailIngest.ts"
+        },
+        {
+          "path": "src/server/channels/graphEmail.ts"
+        },
+        {
+          "path": "src/server/channels/slack.ts"
+        }
+      ]
+    },
+    {
+      "id": "scheduler",
+      "type": "backend",
+      "label": "Legacy scheduler",
+      "pos": [
+        1040,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "setInterval every 5 min",
+      "sources": [
+        {
+          "path": "src/instrumentation.ts"
+        },
+        {
+          "path": "src/server/jobs/scheduler.ts",
+          "line": 259,
+          "end_line": 297,
+          "label": "tick, startScheduler"
+        },
+        {
+          "path": "src/server/jobs/lock.ts"
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "type": "backend",
+      "label": "Unified intake",
+      "pos": [
+        795,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "one pipeline, every channel",
+      "sources": [
+        {
+          "path": "src/server/services/intake.ts",
+          "line": 27,
+          "end_line": 123,
+          "label": "intakeTicket"
+        },
+        {
+          "path": "src/server/services/intake.ts",
+          "line": 125,
+          "end_line": 152,
+          "label": "processTicketPipeline"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "api",
+        "webhooks",
+        "channels",
+        "intake",
+        "scheduler"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "senders--webhooks",
+      "from": "senders",
+      "to": "webhooks",
+      "label": "signed JSON events · HTTPS",
+      "labelAt": [
+        295,
+        123
+      ]
+    },
+    {
+      "id": "brevo--webhooks",
+      "from": "brevo",
+      "to": "webhooks",
+      "label": "inbound mail push · HTTPS",
+      "labelAt": [
+        218,
+        249
+      ]
+    },
+    {
+      "id": "slackx--webhooks",
+      "from": "slackx",
+      "to": "webhooks",
+      "label": "events and slash command · HTTPS",
+      "labelAt": [
+        540,
+        97
+      ]
+    },
+    {
+      "id": "teamsx--api",
+      "from": "teamsx",
+      "to": "api",
+      "label": "bot activity via /intake · HTTPS",
+      "labelAt": [
+        446,
+        253
+      ]
+    },
+    {
+      "id": "api--intake",
+      "from": "api",
+      "to": "intake",
+      "label": "file a ticket",
+      "labelAt": [
+        833,
+        561
+      ]
+    },
+    {
+      "id": "api--channels",
+      "from": "api",
+      "to": "channels",
+      "label": "Teams activity",
+      "labelAt": [
+        785,
+        435
+      ]
+    },
+    {
+      "id": "webhooks--intake",
+      "from": "webhooks",
+      "to": "intake",
+      "label": "ticket request",
+      "labelAt": [
+        785,
+        439
+      ]
+    },
+    {
+      "id": "webhooks--channels",
+      "from": "webhooks",
+      "to": "channels",
+      "label": "Slack, Brevo",
+      "labelAt": [
+        785,
+        443
+      ]
+    },
+    {
+      "id": "channels--intake",
+      "from": "channels",
+      "to": "intake",
+      "label": "new ticket from a message",
+      "labelAt": [
+        870,
+        457
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "id": "scheduler--channels",
+      "from": "scheduler",
+      "to": "channels",
+      "label": "poll Graph mailbox",
+      "labelAt": [
+        1115,
+        513
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Zendesk, Freshdesk and scripts post signed JSON to webhook routes",
+        "Brevo pushes parsed mail and Slack posts signed events to the same route family",
+        "Graph mail is polled by the scheduler"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "Outbound mail and notifications (delivery diagram), and the Graph mailbox itself, which the Channel adapters poll over HTTPS",
+        "Connected but out of scope: Browser UI, Edge proxy, Context and guards, Ticket services, Bucket workflow, AI resolver"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Risks",
+      "items": [
+        "The Brevo inbound secret is compared with === and may travel in the query string: Brevo cannot sign requests, so a shared secret is the fallback, but the comparison is not constant-time and URLs are commonly logged; other webhook routes use timingSafeEqual",
+        "Demo mode is the default and only switches off when Entra ID is configured or DEMO_MODE=false is set: a deployment that sets neither keeps header impersonation (x-actor, x-tenant), passwordless sign-in and open webhooks; the production environment check exists to catch this"
+      ]
+    }
+  ]
+}

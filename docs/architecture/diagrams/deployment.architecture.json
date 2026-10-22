@@ -1,0 +1,476 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How configuration chooses the runtime shape",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "How configuration chooses the runtime shape",
+        "focus": [
+          "config",
+          "store"
+        ],
+        "note": "A config module reads the environment once. DATA_DRIVER picks the Prisma or memory adapter, ATTACHMENT_STORAGE and a connection string pick…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "store",
+          "prisma",
+          "memory",
+          "blobs",
+          "config"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      },
+      {
+        "id": "tenantdata",
+        "label": "Durable state",
+        "focus": [
+          "postgres",
+          "jsonfile",
+          "azblob"
+        ],
+        "note": "The only places data survives a restart. Everything else in the system is recomputed or lost."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "vercel",
+      "type": "security",
+      "label": "Vercel hosting",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "serverless, hosted",
+      "sources": [
+        {
+          "path": "vercel.json"
+        },
+        {
+          "path": "package.json",
+          "label": "vercel-build script"
+        },
+        {
+          "path": "next.config.mjs",
+          "label": "standalone only off Vercel"
+        }
+      ]
+    },
+    {
+      "id": "docker",
+      "type": "security",
+      "label": "Docker and compose",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "container + local",
+      "sources": [
+        {
+          "path": "Dockerfile"
+        },
+        {
+          "path": "docker-compose.yml"
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "type": "database",
+      "label": "Config + flags",
+      "pos": [
+        305,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "env read once",
+      "sources": [
+        {
+          "path": "src/server/config.ts"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port",
+      "pos": [
+        550,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "collections",
+      "sources": [
+        {
+          "path": "src/server/data/store.ts"
+        },
+        {
+          "path": "src/server/data/index.ts",
+          "line": 13,
+          "end_line": 29
+        }
+      ]
+    },
+    {
+      "id": "prisma",
+      "type": "backend",
+      "label": "Prisma adapter",
+      "pos": [
+        305,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "PostgreSQL driver",
+      "sources": [
+        {
+          "path": "src/server/data/prismaStore.ts"
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "backend",
+      "label": "Memory adapter",
+      "pos": [
+        550,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "demo and tests",
+      "sources": [
+        {
+          "path": "src/server/data/memoryStore.ts"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "pos": [
+        1040,
+        672
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "34 models, pgvector",
+      "sources": [
+        {
+          "path": "prisma/schema.prisma"
+        },
+        {
+          "path": "prisma/sql/001_pgvector.sql"
+        }
+      ]
+    },
+    {
+      "id": "jsonfile",
+      "type": "database",
+      "label": ".data/store.json",
+      "pos": [
+        1040,
+        798
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "demo persistence",
+      "sources": [
+        {
+          "path": "src/server/data/memoryStore.ts"
+        }
+      ]
+    },
+    {
+      "id": "blobs",
+      "type": "backend",
+      "label": "Attachment storage",
+      "pos": [
+        795,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "local, Azure",
+      "sources": [
+        {
+          "path": "src/server/services/attachmentService.ts"
+        },
+        {
+          "path": "src/server/storage/blobStore.ts"
+        },
+        {
+          "path": "src/server/storage/databaseBlob.ts"
+        }
+      ]
+    },
+    {
+      "id": "azblob",
+      "type": "external",
+      "label": "Azure Blob Storage",
+      "pos": [
+        1285,
+        735
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "attachments, optional",
+      "sources": [
+        {
+          "path": "src/server/storage/azureBlob.ts"
+        }
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "messagebus",
+      "label": "Redis / BullMQ",
+      "pos": [
+        1285,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "declared, unused",
+      "tag": "planned",
+      "sources": [
+        {
+          "path": "docker-compose.yml"
+        },
+        {
+          "path": "src/server/jobs/lock.ts",
+          "label": "comment names BullMQ as next step"
+        },
+        {
+          "path": "src/server/config.ts",
+          "label": "redisUrl read, never used"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "store",
+        "prisma",
+        "memory",
+        "blobs",
+        "config"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "Durable state",
+      "wraps": [
+        "postgres",
+        "jsonfile",
+        "azblob"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "blobs--store",
+      "from": "blobs",
+      "to": "store",
+      "label": "attachment metadata · SQL",
+      "labelAt": [
+        870,
+        515
+      ]
+    },
+    {
+      "id": "blobs--prisma",
+      "from": "blobs",
+      "to": "prisma",
+      "label": "blob bytes via shared client",
+      "labelAt": [
+        870,
+        561
+      ]
+    },
+    {
+      "id": "blobs--azblob",
+      "from": "blobs",
+      "to": "azblob",
+      "label": "put and get blobs · HTTPS",
+      "labelAt": [
+        1030,
+        438
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "store--prisma",
+      "from": "store",
+      "to": "prisma",
+      "label": "DATA_DRIVER=prisma",
+      "labelAt": [
+        685,
+        562
+      ]
+    },
+    {
+      "id": "store--memory",
+      "from": "store",
+      "to": "memory",
+      "label": "default adapter",
+      "labelAt": [
+        625,
+        557
+      ]
+    },
+    {
+      "id": "prisma--postgres",
+      "from": "prisma",
+      "to": "postgres",
+      "label": "Prisma queries · SQL",
+      "labelAt": [
+        605,
+        561
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "memory--jsonfile",
+      "from": "memory",
+      "to": "jsonfile",
+      "label": "flush on every write · file",
+      "labelAt": [
+        785,
+        535
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "config--store",
+      "from": "config",
+      "to": "store",
+      "label": "adapter choice",
+      "labelAt": [
+        431,
+        451
+      ],
+      "variant": "emphasis"
+    },
+    {
+      "id": "config--blobs",
+      "from": "config",
+      "to": "blobs",
+      "label": "storage mode",
+      "labelAt": [
+        380,
+        459
+      ]
+    },
+    {
+      "id": "vercel--config",
+      "from": "vercel",
+      "to": "config",
+      "label": "env vars at runtime · manual",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "docker--config",
+      "from": "docker",
+      "to": "config",
+      "label": "env vars at runtime · manual",
+      "labelAt": [
+        295,
+        189
+      ]
+    },
+    {
+      "id": "docker--postgres",
+      "from": "docker",
+      "to": "postgres",
+      "label": "compose pgvector image · spawn",
+      "labelAt": [
+        295,
+        189
+      ]
+    },
+    {
+      "id": "docker--redis",
+      "from": "docker",
+      "to": "redis",
+      "label": "compose redis:7 · spawn",
+      "labelAt": [
+        295,
+        126
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "A config module reads the environment once",
+        "DATA_DRIVER picks the Prisma or memory adapter, ATTACHMENT_STORAGE and a connection string pick the blob adapter, and Docker or Vercel only supply the environment",
+        "Redis is provisioned but unused"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The CI workflow (install, generate Prisma client, agent-tools check, typecheck, lint, tests, audit, build) and the production environment check scripts",
+        "Connected but out of scope: Auth.js sessions, Context and guards, API key service, REST API /api/v1, Channel adapters, Unified intake"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "Only the DataStore port and the database blob store reach the Prisma adapter: services depend on the port so persistence swaps with one environment variable; the one recorded exception is databaseBlob.ts, which imports the Prisma client directly"
+      ]
+    }
+  ]
+}

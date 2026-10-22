@@ -1,0 +1,359 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How a request is identified and kept in its tenant",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "How a request is identified and kept in its ten…",
+        "focus": [
+          "guards",
+          "proxy"
+        ],
+        "note": "The proxy rejects credential-less traffic early. Then the guards read the Auth.js session or verify an API key hash to get the actor, role…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "proxy",
+          "authjs",
+          "api",
+          "guards",
+          "apikeys"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Browser UI",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "React client components",
+      "sources": [
+        {
+          "path": "src/lib/api.ts",
+          "label": "apiGet / apiSend fetch wrapper"
+        },
+        {
+          "path": "src/components/AppShell.tsx"
+        },
+        {
+          "path": "src/components/TopBar.tsx",
+          "line": 215,
+          "label": "EventSource /api/v1/events"
+        }
+      ]
+    },
+    {
+      "id": "integrator",
+      "type": "external",
+      "label": "API-key integrator",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "customer back end",
+      "sources": [
+        {
+          "path": "docs/EXTERNAL_API_GUIDE.md",
+          "label": "integration guide"
+        }
+      ]
+    },
+    {
+      "id": "entra",
+      "type": "external",
+      "label": "Microsoft Entra ID",
+      "pos": [
+        350,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "SSO, optional"
+    },
+    {
+      "id": "proxy",
+      "type": "security",
+      "label": "Edge proxy",
+      "pos": [
+        350,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "src/proxy.ts",
+      "sources": [
+        {
+          "path": "src/proxy.ts"
+        },
+        {
+          "path": "src/server/auth/apiGateway.ts",
+          "label": "decideApiV1Access"
+        }
+      ]
+    },
+    {
+      "id": "authjs",
+      "type": "backend",
+      "label": "Auth.js sessions",
+      "pos": [
+        930,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "JWT, demo/org/Entra",
+      "sources": [
+        {
+          "path": "src/auth.ts"
+        },
+        {
+          "path": "src/auth.config.ts"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1",
+      "pos": [
+        640,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "about 80 route handlers",
+      "sources": [
+        {
+          "path": "src/app/api/v1/tickets/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/intake/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/events/route.ts",
+          "label": "SSE stream"
+        }
+      ]
+    },
+    {
+      "id": "guards",
+      "type": "security",
+      "label": "Context and guards",
+      "pos": [
+        640,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "who, which tenant, may",
+      "sources": [
+        {
+          "path": "src/server/context.ts"
+        },
+        {
+          "path": "src/server/guards.ts"
+        },
+        {
+          "path": "src/server/auth/rbac.ts"
+        }
+      ]
+    },
+    {
+      "id": "apikeys",
+      "type": "backend",
+      "label": "API key service",
+      "pos": [
+        1220,
+        423
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "hash-only, tenant-bound",
+      "sources": [
+        {
+          "path": "src/server/auth/apiKeys.ts"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "proxy",
+        "authjs",
+        "api",
+        "guards",
+        "apikeys"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui--proxy",
+      "from": "ui",
+      "to": "proxy",
+      "label": "browser calls · HTTPS",
+      "labelAt": [
+        135,
+        267
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "ui--authjs",
+      "from": "ui",
+      "to": "authjs",
+      "label": "sign in, read session · HTTPS",
+      "labelAt": [
+        295,
+        63
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "api--ui",
+      "from": "api",
+      "to": "ui",
+      "label": "SSE live updates · HTTPS",
+      "labelAt": [
+        295,
+        97
+      ],
+      "variant": "security"
+    },
+    {
+      "id": "integrator--proxy",
+      "from": "integrator",
+      "to": "proxy",
+      "label": "Bearer nlk_ API key · HTTPS",
+      "labelAt": [
+        135,
+        330
+      ]
+    },
+    {
+      "id": "proxy--authjs",
+      "from": "proxy",
+      "to": "authjs",
+      "label": "session check",
+      "labelAt": [
+        633,
+        438
+      ]
+    },
+    {
+      "id": "proxy--api",
+      "from": "proxy",
+      "to": "api",
+      "label": "admit /api/v1 request",
+      "labelAt": [
+        585,
+        375
+      ]
+    },
+    {
+      "id": "authjs--entra",
+      "from": "authjs",
+      "to": "entra",
+      "label": "OIDC sign-in (optional) · HTTPS",
+      "labelAt": [
+        676,
+        131
+      ]
+    },
+    {
+      "id": "api--guards",
+      "from": "api",
+      "to": "guards",
+      "label": "requirePermission",
+      "labelAt": [
+        715,
+        454
+      ]
+    },
+    {
+      "id": "guards--authjs",
+      "from": "guards",
+      "to": "authjs",
+      "label": "read session",
+      "labelAt": [
+        715,
+        569
+      ]
+    },
+    {
+      "id": "guards--apikeys",
+      "from": "guards",
+      "to": "apikeys",
+      "label": "verify API key",
+      "labelAt": [
+        875,
+        438
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The proxy rejects credential-less traffic early",
+        "Then the guards read the Auth.js session or verify an API key hash to get the actor, role and tenant",
+        "RBAC checks the permission"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The datastore lookups behind sign-in and key checks, webhook authentication (see the inbound diagram), the config module that decides demo mode, and the individual permissions in the RBAC matrix",
+        "Connected but out of scope: Microsoft Teams, DataStore port, Ticket services, Audit chain, Unified intake, Bucket workflow"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "In production an unauthenticated request resolves to an actor with no permissions, and an invalid API key never falls back to a privileged identity: the proxy rejects credential-less /api/v1 traffic first, and context.ts returns the inert anonymous actor otherwise"
+      ]
+    }
+  ]
+}

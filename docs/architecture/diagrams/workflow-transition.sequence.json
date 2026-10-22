@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "How a bucket workflow transition is applied",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1464,
+      714
+    ],
+    "column_fit": "spread",
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "the answer’s path"
+        },
+        "return": {
+          "label": "reply"
+        },
+        "dashed": {
+          "label": "async or planned"
+        },
+        "security": {
+          "label": "crosses a boundary"
+        },
+        "default": {
+          "label": "message"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "proxy",
+          "api",
+          "wf",
+          "audit",
+          "outbox",
+          "bus",
+          "hooks",
+          "store"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Browser UI"
+    },
+    {
+      "id": "proxy",
+      "type": "security",
+      "label": "Edge proxy"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1"
+    },
+    {
+      "id": "wf",
+      "type": "backend",
+      "label": "Bucket workflow"
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port"
+    },
+    {
+      "id": "outbox",
+      "type": "messagebus",
+      "label": "Email outbox"
+    },
+    {
+      "id": "hooks",
+      "type": "backend",
+      "label": "Callbacks"
+    },
+    {
+      "id": "audit",
+      "type": "backend",
+      "label": "Audit chain"
+    },
+    {
+      "id": "bus",
+      "type": "backend",
+      "label": "Event bus"
+    }
+  ],
+  "segments": [
+    {
+      "from": 170,
+      "to": 210,
+      "label": "Admit"
+    },
+    {
+      "from": 236,
+      "to": 276,
+      "label": "Transition"
+    },
+    {
+      "from": 302,
+      "to": 502,
+      "label": "One transaction"
+    },
+    {
+      "from": 528,
+      "to": 568,
+      "label": "After commit"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "ui",
+      "to": "proxy",
+      "y": 190,
+      "label": "POST /tickets/:id/workflow · HTTPS",
+      "variant": "security"
+    },
+    {
+      "id": "s2",
+      "from": "api",
+      "to": "wf",
+      "y": 256,
+      "label": "transitionWorkflow(action)"
+    },
+    {
+      "id": "s3",
+      "from": "wf",
+      "to": "store",
+      "y": 322,
+      "label": "load ticket, group, settings · SQL"
+    },
+    {
+      "id": "s4",
+      "from": "wf",
+      "to": "store",
+      "y": 362,
+      "label": "updateIf(workflowVersion) · SQL"
+    },
+    {
+      "id": "s5",
+      "from": "wf",
+      "to": "outbox",
+      "y": 402,
+      "label": "queue lifecycle email"
+    },
+    {
+      "id": "s6",
+      "from": "wf",
+      "to": "hooks",
+      "y": 442,
+      "label": "queue ticket.updated callback"
+    },
+    {
+      "id": "s7",
+      "from": "wf",
+      "to": "audit",
+      "y": 482,
+      "label": "append workflow.action"
+    },
+    {
+      "id": "s8",
+      "from": "wf",
+      "to": "bus",
+      "y": 548,
+      "label": "publish ticket.updated · event",
+      "variant": "dashed"
+    },
+    {
+      "id": "s9",
+      "from": "wf",
+      "to": "api",
+      "y": 614,
+      "label": "updated ticket",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "api",
+      "from": 251,
+      "to": 620,
+      "type": "backend"
+    },
+    {
+      "participant": "wf",
+      "from": 251,
+      "to": 620,
+      "type": "backend"
+    },
+    {
+      "participant": "store",
+      "from": 317,
+      "to": 368,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "The route calls transitionWorkflow, which does everything in one transaction: it checks the actor and phase, applies a compare-and-set on the ticket's workflow version, queues emails and callbacks, and appends an audit block",
+        "The live event is published only after commit"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The guards call (the route performs it before the service) and the individual action rules: claim_review, route, offer, pickup, accept, decline, release and return_to_service_desk, which differ only in their phase and role checks",
+        "Connected but out of scope: Auth.js sessions, API-key integrator, Microsoft Teams, Context and guards, API key service, Unified intake"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "What it guarantees",
+      "items": [
+        "Workflow transitions are compare-and-set on workflowVersion, so two staff acting at once cannot both win: the loser gets 'Ticket changed. Refresh and try again.'",
+        "Each audit block hashes its predecessor and is written in the same transaction as the change it records: a verify call can recompute the chain and point to the first altered block"
+      ]
+    }
+  ]
+}

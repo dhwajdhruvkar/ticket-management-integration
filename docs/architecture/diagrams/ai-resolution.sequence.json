@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "How the AI decides to resolve, suggest or escalate",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1575,
+      768
+    ],
+    "column_fit": "spread",
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "the answer’s path"
+        },
+        "return": {
+          "label": "reply"
+        },
+        "dashed": {
+          "label": "async or planned"
+        },
+        "security": {
+          "label": "crosses a boundary"
+        },
+        "default": {
+          "label": "message"
+        }
+      }
+    },
+    "views": [
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "intake",
+          "tickets",
+          "ai",
+          "llm",
+          "audit",
+          "store"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "intake",
+      "type": "backend",
+      "label": "Unified intake"
+    },
+    {
+      "id": "ai",
+      "type": "backend",
+      "label": "AI resolver"
+    },
+    {
+      "id": "llm",
+      "type": "security",
+      "label": "LLM gateway"
+    },
+    {
+      "id": "llmprov",
+      "type": "external",
+      "label": "LLM providers"
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port"
+    },
+    {
+      "id": "audit",
+      "type": "backend",
+      "label": "Audit chain"
+    },
+    {
+      "id": "tickets",
+      "type": "backend",
+      "label": "Ticket services"
+    }
+  ],
+  "segments": [
+    {
+      "from": 170,
+      "to": 410,
+      "label": "Retrieve"
+    },
+    {
+      "from": 436,
+      "to": 556,
+      "label": "Generate"
+    },
+    {
+      "from": 582,
+      "to": 622,
+      "label": "Decide"
+    },
+    {
+      "from": 648,
+      "to": 688,
+      "label": "Act"
+    }
+  ],
+  "messages": [
+    {
+      "id": "s1",
+      "from": "intake",
+      "to": "ai",
+      "y": 190,
+      "label": "resolveTicket(ticketId)"
+    },
+    {
+      "id": "s2",
+      "from": "ai",
+      "to": "llm",
+      "y": 230,
+      "label": "embed ticket text"
+    },
+    {
+      "id": "s3",
+      "from": "llm",
+      "to": "llmprov",
+      "y": 270,
+      "label": "embeddings request · HTTPS"
+    },
+    {
+      "id": "s4",
+      "from": "llmprov",
+      "to": "llm",
+      "y": 310,
+      "label": "vector or fallback",
+      "variant": "return"
+    },
+    {
+      "id": "s5",
+      "from": "ai",
+      "to": "store",
+      "y": 350,
+      "label": "load KB articles · SQL"
+    },
+    {
+      "id": "s6",
+      "from": "ai",
+      "to": "audit",
+      "y": 390,
+      "label": "ticket.retrieval"
+    },
+    {
+      "id": "s7",
+      "from": "ai",
+      "to": "llm",
+      "y": 456,
+      "label": "answer from context"
+    },
+    {
+      "id": "s8",
+      "from": "llm",
+      "to": "llmprov",
+      "y": 496,
+      "label": "chat completion · HTTPS"
+    },
+    {
+      "id": "s9",
+      "from": "llmprov",
+      "to": "llm",
+      "y": 536,
+      "label": "answer or ESCALATE",
+      "variant": "return"
+    },
+    {
+      "id": "s10",
+      "from": "ai",
+      "to": "audit",
+      "y": 602,
+      "label": "decision + confidence"
+    },
+    {
+      "id": "s11",
+      "from": "ai",
+      "to": "tickets",
+      "y": 668,
+      "label": "reply, auto_resolved"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "ai",
+      "from": 185,
+      "to": 674,
+      "type": "backend"
+    },
+    {
+      "participant": "llm",
+      "from": 225,
+      "to": 542,
+      "type": "security"
+    },
+    {
+      "participant": "llmprov",
+      "from": 265,
+      "to": 542,
+      "type": "external"
+    },
+    {
+      "participant": "audit",
+      "from": 385,
+      "to": 608,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "It embeds the ticket, retrieves published knowledge-base articles, asks the model to answer only from them, scores confidence, records the evidence on the audit chain, and then acts: auto-resolve at 0.78 or more, draft at 0.55 or more, otherwise escalate",
+        "P1 and workflow tickets never auto-resolve"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The persisted resolution with its citations",
+        "The fallback path is also not drawn: with no provider configured, an offline template and hashed embeddings are used and the same steps run",
+        "Connected but out of scope: Auth.js sessions, Context and guards, API key service, REST API /api/v1, Inbound webhook routes, Channel adapters"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Doctrine",
+      "items": [
+        "AI confidence of 0.78 or more auto-resolves, 0.55 or more drafts for an agent, anything lower escalates; critical (P1) tickets never auto-resolve: thresholds are environment-tunable and the P1 guardrail keeps a person in the loop",
+        "A ticket inside the bucket workflow is never auto-resolved by AI and is skipped by the legacy SLA sweep: the workflow requires human resolution and has its own monitor; the AI only drafts a suggestion"
+      ]
+    }
+  ]
+}

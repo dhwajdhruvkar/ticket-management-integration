@@ -1,0 +1,281 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How people and systems are told about changes",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "How people and systems are told about changes",
+        "focus": [
+          "outbox",
+          "bus"
+        ],
+        "note": "Live UI updates use an in-process event bus pushed over SSE and are best-effort per instance. Workflow email goes through a leased, retried…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "tickets",
+          "notifier",
+          "outbox",
+          "bus",
+          "hooks"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "tickets",
+      "type": "backend",
+      "label": "Ticket services",
+      "pos": [
+        380,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "create, mutate, reply",
+      "sources": [
+        {
+          "path": "src/server/services/ticketService.ts",
+          "line": 196,
+          "label": "createTicket"
+        },
+        {
+          "path": "src/server/services/agentActions.ts"
+        },
+        {
+          "path": "src/server/services/idempotencyService.ts"
+        }
+      ]
+    },
+    {
+      "id": "notifier",
+      "type": "backend",
+      "label": "Notifier",
+      "pos": [
+        700,
+        234
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "in-app + email/chat",
+      "sources": [
+        {
+          "path": "src/server/notify/notifier.ts",
+          "line": 52,
+          "label": "notify"
+        },
+        {
+          "path": "src/server/notify/templates.ts"
+        }
+      ]
+    },
+    {
+      "id": "outbox",
+      "type": "messagebus",
+      "label": "Email outbox",
+      "pos": [
+        700,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "leased, retried",
+      "sources": [
+        {
+          "path": "src/server/notify/workflowOutbox.ts"
+        }
+      ]
+    },
+    {
+      "id": "bus",
+      "type": "backend",
+      "label": "Event bus",
+      "pos": [
+        1020,
+        297
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "EventEmitter, single node",
+      "sources": [
+        {
+          "path": "src/server/events/bus.ts"
+        }
+      ]
+    },
+    {
+      "id": "hooks",
+      "type": "backend",
+      "label": "Callbacks",
+      "pos": [
+        380,
+        360
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "HMAC, SSRF-guarded",
+      "sources": [
+        {
+          "path": "src/server/services/integrationWebhookService.ts"
+        }
+      ]
+    },
+    {
+      "id": "integrator",
+      "type": "external",
+      "label": "API-key integrator",
+      "pos": [
+        60,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "customer back end",
+      "sources": [
+        {
+          "path": "docs/EXTERNAL_API_GUIDE.md",
+          "label": "integration guide"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "tickets",
+        "notifier",
+        "outbox",
+        "bus",
+        "hooks"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "tickets--bus",
+      "from": "tickets",
+      "to": "bus",
+      "label": "ticket.updated · event",
+      "labelAt": [
+        525,
+        329
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "tickets--outbox",
+      "from": "tickets",
+      "to": "outbox",
+      "label": "queue lifecycle email",
+      "labelAt": [
+        522,
+        457
+      ]
+    },
+    {
+      "id": "tickets--hooks",
+      "from": "tickets",
+      "to": "hooks",
+      "label": "queue ticket callback",
+      "labelAt": [
+        455,
+        431
+      ]
+    },
+    {
+      "id": "notifier--bus",
+      "from": "notifier",
+      "to": "bus",
+      "label": "notification event · event",
+      "labelAt": [
+        854,
+        333
+      ],
+      "variant": "dashed"
+    },
+    {
+      "id": "outbox--notifier",
+      "from": "outbox",
+      "to": "notifier",
+      "label": "Graph send path",
+      "labelAt": [
+        775,
+        435
+      ]
+    },
+    {
+      "id": "hooks--integrator",
+      "from": "hooks",
+      "to": "integrator",
+      "label": "signed callback · HTTPS",
+      "labelAt": [
+        295,
+        63
+      ]
+    },
+    {
+      "id": "tickets--notifier",
+      "from": "tickets",
+      "to": "notifier",
+      "label": "notify on agent actions",
+      "labelAt": [
+        527,
+        325
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Live UI updates use an in-process event bus pushed over SSE and are best-effort per instance",
+        "Workflow email goes through a leased, retried database outbox with at-least-once delivery",
+        "Non-workflow notifications are sent inline and recorded in-app"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The SSE route and the browser at the end of the stream, the Bucket workflow, which publishes to the same bus, outbox and callback queue as Ticket services",
+        "the mail and chat providers (see the integrations diagram)",
+        "and the schedulers that trigger retries"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Trade-offs",
+      "items": [
+        "The event bus, the proxy and route rate limiters, and the in-process job lock are per-instance: they are plain memory on globalThis; on several instances a user may miss a live update and a rate limit is enforced per instance, while Postgres advisory locks and leases do stop duplicate sweeps",
+        "Workflow email is delivered at least once, so a timeout after the provider accepted a message can send a duplicate: a lease plus backoff is used instead of a transactional hand-off to the provider"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,416 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How the server code is layered",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/dhwajdhruvkar/ticket-management-integration",
+      "revision": "c0d86aa14de4f19dac02a307b38c767dd417684c"
+    },
+    "views": [
+      {
+        "id": "answer",
+        "label": "How the server code is layered",
+        "focus": [
+          "store",
+          "audit"
+        ],
+        "note": "Route handlers call guards and services; services call the audit chain and the DataStore port; the port builds one adapter, and only the Pr…"
+      },
+      {
+        "id": "nextapp",
+        "label": "Next.js server process",
+        "focus": [
+          "api",
+          "intake",
+          "tickets",
+          "store",
+          "prisma",
+          "memory",
+          "blobs"
+        ],
+        "note": "Shares one set of process-level singletons: the DataStore, the event bus, the in-memory rate limiter and the job locks. They are consistent…"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST API /api/v1",
+      "pos": [
+        60,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "about 80 route handlers",
+      "sources": [
+        {
+          "path": "src/app/api/v1/tickets/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/intake/route.ts"
+        },
+        {
+          "path": "src/app/api/v1/events/route.ts",
+          "label": "SSE stream"
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "type": "backend",
+      "label": "Unified intake",
+      "pos": [
+        305,
+        111
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "one pipeline, every channel",
+      "sources": [
+        {
+          "path": "src/server/services/intake.ts",
+          "line": 27,
+          "end_line": 123,
+          "label": "intakeTicket"
+        },
+        {
+          "path": "src/server/services/intake.ts",
+          "line": 125,
+          "end_line": 152,
+          "label": "processTicketPipeline"
+        }
+      ]
+    },
+    {
+      "id": "tickets",
+      "type": "backend",
+      "label": "Ticket services",
+      "pos": [
+        305,
+        237
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "create, mutate, reply",
+      "sources": [
+        {
+          "path": "src/server/services/ticketService.ts",
+          "line": 196,
+          "label": "createTicket"
+        },
+        {
+          "path": "src/server/services/agentActions.ts"
+        },
+        {
+          "path": "src/server/services/idempotencyService.ts"
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "backend",
+      "label": "DataStore port",
+      "pos": [
+        550,
+        48
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "collections + transactions",
+      "sources": [
+        {
+          "path": "src/server/data/store.ts"
+        },
+        {
+          "path": "src/server/data/index.ts",
+          "line": 13,
+          "end_line": 29
+        }
+      ]
+    },
+    {
+      "id": "blobs",
+      "type": "backend",
+      "label": "Attachment storage",
+      "pos": [
+        550,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "local, Azure or database",
+      "sources": [
+        {
+          "path": "src/server/services/attachmentService.ts"
+        },
+        {
+          "path": "src/server/storage/blobStore.ts"
+        },
+        {
+          "path": "src/server/storage/databaseBlob.ts"
+        }
+      ]
+    },
+    {
+      "id": "prisma",
+      "type": "backend",
+      "label": "Prisma adapter",
+      "pos": [
+        550,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "PostgreSQL driver",
+      "sources": [
+        {
+          "path": "src/server/data/prismaStore.ts"
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "backend",
+      "label": "Memory adapter",
+      "pos": [
+        795,
+        174
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "demo and tests",
+      "sources": [
+        {
+          "path": "src/server/data/memoryStore.ts"
+        }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "pos": [
+        1040,
+        486
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "sublabel": "34 models, pgvector",
+      "sources": [
+        {
+          "path": "prisma/schema.prisma"
+        },
+        {
+          "path": "prisma/sql/001_pgvector.sql"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Next.js server process",
+      "wraps": [
+        "api",
+        "intake",
+        "tickets",
+        "store",
+        "prisma",
+        "memory",
+        "blobs"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "api--intake",
+      "from": "api",
+      "to": "intake",
+      "label": "file a ticket",
+      "labelAt": [
+        295,
+        186
+      ]
+    },
+    {
+      "id": "api--tickets",
+      "from": "api",
+      "to": "tickets",
+      "label": "read and change tickets",
+      "labelAt": [
+        817,
+        249
+      ]
+    },
+    {
+      "id": "api--blobs",
+      "from": "api",
+      "to": "blobs",
+      "label": "attachments",
+      "labelAt": [
+        202,
+        268
+      ]
+    },
+    {
+      "id": "api--store",
+      "from": "api",
+      "to": "store",
+      "label": "direct reads in routes · SQL",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          135,
+          16
+        ],
+        [
+          625,
+          16
+        ]
+      ],
+      "labelAt": [
+        380,
+        16
+      ]
+    },
+    {
+      "id": "intake--tickets",
+      "from": "intake",
+      "to": "tickets",
+      "label": "createTicket",
+      "labelAt": [
+        380,
+        226
+      ]
+    },
+    {
+      "id": "intake--store",
+      "from": "intake",
+      "to": "store",
+      "label": "requester lookups · SQL",
+      "labelAt": [
+        900,
+        123
+      ]
+    },
+    {
+      "id": "tickets--store",
+      "from": "tickets",
+      "to": "store",
+      "label": "ticket, event, outbox rows · SQL",
+      "labelAt": [
+        1024,
+        127
+      ]
+    },
+    {
+      "id": "blobs--store",
+      "from": "blobs",
+      "to": "store",
+      "label": "attachment metadata · SQL",
+      "labelAt": [
+        702,
+        270
+      ]
+    },
+    {
+      "id": "blobs--prisma",
+      "from": "blobs",
+      "to": "prisma",
+      "label": "blob bytes via shared client",
+      "labelAt": [
+        625,
+        268
+      ]
+    },
+    {
+      "id": "blobs--tickets",
+      "from": "blobs",
+      "to": "tickets",
+      "label": "confirm ticket access",
+      "labelAt": [
+        885,
+        252
+      ]
+    },
+    {
+      "id": "store--prisma",
+      "from": "store",
+      "to": "prisma",
+      "label": "DATA_DRIVER=prisma",
+      "labelAt": [
+        625,
+        142
+      ]
+    },
+    {
+      "id": "store--memory",
+      "from": "store",
+      "to": "memory",
+      "label": "default adapter",
+      "labelAt": [
+        678,
+        266
+      ]
+    },
+    {
+      "id": "prisma--postgres",
+      "from": "prisma",
+      "to": "postgres",
+      "label": "Prisma queries · SQL",
+      "labelAt": [
+        850,
+        249
+      ],
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The short answer",
+      "items": [
+        "Route handlers call guards and services",
+        "services call the audit chain and the DataStore port",
+        "the port builds one adapter, and only the Prisma adapter reaches PostgreSQL"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not shown here",
+      "items": [
+        "The guards, the audit chain every service calls in the same transaction as its change, the other services (same layer, same rule) and the .data/store.json file",
+        "Connected but out of scope: Browser UI, Microsoft Teams, Edge proxy, Auth.js sessions, Context and guards, API key service"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Constraints",
+      "items": [
+        "Only the DataStore port and the database blob store reach the Prisma adapter: services depend on the port so persistence swaps with one environment variable; the one recorded exception is databaseBlob.ts, which imports the Prisma client directly"
+      ]
+    }
+  ]
+}
