@@ -161,8 +161,6 @@ export const HINTS = {
   weeklyDigest: "A Monday summary email of your queue, SLA position, and anything that breached over the week.",
 } as const;
 
-export type HintKey = keyof typeof HINTS;
-
 const FIELD_TYPE_NOUNS: Record<CustomFieldType, string> = {
   text: "text field",
   number: "number",

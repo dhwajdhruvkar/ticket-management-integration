@@ -314,11 +314,6 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--r-md);
   }
-  .panel-flat {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-  }
 
   .note-surface {
     background: var(--note-bg);

@@ -78,14 +78,3 @@ export function isAgentRole(role: Role | undefined): boolean {
 export function isTicketSubmitterRole(role: Role | string | undefined): boolean {
   return role === "ticket_submitter";
 }
-
-export class ForbiddenError extends Error {
-  constructor(permission: Permission) {
-    super(`Forbidden: missing permission "${permission}".`);
-    this.name = "ForbiddenError";
-  }
-}
-
-export function assertCan(role: Role | undefined, permission: Permission): void {
-  if (!can(role, permission)) throw new ForbiddenError(permission);
-}

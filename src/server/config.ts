@@ -213,5 +213,3 @@ export const config = {
     brevoOutbound: brevoConfigured,
   },
 } as const;
-
-export type AppConfig = typeof config;

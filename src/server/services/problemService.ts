@@ -34,8 +34,6 @@ import type {
   TicketRow,
 } from "../domain/models";
 
-export { derivePriority };
-
 export interface NewProblemInput {
   title: string;
   description: string;
@@ -84,14 +82,6 @@ export async function listProblems(
   const store = await getStore();
   const where: Partial<ProblemRow> = { tenantId, ...filter };
   return pageCollection(store.problems, where, options);
-}
-
-export async function getProblem(id: string, tenantId?: string): Promise<ProblemRow | null> {
-  const store = await getStore();
-  const problem = await store.problems.get(id);
-  if (!problem) return null;
-  if (tenantId && problem.tenantId !== tenantId) return null;
-  return problem;
 }
 
 export async function getProblemView(id: string, tenantId?: string): Promise<ProblemView | null> {

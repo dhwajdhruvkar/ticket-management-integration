@@ -16,8 +16,8 @@ export { InfoHint, type HintSide };
 //
 // Small, dependency-free building blocks reused across pages and both server
 // and client components: status/priority/SLA/decision badges (tone-mapped to
-// the design tokens), the StatCard/ConfidenceBar/PipelineRow widgets, relative-
-// time formatting (timeAgo/formatDuration), and audit-action labels. Keeping
+// the design tokens), relative-time formatting (timeAgo/formatDuration), and
+// audit-action labels. Keeping
 // them here guarantees a ticket looks identical everywhere it appears.
 // =============================================================================
 
@@ -177,47 +177,6 @@ export function formatDuration(mins: number): string {
   return `${sign}${d}d${h % 24 ? ` ${h % 24}h` : ""}`;
 }
 
-export function ConfidenceBar({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const color =
-    value >= 0.78
-      ? "var(--success-solid)"
-      : value >= 0.55
-      ? "var(--warning-solid)"
-      : "var(--danger-solid)";
-  return (
-    <div style={{ minWidth: 120 }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-        <span className="muted" style={{ fontSize: "0.72rem", display: "inline-flex", alignItems: "center", gap: 4 }}>
-          confidence
-          <InfoHint text={HINTS.aiConfidence} size={11} />
-        </span>
-        <span style={{ fontSize: "0.78rem", fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
-          {pct}%
-        </span>
-      </div>
-      <div
-        style={{
-          height: 6,
-          background: "var(--surface-3)",
-          borderRadius: 999,
-          overflow: "hidden",
-        }}
-      >
-        <div
-          className="bar-grow"
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: color,
-            borderRadius: 999,
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
 /** Wraps a label with an optional trailing InfoHint, keeping the two aligned. */
 export function LabelWithHint({
   children,
@@ -238,36 +197,6 @@ export function LabelWithHint({
       {children}
       <InfoHint text={info} side={side} size={size} nested={nested} />
     </span>
-  );
-}
-
-export function StatCard({
-  label,
-  value,
-  sub,
-  accent,
-  info,
-}: {
-  label: string;
-  value: ReactNode;
-  sub?: ReactNode;
-  accent?: string;
-  info?: string;
-}) {
-  return (
-    <div className="stat-card" style={{ minWidth: 0 }}>
-      <div className="label">
-        <LabelWithHint info={info}>{label}</LabelWithHint>
-      </div>
-      <div className="stat-value" style={{ marginTop: 8, color: accent ?? "var(--text)" }}>
-        {value}
-      </div>
-      {sub ? (
-        <div className="muted" style={{ marginTop: 6, fontSize: "0.8rem" }}>
-          {sub}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -323,93 +252,6 @@ export function timeAgo(iso: string): string {
 /* =========================================================
    Redesign primitives — additive, hook-free (server-safe)
    ========================================================= */
-
-/** Small pill showing a trend arrow + text, e.g. "+12%". `tone` defaults from direction. */
-export function TrendChip({
-  direction,
-  tone,
-  children,
-}: {
-  direction: "up" | "down" | "flat";
-  tone?: "good" | "bad" | "neutral";
-  children: ReactNode;
-}) {
-  const resolved =
-    tone ?? (direction === "up" ? "good" : direction === "down" ? "bad" : "neutral");
-  const cls =
-    resolved === "good" ? "trend-up" : resolved === "bad" ? "trend-down" : "trend-flat";
-  return (
-    <span className={`trend-chip ${cls}`}>
-      {direction !== "flat" ? (
-        <svg
-          aria-hidden
-          width="10"
-          height="10"
-          viewBox="0 0 12 12"
-          fill="none"
-          style={{ transform: direction === "down" ? "rotate(180deg)" : undefined }}
-        >
-          <path
-            d="M6 2.5v7M6 2.5 2.8 5.7M6 2.5l3.2 3.2"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      ) : null}
-      {children}
-    </span>
-  );
-}
-
-/** Tiny inline SVG sparkline for KPI cards. Values are auto-scaled to the box. */
-export function Sparkline({
-  points,
-  color = "var(--brand-500)",
-  width = 72,
-  height = 24,
-  fill = false,
-}: {
-  points: number[];
-  color?: string;
-  width?: number;
-  height?: number;
-  fill?: boolean;
-}) {
-  if (!points.length) return null;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const span = max - min || 1;
-  const pad = 2;
-  const step = points.length > 1 ? (width - pad * 2) / (points.length - 1) : 0;
-  const coords = points.map((v, i) => {
-    const x = pad + i * step;
-    const y = pad + (1 - (v - min) / span) * (height - pad * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  });
-  const line = coords.join(" ");
-  const area = `${pad},${height - pad} ${line} ${(pad + step * (points.length - 1)).toFixed(1)},${height - pad}`;
-  return (
-    <svg
-      aria-hidden
-      width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
-      style={{ display: "block", overflow: "visible" }}
-    >
-      {fill ? <polygon points={area} fill={color} opacity={0.12} /> : null}
-      <polyline
-        points={line}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 /** SVG donut ring with centered content, per the SLA-compliance reference card. */
 export function Donut({
@@ -527,28 +369,6 @@ export function PieChart({
   );
 }
 
-/** Thin rounded progress bar (category breakdown / goals). */
-export function MeterBar({
-  value,
-  color,
-  height = 8,
-}: {
-  /** 0..1 fill fraction. */
-  value: number;
-  color?: string;
-  height?: number;
-}) {
-  const pct = Math.max(0, Math.min(1, value)) * 100;
-  return (
-    <div className="meter" style={{ height }}>
-      <span
-        className="bar-grow"
-        style={{ width: `${pct}%`, background: color ?? undefined }}
-      />
-    </div>
-  );
-}
-
 const AVATAR_TONES = [
   { bg: "var(--brand-100)", fg: "var(--brand-700)" },
   { bg: "var(--violet-bg)", fg: "var(--violet-fg)" },
@@ -590,35 +410,6 @@ export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
     >
       {initials || "?"}
     </span>
-  );
-}
-
-/** Panel header row: title on the left, optional action (e.g. "View All") on the right. */
-export function SectionHeader({
-  title,
-  sub,
-  action,
-  info,
-}: {
-  title: ReactNode;
-  sub?: ReactNode;
-  action?: ReactNode;
-  info?: string;
-}) {
-  return (
-    <div className="section-head">
-      <div style={{ minWidth: 0 }}>
-        <div className="section-title">
-          <LabelWithHint info={info}>{title}</LabelWithHint>
-        </div>
-        {sub ? (
-          <div className="muted" style={{ fontSize: "0.76rem", marginTop: 2 }}>
-            {sub}
-          </div>
-        ) : null}
-      </div>
-      {action ? <div style={{ flexShrink: 0 }}>{action}</div> : null}
-    </div>
   );
 }
 
