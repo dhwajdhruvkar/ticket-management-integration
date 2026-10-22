@@ -10,7 +10,7 @@
 
 import { createHash } from "node:crypto";
 import { embed } from "../ai/embeddings";
-import { KB_ARTICLES } from "../../lib/kbArticles.data";
+import { KB_ARTICLES } from "./kbArticles.data";
 import { minutesAgo, newId, now, reference, ticketReference } from "../domain/ids";
 import type {
   ApiKeyRow,
@@ -65,7 +65,7 @@ export interface SeedData {
 
 export const NETLINK_TENANT_ID = "tenant_netlink";
 
-// Knowledge base content comes from the shared dataset (src/lib/kbArticles.data.ts).
+// Knowledge base content comes from the shared dataset (src/server/data/kbArticles.data.ts).
 
 const GROUP_SERVICE_DESK = "grp_service_desk";
 const GROUP_NETWORK = "grp_network";

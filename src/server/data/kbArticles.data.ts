@@ -1,9 +1,9 @@
-import type { TicketCategory } from "../server/domain/models";
+import type { TicketCategory } from "../domain/models";
 
 // =============================================================================
-// Shared knowledge base content.
+// Starter knowledge base content.
 //
-// Pure, dependency-free article data used by the server seed
+// Pure, dependency-free article data used by the seed
 // (src/server/data/seed.ts) to build the starter knowledge base.
 // =============================================================================
 
