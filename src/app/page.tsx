@@ -16,7 +16,23 @@ import {
   StatusBadge,
   timeAgo,
 } from "@/components/ui";
+import { PanelHeader } from "@/components/PanelHeader";
 import { HINTS } from "@/lib/hints";
+import {
+  AlertIcon,
+  BankIcon,
+  BoltIcon,
+  CheckIcon,
+  FolderIcon,
+  GaugeIcon,
+  HeartIcon,
+  HourglassIcon,
+  ShieldIcon,
+  SparkIcon,
+  TagIcon,
+  TimerIcon,
+  TrophyIcon,
+} from "@/components/icons";
 import { DashboardSkeleton } from "@/components/Skeleton";
 import { EmptyState } from "@/components/primitives";
 import { usePersona } from "@/components/Persona";
@@ -734,7 +750,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       label: "Auto-resolved by AI",
       value: pct(metrics.deflectionRate),
       hint: `${metrics.autoResolved} of ${metrics.processed} handled without an agent`,
-      icon: <SparkIcon />,
+      icon: <SparkIcon size={20} />,
       tone: "success",
       href: "/tickets",
       progress: metrics.deflectionRate,
@@ -744,7 +760,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       label: "Assistant containment",
       value: pct(metrics.containmentRate),
       hint: "Solved or drafted by AI",
-      icon: <BoltIcon />,
+      icon: <BoltIcon size={20} />,
       tone: "brand",
       progress: metrics.containmentRate,
       info: HINTS.aiContainment,
@@ -753,7 +769,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       label: "First response / MTTR",
       value: `${mins(metrics.avgFirstResponseMins)} · ${mins(metrics.mttrMins)}`,
       hint: "Average across resolved tickets",
-      icon: <TimerIcon />,
+      icon: <TimerIcon size={20} />,
       tone: "info",
       info: `${HINTS.firstResponseTime} ${HINTS.mttr}`,
     },
@@ -761,7 +777,7 @@ function PrimaryKpis({ metrics }: { metrics: Metrics }) {
       label: "Estimated cost saved",
       value: money(metrics.costSaved),
       hint: `~${metrics.agentHoursSaved.toFixed(1)} agent-hours saved`,
-      icon: <BankIcon />,
+      icon: <BankIcon size={20} />,
       tone: "warning",
       info: HINTS.costSaved,
     },
@@ -1531,39 +1547,6 @@ function AgentLeaderboard({ metrics, users, report }: { metrics: Metrics; users:
    Panel header
    ========================================================================= */
 
-function PanelHeader({
-  title,
-  icon,
-  right,
-  info,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  right?: React.ReactNode;
-  info?: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 8,
-        margin: "-1.1rem -1.2rem 14px",
-        padding: "0.8rem 1.2rem",
-        borderBottom: "1px solid var(--border)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {icon ? <span style={{ color: "var(--muted)", display: "inline-flex" }}>{icon}</span> : null}
-        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>
-          <LabelWithHint info={info}>{title}</LabelWithHint>
-        </h2>
-      </div>
-      {right}
-    </div>
-  );
-}
 
 /* =========================================================================
    Icons
@@ -1602,99 +1585,10 @@ function PlusIcon() {
     </svg>
   );
 }
-function SparkIcon() {
-  return (
-    <svg {...svgProps} width={20} height={20}>
-      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2" />
-    </svg>
-  );
-}
-function BoltIcon() {
-  return (
-    <svg {...svgProps} width={20} height={20}>
-      <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" />
-    </svg>
-  );
-}
-function TimerIcon() {
-  return (
-    <svg {...svgProps} width={20} height={20}>
-      <circle cx="12" cy="13" r="8" />
-      <path d="M12 9v4l3 2M9 2h6" />
-    </svg>
-  );
-}
-function BankIcon() {
-  return (
-    <svg {...svgProps} width={20} height={20}>
-      <path d="M3 21h18M4 21V10M20 21V10M6 21V10M18 21V10M10 21V10M14 21V10M2 10l10-7 10 7" />
-    </svg>
-  );
-}
-function FolderIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-function CheckIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M20 6L9 17l-5-5" />
-    </svg>
-  );
-}
-function HourglassIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M6 2h12M6 22h12M6 2v4a6 6 0 006 6 6 6 0 006-6V2M6 22v-4a6 6 0 016-6 6 6 0 016 6v4" />
-    </svg>
-  );
-}
-function AlertIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M12 9v4M12 17h.01" />
-      <path d="M10.29 3.86l-8.14 14a2 2 0 001.71 3h16.28a2 2 0 001.71-3l-8.14-14a2 2 0 00-3.42 0z" />
-    </svg>
-  );
-}
-function HeartIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
-    </svg>
-  );
-}
-function ShieldIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  );
-}
 function ListIcon() {
   return (
     <svg {...svgProps}>
       <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-    </svg>
-  );
-}
-function GaugeIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M12 14l4-4" />
-      <path d="M3 12a9 9 0 0 1 18 0" />
-      <circle cx="12" cy="14" r="1.5" />
-    </svg>
-  );
-}
-function TagIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M20.59 13.41l-8.17 8.17a2 2 0 0 1-2.83 0L2 13.83V2h11.83l7.83 7.83a2 2 0 0 1 0 2.83z" />
-      <circle cx="7" cy="7" r="1.5" />
     </svg>
   );
 }
@@ -1705,14 +1599,6 @@ function UsersIcon() {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-function TrophyIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4z" />
-      <path d="M17 4h3v3a3 3 0 01-3 3M7 4H4v3a3 3 0 003 3" />
     </svg>
   );
 }
