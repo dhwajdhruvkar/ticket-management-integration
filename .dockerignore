@@ -7,6 +7,3 @@ node_modules
 .env*
 npm-debug.log*
 *.md
-comparison.html
-gaps.html
-workflow*.html
