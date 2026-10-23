@@ -76,6 +76,7 @@ export function RequesterPicker({
 
   return <div>
     <label className="label" htmlFor={uid}>Requester (who)</label>
+    <div style={{ position: "relative" }}>
     <input
       id={uid}
       className="input"
@@ -99,7 +100,7 @@ export function RequesterPicker({
         setOpen(true);
       }}
     />
-    <ul id={listId} role="listbox" aria-label="Organization users" hidden={!showList} style={{ listStyle: "none", margin: "4px 0 0", padding: 4, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", maxHeight: 260, overflowY: "auto" }}>
+    <ul id={listId} role="listbox" aria-label="Organization users" hidden={!showList} style={{ listStyle: "none", position: "absolute", top: "100%", left: 0, right: 0, zIndex: 40, margin: "4px 0 0", padding: 4, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface)", boxShadow: "var(--shadow-md, 0 8px 24px rgba(0,0,0,0.18))", maxHeight: 260, overflowY: "auto" }}>
       {items.map((user, index) => {
         const detail = [user.department, user.location].filter(Boolean).join(" · ");
         return <li
@@ -116,6 +117,7 @@ export function RequesterPicker({
         </li>;
       })}
     </ul>
+    </div>
     <p id={helpId} className="muted" style={{ fontSize: "0.74rem", marginTop: 4 }} role="status">
       {disabled ? "Requests are submitted as your signed-in account." : state || "Select an organization user or enter a new email. No login account is created."}
     </p>

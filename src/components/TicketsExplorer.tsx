@@ -1758,7 +1758,7 @@ function NewTicketForm({
 
         <section>
           <div className="label" style={{ marginBottom: 6 }}>Who and where</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, alignItems: "start" }}>
             <RequesterPicker
               value={requester}
               onChange={setRequester}
