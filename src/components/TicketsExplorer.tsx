@@ -1766,28 +1766,37 @@ function NewTicketForm({
               // Choosing a person pre-fills location; typing a free email keeps what is already entered.
               onSelect={(choice) => { if (choice) setLocation(choice.location ?? ""); }}
             />
-            <input
-              className="input"
-              aria-label="Location"
-              placeholder="Location / site"
-              maxLength={160}
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            />
-            <select className="select" aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-            <input
-              className="input"
-              placeholder="Subcategory (e.g. VPN)"
-              aria-label="Subcategory"
-              value={subcategory}
-              onChange={(e) => setSubcategory(e.target.value)}
-            />
+            <div>
+              <label className="label" htmlFor="ticket-location">Location / site</label>
+              <input
+                id="ticket-location"
+                className="input"
+                placeholder="Location / site"
+                maxLength={160}
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor="ticket-category">Category</label>
+              <select id="ticket-category" className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label" htmlFor="ticket-subcategory">Subcategory</label>
+              <input
+                id="ticket-subcategory"
+                className="input"
+                placeholder="Subcategory (e.g. VPN)"
+                value={subcategory}
+                onChange={(e) => setSubcategory(e.target.value)}
+              />
+            </div>
           </div>
         </section>
 
