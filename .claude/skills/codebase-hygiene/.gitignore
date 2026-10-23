@@ -1,0 +1,4 @@
+# scan output (generated in target projects, never committed)
+.hygiene/
+.DS_Store
+*.log
