@@ -365,7 +365,7 @@ function AgentExplorer({
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
-                {rows.length}
+                {total}
               </span>
             </div>
             <div className="muted" style={{ fontSize: "0.76rem", marginTop: 3, marginLeft: 40 }}>

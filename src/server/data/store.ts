@@ -47,6 +47,8 @@ import type {
   TicketAcknowledgementRow,
   NotificationDeliveryRow,
 } from "../domain/models";
+import type { TicketFilters } from "@/lib/ticketFilters";
+import type { TicketViewId } from "@/lib/ticketViews";
 
 export interface ListOptions<T> {
   /** Stable ID cursor; use with orderBy id ascending. */
@@ -61,6 +63,25 @@ export interface ListOptions<T> {
    * rows (a superset), which is safe for the same callers.
    */
   select?: (keyof T)[];
+}
+
+/** Caller-supplied equality scope for the explorer query (record-level security lives here). */
+export interface TicketSearchScope {
+  status?: TicketRow["status"];
+  type?: TicketRow["type"];
+  assigneeId?: string | null;
+  assignmentGroupId?: string;
+  requesterEmail?: string;
+}
+
+export interface TicketSearchSpec {
+  scope: TicketSearchScope;
+  meId: string;
+  view: TicketViewId;
+  filters: TicketFilters;
+  q?: string;
+  skip: number;
+  take: number;
 }
 
 export interface PageResult<T> {
@@ -107,6 +128,19 @@ export interface DataStore {
   notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }): Promise<{ items: NotificationRow[]; total: number; unread: number }>;
   /** Mark one recipient's unread notifications read (optionally just `id`); returns how many changed. */
   markNotificationsRead(tenantId: string, email: string, readAt: string, id?: string): Promise<number>;
+  /**
+   * Explorer query: saved view + filters + search + paging for one tenant's
+   * non-deleted tickets, with the unfiltered per-view counts. Rows omit `body`
+   * on the Prisma driver. The tenant is a required argument.
+   */
+  searchTickets(tenantId: string, spec: TicketSearchSpec): Promise<{ data: TicketRow[]; total: number; counts: Record<string, number> }>;
+  /**
+   * Tickets taking part in workflow monitoring (workflow present, not deleted,
+   * not closed/cancelled), narrowed to `visibleTo` when given (assigned to the
+   * user or in one of their groups), plus the count of ALL such tickets in the
+   * tenant. Prisma rows carry only the columns bucketHealth() reads.
+   */
+  workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null): Promise<{ tickets: TicketRow[]; workflowCount: number }>;
   transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T>;
 
   tenants: Collection<TenantRow>;

@@ -13,7 +13,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { config } from "../config";
 import { logger } from "../observability/logger";
 import { buildSeed } from "./seed";
-import { matchesWhere, type Collection, type DataStore, type ListOptions } from "./store";
+import { matchesWhere, type Collection, type DataStore, type ListOptions, type TicketSearchSpec } from "./store";
+import { searchTicketRows } from "@/lib/ticketViews";
 import type {
   ApiKeyRow,
   ApprovalRow,
@@ -312,6 +313,20 @@ export class MemoryStore implements DataStore {
   async eventsForTenant(tenantId: string, type: TicketEventRow["type"]) {
     const ids = this.activeTicketIds(tenantId);
     return this.db.events.filter((e) => e.type === type && ids.has(e.ticketId)).map(({ ticketId, type, createdAt }) => ({ ticketId, type, createdAt }));
+  }
+
+  async searchTickets(tenantId: string, spec: TicketSearchSpec) {
+    const { scope } = spec;
+    // Default list order (createdAt desc, id asc) is the base order searchTicketRows expects.
+    const all = (await this.tickets.list({ tenantId, deletedAt: null, ...scope } as Partial<TicketRow>, { orderBy: { field: "createdAt", dir: "desc" } }));
+    const { rows, counts } = searchTicketRows(all, { meId: spec.meId, view: spec.view, filters: spec.filters, q: spec.q });
+    return { data: rows.slice(spec.skip, spec.skip + spec.take), total: rows.length, counts };
+  }
+
+  async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null) {
+    const work = this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt && !!t.workflow && !["closed", "cancelled"].includes(t.status));
+    const visible = visibleTo ? work.filter((t) => t.assigneeId === visibleTo.userId || (!!t.assignmentGroupId && visibleTo.groupIds.includes(t.assignmentGroupId))) : work;
+    return { tickets: visible.map(clone), workflowCount: work.length };
   }
 
   private mineNotifications(tenantId: string, email: string) {

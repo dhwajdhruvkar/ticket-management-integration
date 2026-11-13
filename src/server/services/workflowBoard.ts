@@ -81,15 +81,15 @@ export async function getWorkflowAlerts(tenantId: string, actor: WorkflowActor):
   const store = await getStore();
   const user = actor.id ? await store.users.get(actor.id) : null;
   if (!user?.active || user.tenantId !== tenantId || !["agent", "manager", "tenant_admin", "super_admin"].includes(user.role)) throw new WorkflowError("Staff access required.", 403);
-  const [tenant, groups, allTickets, calendars, policies] = await Promise.all([store.tenants.get(tenantId), store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }), store.calendars.list({ tenantId }), store.slaPolicies.list({ tenantId })]);
+  const [tenant, groups, calendars, policies] = await Promise.all([store.tenants.get(tenantId), store.groups.list({ tenantId }), store.calendars.list({ tenantId }), store.slaPolicies.list({ tenantId })]);
   const canDispatch = user.role !== "agent";
   const settings = tenant?.workflowSettings ?? defaultWorkflowSettings();
-  const work = allTickets.filter((ticket) => ticket.workflow && !["closed", "cancelled"].includes(ticket.status));
-  const allowed = new Set(groups.filter((group) => canDispatch || group.memberIds.includes(user.id)).map((group) => group.id));
-  const tickets = work.filter((ticket) => canDispatch || (ticket.assignmentGroupId && allowed.has(ticket.assignmentGroupId)) || ticket.assigneeId === user.id);
+  // The store returns only workflow tickets (not every active ticket); agents are narrowed to their groups or assignments there.
+  const groupIds = groups.filter((group) => group.memberIds.includes(user.id)).map((group) => group.id);
+  const { tickets, workflowCount } = await store.workflowAlertTickets(tenantId, canDispatch ? null : { userId: user.id, groupIds });
   const queueHealth = Object.fromEntries(tickets.map((ticket) => {
     const policy = policies.find((row) => row.priority === ticket.priority) ?? null;
     return [ticket.id, bucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null)];
   }));
-  return buildMonitoring(store, tenantId, user.role, settings, work.length > 0, tickets, queueHealth);
+  return buildMonitoring(store, tenantId, user.role, settings, workflowCount > 0, tickets, queueHealth);
 }

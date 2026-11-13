@@ -9,7 +9,8 @@
 
 import { PrismaClient } from "@prisma/client";
 import { config } from "../config";
-import type { Collection, DataStore, ListOptions } from "./store";
+import type { Collection, DataStore, ListOptions, TicketSearchSpec } from "./store";
+import { ticketSearchQueries, workflowAlertQueries } from "./ticketSql";
 import type { Entity } from "../domain/models";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -192,6 +193,18 @@ export class PrismaStore implements DataStore {
       where: { type, ticket: { tenantId, deletedAt: null } },
       select: { ticketId: true, type: true, createdAt: true },
     }).then((rows: any[]) => rows.map((r) => serialize(r)));
+  }
+
+  async searchTickets(tenantId: string, spec: TicketSearchSpec) {
+    const q = ticketSearchQueries(tenantId, spec);
+    const [rows, total, counts] = await Promise.all([this.p.$queryRaw(q.rows), this.p.$queryRaw(q.total), this.p.$queryRaw(q.counts)]);
+    return { data: (rows as unknown[]).map((r) => serialize<any>(r)), total: (total as any[])[0].total as number, counts: { ...(counts as any[])[0] } };
+  }
+
+  async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null) {
+    const q = workflowAlertQueries(tenantId, visibleTo);
+    const [rows, count] = await Promise.all([this.p.$queryRaw(q.rows), this.p.$queryRaw(q.count)]);
+    return { tickets: (rows as unknown[]).map((r) => serialize<any>(r)), workflowCount: (count as any[])[0].total as number };
   }
 
   async notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }) {
