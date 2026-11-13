@@ -1,5 +1,6 @@
 "use client";
 
+import { subscribeLiveEvents } from "@/lib/liveEvents";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -208,26 +209,21 @@ function NotificationsBell({ active }: { active: boolean }) {
   // Live updates via SSE, with slow polling as the safety net.
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 120_000);
+    const interval = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 120_000);
 
-    let source: EventSource | null = null;
-    if (active && typeof EventSource !== "undefined") {
-      source = new EventSource("/api/v1/events");
-      source.onmessage = (e) => {
-        try {
-          const event = JSON.parse(e.data) as { type?: string };
-          if (event.type === "notification") refresh();
-        } catch {
-          // Ignore malformed frames.
-        }
-      };
-      source.onerror = () => {
-        // Browser retries automatically; polling covers the gap.
-      };
-    }
+    const unsubscribe = active
+      ? subscribeLiveEvents((e) => {
+          try {
+            const event = JSON.parse(e.data) as { type?: string };
+            if (event.type === "notification") refresh();
+          } catch {
+            // Ignore malformed frames.
+          }
+        })
+      : undefined;
     return () => {
       clearInterval(interval);
-      source?.close();
+      unsubscribe?.();
     };
   }, [refresh, active]);
 

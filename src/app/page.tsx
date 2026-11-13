@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { apiGet, apiGetAll } from "@/lib/api";
 import type { Metrics } from "@/server/services/metricsService";
 import type { AgentPerformanceReport } from "@/server/services/agentPerformance";
-import type { TicketRow, UserRow } from "@/server/domain/models";
+import type { TicketRow } from "@/server/domain/models";
 import {
   Avatar,
   Donut,
@@ -52,7 +52,7 @@ import { WORKFLOW_LABELS } from "@/shared/workflow";
 // the ticket queue where relevant.
 // =============================================================================
 
-type ChainState = "checking" | "ok" | "tampered" | "unavailable";
+type ChainState = "not_run" | "checking" | "ok" | "tampered" | "unavailable";
 
 interface ChainCopy {
   strip: string;
@@ -67,6 +67,15 @@ interface ChainCopy {
 const NEUTRAL_CHIP = { bg: "var(--surface-2)", fg: "var(--text-muted)", border: "var(--border)" };
 
 const CHAIN_COPY: Record<ChainState, ChainCopy> = {
+  // Full-chain verification is O(audit records), so the dashboard no longer runs
+  // it on load. It must never read as verified until the Audit page has run it.
+  not_run: {
+    strip: "Chain not verified",
+    ops: "Not verified",
+    opsTone: "info",
+    ...NEUTRAL_CHIP,
+    hint: "Full verification is run from the Audit page; the dashboard does not recompute the hash chain on load.",
+  },
   checking: {
     strip: "Verifying chain…",
     ops: "…",
@@ -101,14 +110,17 @@ const CHAIN_COPY: Record<ChainState, ChainCopy> = {
   },
 };
 
+// Newest six tickets: the first page of the server-side list (default sort is createdAt desc).
+const RECENT_PATH = "/tickets?page=1&pageSize=6&sortBy=createdAt&sortDir=desc";
+
 export default function DashboardPage() {
   const { persona, ready } = usePersona();
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [recent, setRecent] = useState<TicketRow[]>([]);
-  const [users, setUsers] = useState<UserRow[]>([]);
-  // "unavailable" is not "tampered": a failed verify request must never be
-  // reported to an auditor as a broken chain, nor as a verified one.
-  const [chainValid, setChainValid] = useState<ChainState>("checking");
+  // Verification is not run on the dashboard, so the chain is never shown as
+  // verified here; see CHAIN_COPY.not_run.
+  const chainValid: ChainState = "not_run";
+  const refreshingLive = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,16 +128,12 @@ export default function DashboardPage() {
     setRefreshing(true);
     setError(null);
     try {
-      const [m, rows, ppl, audit] = await Promise.all([
+      const [m, rows] = await Promise.all([
         apiGet<Metrics>("/metrics"),
-        apiGetAll<TicketRow>("/tickets").catch(() => [] as TicketRow[]),
-        apiGetAll<UserRow>("/users").catch(() => [] as UserRow[]),
-        apiGet<{ valid: boolean }>("/audit?verify=1").catch(() => null),
+        apiGet<TicketRow[]>(RECENT_PATH).catch(() => [] as TicketRow[]),
       ]);
       setMetrics(m);
-      setRecent(rows.slice(0, 6));
-      setUsers(ppl);
-      setChainValid(audit ? (audit.valid ? "ok" : "tampered") : "unavailable");
+      setRecent(rows);
     } catch (err) {
       // Metrics are the dashboard: without them there is nothing to show, so
       // say so and offer a retry instead of leaving the skeleton up forever.
@@ -141,12 +149,17 @@ export default function DashboardPage() {
 
   // Lighter than refresh(): metrics and recent tickets only, no audit verify or user list, and no skeleton.
   const refreshLive = useCallback(async () => {
+    if (refreshingLive.current) return;
+    refreshingLive.current = true;
     try {
-      const [m, rows] = await Promise.all([apiGet<Metrics>("/metrics"), apiGetAll<TicketRow>("/tickets").catch(() => null)]);
-      setMetrics(m);
-      if (rows) setRecent(rows.slice(0, 6));
+      const [m, rows] = await Promise.all([apiGet<Metrics>("/metrics"), apiGet<TicketRow[]>(RECENT_PATH).catch(() => null)]);
+      // Skip the re-render when the payload is unchanged.
+      setMetrics((prev) => (prev && JSON.stringify(prev) === JSON.stringify(m) ? prev : m));
+      if (rows) setRecent((prev) => (JSON.stringify(prev) === JSON.stringify(rows) ? prev : rows));
     } catch {
       // Keep the last good numbers; the manual refresh reports errors.
+    } finally {
+      refreshingLive.current = false;
     }
   }, []);
   useLiveRefresh(refreshLive, { enabled: ready && persona.role !== "requester" });
@@ -229,7 +242,7 @@ export default function DashboardPage() {
           <GroupBacklog metrics={metrics} />
         </div>
 
-        <AgentPerformance key={`performance-${persona.id}`}>{(report) => <AgentLeaderboard metrics={{ ...metrics, leaderboard: report.rows.map((row) => ({ id: row.id, name: row.name, resolved: row.resolutions, open: row.liveOpen })) }} users={users} report={report} />}</AgentPerformance>
+        <AgentPerformance key={`performance-${persona.id}`}>{(report) => <AgentLeaderboard metrics={{ ...metrics, leaderboard: report.rows.map((row) => ({ id: row.id, name: row.name, resolved: row.resolutions, open: row.liveOpen })) }} report={report} />}</AgentPerformance>
       </div>
 
       <style jsx>{`
@@ -1359,7 +1372,7 @@ function formatMinutes(mins: number | null) {
   return hours ? `${hours}h ${total % 60}m` : `${total % 60}m`;
 }
 
-function AgentLeaderboard({ metrics, users, report }: { metrics: Metrics; users: UserRow[]; report?: AgentPerformanceReport }) {
+function AgentLeaderboard({ metrics, report }: { metrics: Metrics; report?: AgentPerformanceReport }) {
   const board = metrics.leaderboard;
   const maxTotal = Math.max(1, ...board.map((a) => a.resolved + a.open));
 
@@ -1399,7 +1412,6 @@ function AgentLeaderboard({ metrics, users, report }: { metrics: Metrics; users:
                 const total = a.resolved + a.open;
                 const resolvedPct = total ? Math.round((a.resolved / total) * 100) : 0;
                 const barPct = total ? Math.round((total / maxTotal) * 100) : 0;
-                const user = users.find((u) => u.id === a.id);
                 return (
                   <tr key={a.id} className="row-hover">
                     <td style={{ paddingLeft: "1.2rem" }}>
@@ -1415,7 +1427,7 @@ function AgentLeaderboard({ metrics, users, report }: { metrics: Metrics; users:
                         >
                           {String(index + 1).padStart(2, "0")}
                         </span>
-                        <Avatar name={user?.name ?? a.name} size={30} />
+                        <Avatar name={a.name} size={30} />
                         <span style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text)" }}>
                           {a.name}
                         </span>

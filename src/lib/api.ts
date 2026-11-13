@@ -32,6 +32,8 @@ export interface PageMeta {
   /** Backward-compatible alias returned by the API. */
   limit: number;
   totalPages: number;
+  /** Per-saved-view ticket counts (ticket explorer queries only). */
+  counts?: Record<string, number>;
 }
 
 interface ApiEnvelope<T> {
@@ -70,6 +72,13 @@ async function getResponse(path: string): Promise<Response> {
 
 export async function apiGet<T>(path: string): Promise<T> {
   return handle<T>(await getResponse(path));
+}
+
+/** One page of a list plus its pagination metadata. */
+export async function apiGetPage<T>(path: string): Promise<{ data: T[]; meta: PageMeta }> {
+  const envelope = await readEnvelope<T[]>(await getResponse(path));
+  if (!Array.isArray(envelope.data) || !envelope.meta) throw new ApiError("Expected a paginated array response.", 500);
+  return { data: envelope.data, meta: envelope.meta };
 }
 
 /**

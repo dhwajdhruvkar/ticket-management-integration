@@ -415,6 +415,8 @@ model Ticket {
   @@index([tenantId, externalTicketId])
   @@index([integrationKeyId])
   @@index([tenantId, deletedAt])
+  // Active-ticket lists (explorer, metrics, performance): tenant + not deleted, newest first.
+  @@index([tenantId, deletedAt, createdAt])
 }
 
 model TicketMessage {
@@ -840,6 +842,8 @@ model NotificationDelivery {
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   @@index([status, nextAttemptAt])
   @@index([tenantId, createdAt])
+  // Pending/failed counts polled by the workflow-alerts endpoint.
+  @@index([tenantId, status])
 }
 
 model Notification {

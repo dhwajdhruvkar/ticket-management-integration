@@ -8,6 +8,7 @@
 
 import { getStore } from "../data";
 import { slaStatus } from "./slaService";
+import type { TicketRow } from "../domain/models";
 import { listActiveTickets, listTicketsForReporting } from "./ticketService";
 
 const ROI_MINUTES_PER_TICKET = 12;
@@ -80,25 +81,28 @@ export interface Metrics {
   byWorkflowPhase: Record<string, number>;
 }
 
+/** Every ticket field computeMetrics/slaStatus read; keep in sync when adding metrics. */
+const METRIC_TICKET_FIELDS: (keyof TicketRow)[] = [
+  "id", "tenantId", "type", "status", "category", "priority", "assigneeId", "assignmentGroupId",
+  "resolvedById", "satisfaction", "createdAt", "firstRespondedAt", "resolvedAt", "dueResponseAt",
+  "dueResolveAt", "slaPausedAt", "workflow", "deletedAt",
+];
 const PRIORITY_ORDER = ["critical", "high", "medium", "low", "very_low"];
 
 export async function computeMetrics(tenantId: string): Promise<Metrics> {
   const store = await getStore();
-  const [tickets, allResolutions, articles, audit, users, groups, allEvents] = await Promise.all([
-    listActiveTickets(tenantId),
-    store.resolutions.list(),
-    store.articles.list({ tenantId }),
-    store.audit.list({ tenantId }),
+  // Resolutions and events are keyed by ticket, not tenant, so the store scopes
+  // them through the ticket relation (same active-ticket set as `tickets`).
+  // Only the columns the calculations read are transferred (no body/subject).
+  const [tickets, resolutions, articleCount, auditBlocks, users, groups, events] = await Promise.all([
+    listActiveTickets(tenantId, {}, { select: METRIC_TICKET_FIELDS }),
+    store.resolutionsForTenant(tenantId),
+    store.articles.count({ tenantId }),
+    store.audit.count({ tenantId }),
     store.users.list({ tenantId }),
     store.groups.list({ tenantId }),
-    store.events.list(),
+    store.eventsForTenant(tenantId, "reopened"),
   ]);
-
-  // Resolutions and events are keyed by ticket, not tenant, so scope them to
-  // this tenant's tickets before anything is counted.
-  const ticketIds = new Set(tickets.map((t) => t.id));
-  const resolutions = allResolutions.filter((r) => ticketIds.has(r.ticketId));
-  const events = allEvents.filter((e) => ticketIds.has(e.ticketId));
 
   const byType = countBy(tickets, (t) => t.type);
   const byStatus = countBy(tickets, (t) => t.status);
@@ -147,7 +151,7 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
 
   // Reopen rate: tickets with at least one "reopened" lifecycle event.
   const reopenedIds = new Set(
-    events.filter((e) => e.type === "reopened").map((e) => e.ticketId)
+    events.map((e) => e.ticketId)
   );
   const reopenRate = tickets.length ? reopenedIds.size / tickets.length : 0;
 
@@ -205,8 +209,8 @@ export async function computeMetrics(tenantId: string): Promise<Metrics> {
     slaCompliance,
     reopenRate,
     backlogByGroup,
-    kbArticles: articles.length,
-    auditBlocks: audit.length,
+    kbArticles: articleCount,
+    auditBlocks,
     agentHoursSaved,
     costSaved: agentHoursSaved * ROI_AGENT_HOURLY_COST,
     leaderboard: [...agentMap.values()].sort((a, b) => b.resolved - a.resolved || b.open - a.open),

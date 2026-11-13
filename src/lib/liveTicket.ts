@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiSend } from "./api";
+import { subscribeLiveEvents } from "./liveEvents";
 import type { MessageVisibility } from "@/server/domain/models";
 
 // =============================================================================
@@ -79,8 +80,7 @@ export function useTicketLive(
       emit();
     }, 1_000);
 
-    const source = new EventSource("/api/v1/events");
-    source.onmessage = (e) => {
+    const unsubscribe = subscribeLiveEvents((e) => {
       let event: TypingEvent;
       try {
         event = JSON.parse(e.data) as TypingEvent;
@@ -113,10 +113,10 @@ export function useTicketLive(
         });
         emit();
       }
-    };
+    });
 
     return () => {
-      source.close();
+      unsubscribe();
       clearInterval(prune);
       if (refreshTimer) clearTimeout(refreshTimer);
       setTyping([]);

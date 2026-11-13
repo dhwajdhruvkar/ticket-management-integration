@@ -51,8 +51,16 @@ export async function getWorkflowBoard(tenantId: string, actor: WorkflowActor, l
     const policy = policies.find((row) => row.priority === ticket.priority) ?? null;
     return [ticket.id, bucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null)];
   }));
-  const monitor = await store.jobLeases.get("workflow-monitor");
-  const monitoring: WorkflowAlerts = { enabled: settings.enabled || work.length > 0, canRetryEmails: ["tenant_admin", "super_admin"].includes(user.role),
+  const monitoring = await buildMonitoring(store, tenantId, user.role, settings, work.length > 0, tickets, queueHealth);
+  return { settings, groups, canDispatch, hasWorkflowTickets: work.length > 0, tickets, suggestions, queueHealth, monitoring, teamsConfigured: teamsPresenceConfigured(tenantId),
+    staff: presenceUsers.map(({ id, name, role }) => ({ id, name, role, availability: availability[id] })),
+  };
+}
+
+type Store = Awaited<ReturnType<typeof getStore>>;
+async function buildMonitoring(store: Store, tenantId: string, role: string, settings: WorkflowSettings, hasWork: boolean, tickets: TicketRow[], queueHealth: Record<string, BucketHealth>): Promise<WorkflowAlerts> {
+  const [monitor, pendingEmails, failedEmails] = await Promise.all([store.jobLeases.get("workflow-monitor"), store.notificationDeliveries.count({ tenantId, status: "pending" }), store.notificationDeliveries.count({ tenantId, status: "failed" })]);
+  return { enabled: settings.enabled || hasWork, canRetryEmails: ["tenant_admin", "super_admin"].includes(role),
     alerts: tickets.flatMap((ticket): WorkflowAlerts["alerts"] => {
       const health = queueHealth[ticket.id];
       if (["warning", "manager", "senior_rm"].includes(health.level)) return [{ ticketId: ticket.id, reference: ticket.reference, subject: ticket.subject, level: health.level, dueAt: health.managerDueAt }];
@@ -61,9 +69,27 @@ export async function getWorkflowBoard(tenantId: string, actor: WorkflowActor, l
     }),
     health: { monitorFresh: !!monitor?.lastSuccessAt && Date.now() - Date.parse(monitor.lastSuccessAt) < 3 * 60_000 && !monitor.lastError,
       lastSuccessAt: monitor?.lastSuccessAt ?? null, lastError: monitor?.lastError ?? null, emailConfigured: outboundEmailConfigured() && !!publicAppOrigin(),
-      confirmationConfigured: (process.env.AUTH_SECRET?.length ?? 0) >= 32 && !!publicAppOrigin(),
-      pendingEmails: await store.notificationDeliveries.count({ tenantId, status: "pending" }), failedEmails: await store.notificationDeliveries.count({ tenantId, status: "failed" }) } };
-  return { settings, groups, canDispatch, hasWorkflowTickets: work.length > 0, tickets, suggestions, queueHealth, monitoring, teamsConfigured: teamsPresenceConfigured(tenantId),
-    staff: presenceUsers.map(({ id, name, role }) => ({ id, name, role, availability: availability[id] })),
-  };
+      confirmationConfigured: (process.env.AUTH_SECRET?.length ?? 0) >= 32 && !!publicAppOrigin(), pendingEmails, failedEmails } };
+}
+
+/**
+ * Alert summary for the dashboard poll. Same alerts/health as the board's
+ * `monitoring`, but skips staff availability, Teams presence, experience
+ * history and agent suggestions, none of which the summary uses.
+ */
+export async function getWorkflowAlerts(tenantId: string, actor: WorkflowActor): Promise<WorkflowAlerts> {
+  const store = await getStore();
+  const user = actor.id ? await store.users.get(actor.id) : null;
+  if (!user?.active || user.tenantId !== tenantId || !["agent", "manager", "tenant_admin", "super_admin"].includes(user.role)) throw new WorkflowError("Staff access required.", 403);
+  const [tenant, groups, allTickets, calendars, policies] = await Promise.all([store.tenants.get(tenantId), store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }), store.calendars.list({ tenantId }), store.slaPolicies.list({ tenantId })]);
+  const canDispatch = user.role !== "agent";
+  const settings = tenant?.workflowSettings ?? defaultWorkflowSettings();
+  const work = allTickets.filter((ticket) => ticket.workflow && !["closed", "cancelled"].includes(ticket.status));
+  const allowed = new Set(groups.filter((group) => canDispatch || group.memberIds.includes(user.id)).map((group) => group.id));
+  const tickets = work.filter((ticket) => canDispatch || (ticket.assignmentGroupId && allowed.has(ticket.assignmentGroupId)) || ticket.assigneeId === user.id);
+  const queueHealth = Object.fromEntries(tickets.map((ticket) => {
+    const policy = policies.find((row) => row.priority === ticket.priority) ?? null;
+    return [ticket.id, bucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null)];
+  }));
+  return buildMonitoring(store, tenantId, user.role, settings, work.length > 0, tickets, queueHealth);
 }

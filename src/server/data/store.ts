@@ -55,6 +55,12 @@ export interface ListOptions<T> {
   take?: number;
   orderBy?: { field: keyof T; dir: "asc" | "desc" };
   includeDeleted?: boolean;
+  /**
+   * Column projection for read-heavy reports. Rows are still typed as T, so
+   * callers must only read the listed fields. The memory driver returns full
+   * rows (a superset), which is safe for the same callers.
+   */
+  select?: (keyof T)[];
 }
 
 export interface PageResult<T> {
@@ -93,6 +99,14 @@ export async function pageCollection<T extends Entity>(
 export interface DataStore {
   readonly driver: "memory" | "prisma";
   ready(): Promise<void>;
+  /** Resolutions of this tenant's non-deleted tickets, filtered inside the query. */
+  resolutionsForTenant(tenantId: string): Promise<Pick<ResolutionRow, "ticketId" | "decision" | "confidence">[]>;
+  /** Events of one type on this tenant's non-deleted tickets, filtered inside the query. */
+  eventsForTenant(tenantId: string, type: TicketEventRow["type"]): Promise<Pick<TicketEventRow, "ticketId" | "type" | "createdAt">[]>;
+  /** One recipient's in-app feed page (email compared case-insensitively) with its total and unread counts. */
+  notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }): Promise<{ items: NotificationRow[]; total: number; unread: number }>;
+  /** Mark one recipient's unread notifications read (optionally just `id`); returns how many changed. */
+  markNotificationsRead(tenantId: string, email: string, readAt: string, id?: string): Promise<number>;
   transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T>;
 
   tenants: Collection<TenantRow>;

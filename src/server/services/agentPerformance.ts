@@ -54,7 +54,7 @@ function blankRow(id: string, name: string, active: boolean): AgentPerformanceRo
 const inWindow = (createdAt: string, window: PerformancePeriod) => createdAt >= window.startAt && createdAt < window.endBefore;
 
 export function summarizeAgentPerformance(tenantId: string, users: UserRow[], tickets: TicketRow[], events: TicketEventRow[], period: PerformancePeriod,
-  options: { reopenEvents?: TicketEventRow[]; at?: Date } = {}): AgentPerformanceRow[] {
+  options: { reopenEvents?: Pick<TicketEventRow, "ticketId" | "type" | "createdAt">[]; at?: Date } = {}): AgentPerformanceRow[] {
   const at = options.at ?? new Date();
   const today = dayInZone(at, dateFormatter(period.timezone));
   // Fixed windows ignore the selected period: "today", "this week", "this month" in organization time.
@@ -165,12 +165,11 @@ export async function getAgentPerformance(tenantId: string, range: PerformanceRa
   const timezone = (await store.tenants.get(tenantId))?.workflowSettings?.timezone ?? "UTC";
   const period = performancePeriod(range, timezone, from, to);
   // Reopen events carry no tenant id, so they are scoped by this tenant's ticket ids.
-  const [users, tickets, events, reopens] = await Promise.all([
-    store.users.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }),
-    store.events.list({ tenantId, type: "resolution_recorded" }), store.events.list({ type: "reopened" }),
+  // Tickets keep only the columns summarizeAgentPerformance reads; reopens are scoped by the store.
+  const [users, tickets, events, reopenEvents] = await Promise.all([
+    store.users.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }, { select: ["id", "tenantId", "createdAt", "slaPausedMins", "dueResolveAt", "deletedAt", "status", "assigneeId"] }),
+    store.events.list({ tenantId, type: "resolution_recorded" }), store.eventsForTenant(tenantId, "reopened"),
   ]);
-  const ticketIds = new Set(tickets.map((ticket) => ticket.id));
-  const reopenEvents = reopens.filter((event) => ticketIds.has(event.ticketId));
   const resolvedGranularity = granularity ?? defaultGranularity(period);
   return {
     period, granularity: resolvedGranularity,

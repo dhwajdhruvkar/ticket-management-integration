@@ -31,10 +31,20 @@ export function WorkflowDashboardAlerts() {
   const [error, setError] = useState(false);
   useEffect(() => {
     let live = true;
-    const refresh = () => { void apiGet<Alerts>("/workflow/alerts").then((value) => { if (live) { setData(value); setError(false); } }).catch(() => { if (live) setError(true); }); };
+    let inFlight = false;
+    const refresh = () => {
+      if (inFlight || document.visibilityState !== "visible") return;
+      inFlight = true;
+      void apiGet<Alerts>("/workflow/alerts")
+        .then((value) => { if (live) { setData((prev) => (JSON.stringify(prev) === JSON.stringify(value) ? prev : value)); setError(false); } })
+        .catch(() => { if (live) setError(true); })
+        .finally(() => { inFlight = false; });
+    };
     refresh();
-    const timer = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 15000);
-    return () => { live = false; clearInterval(timer); };
+    // Hidden tabs skip polling; returning to the tab refreshes immediately.
+    const timer = setInterval(refresh, 30000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { live = false; clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
   }, []);
   return <>{error && <p role="status">Bucket alerts could not refresh; any displayed results may be stale.</p>}{data && <WorkflowAlertSummary data={data} />}</>;
 }

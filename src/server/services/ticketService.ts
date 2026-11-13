@@ -17,6 +17,7 @@ import {
   queueTicketWebhookEvent,
   type TicketWebhookEvent,
 } from "./integrationWebhookService";
+import { searchTicketRows, type TicketSearch } from "@/lib/ticketViews";
 import { slaPausePatch, slaStatus, type SlaStatus } from "./slaService";
 import { workflowMutationPatch, WorkflowError } from "./workflowService";
 import type {
@@ -95,6 +96,38 @@ export async function listTickets(
     ? { tenantId, ...where }
     : { tenantId, ...where, deletedAt: null };
   return pageCollection(store.tickets, filter, opt);
+}
+
+/** Every list column except `body`; the explorer table never shows ticket bodies. */
+const LIST_COLUMNS = {
+  id: true, workflow: true, workflowVersion: true, resolvedById: true, reference: true, tenantId: true, type: true, subject: true,
+  status: true, priority: true, impact: true, urgency: true, category: true, subcategory: true, channel: true, source: true,
+  tags: true, customFields: true, requesterEmail: true, requesterId: true, externalTicketId: true, idempotencyScopeHash: true,
+  idempotencyRequestHash: true, integrationKeyId: true, assigneeId: true, assignmentGroupId: true, problemId: true, changeId: true,
+  catalogItemId: true, ciIds: true, linkedTicketIds: true, mergedIntoId: true, satisfaction: true, resolutionNotes: true,
+  escalationReason: true, escalatedById: true, escalatedAt: true, firstRespondedAt: true, resolvedAt: true, closedAt: true,
+  dueResponseAt: true, dueResolveAt: true, slaPolicyId: true, slaPausedAt: true, slaPausedMins: true, createdAt: true,
+  updatedAt: true, deletedAt: true,
+} satisfies Record<Exclude<keyof TicketRow, "body">, true>;
+
+/**
+ * Explorer query: saved view + filters + search evaluated over the actor's
+ * visible tickets, returning one page and the per-view counts. SLA/escalation
+ * filters are time-dependent, so they run on the shared rules rather than SQL.
+ */
+export async function searchTickets(
+  tenantId: string,
+  where: Partial<TicketRow>,
+  search: TicketSearch,
+  page: { skip: number; take: number }
+): Promise<{ data: TicketRow[]; total: number; counts: Record<string, number> }> {
+  const store = await getStore();
+  const all = await store.tickets.list(
+    { tenantId, ...where, deletedAt: null },
+    { orderBy: { field: "createdAt", dir: "desc" }, select: Object.keys(LIST_COLUMNS) as (keyof TicketRow)[] }
+  );
+  const { rows, counts } = searchTicketRows(all, search);
+  return { data: rows.slice(page.skip, page.skip + page.take), total: rows.length, counts };
 }
 
 /** Operational reads always hide soft-deleted tickets. */

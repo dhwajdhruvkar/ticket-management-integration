@@ -46,6 +46,7 @@ export class PrismaCollection<T extends Entity> implements Collection<T> {
   async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
     const args: any = { where: where ?? undefined };
     if (options?.afterId) args.where = { ...where, id: { gt: options.afterId } };
+    if (options?.select) args.select = Object.fromEntries(options.select.map((field) => [field, true]));
     if (options?.skip !== undefined) args.skip = options.skip;
     if (options?.take !== undefined) args.take = options.take;
     if (options?.orderBy) {
@@ -177,6 +178,38 @@ export class PrismaStore implements DataStore {
 
   async ready(): Promise<void> {
     // Connection is lazy; seeding for Postgres is handled by prisma/seed.ts.
+  }
+
+  async resolutionsForTenant(tenantId: string) {
+    return this.p.resolution.findMany({
+      where: { ticket: { tenantId, deletedAt: null } },
+      select: { ticketId: true, decision: true, confidence: true },
+    });
+  }
+
+  async eventsForTenant(tenantId: string, type: any) {
+    return this.p.ticketEvent.findMany({
+      where: { type, ticket: { tenantId, deletedAt: null } },
+      select: { ticketId: true, type: true, createdAt: true },
+    }).then((rows: any[]) => rows.map((r) => serialize(r)));
+  }
+
+  async notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }) {
+    const where = { tenantId, toAddress: { equals: email, mode: "insensitive" } };
+    const [items, total, unread] = await Promise.all([
+      this.p.notification.findMany({ where, orderBy: [{ createdAt: page.dir }, { id: "asc" }], skip: page.skip, take: page.take }),
+      this.p.notification.count({ where }),
+      this.p.notification.count({ where: { ...where, readAt: null } }),
+    ]);
+    return { items: items.map((r: unknown) => serialize<any>(r)), total, unread };
+  }
+
+  async markNotificationsRead(tenantId: string, email: string, readAt: string, id?: string) {
+    const result = await this.p.notification.updateMany({
+      where: { tenantId, toAddress: { equals: email, mode: "insensitive" }, readAt: null, ...(id ? { id } : {}) },
+      data: { readAt: new Date(readAt) },
+    });
+    return result.count;
   }
 
   async transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T> {

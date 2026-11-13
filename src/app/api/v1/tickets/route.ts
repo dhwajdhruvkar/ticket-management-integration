@@ -9,13 +9,15 @@ import {
 import { isResponse, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
-import { listTickets, type NewTicketInput } from "@/server/services/ticketService";
+import { listTickets, searchTickets, type NewTicketInput } from "@/server/services/ticketService";
 import { intakeTicket } from "@/server/services/intake";
 import {
   findIdempotentTicket,
   IdempotencyError,
   ticketIdempotencyMetadata,
 } from "@/server/services/idempotencyService";
+import { filtersFromParams } from "@/lib/ticketFilters";
+import { isTicketViewId } from "@/lib/ticketViews";
 import type { Role, TicketRow } from "@/server/domain/models";
 import { z } from "zod";
 import { appendAudit } from "@/server/audit/auditChain";
@@ -70,6 +72,21 @@ export async function GET(req: Request) {
   if (!isAgentRole(role)) {
     if (!actor.email) return paginated([], 0, pagination);
     where.requesterEmail = actor.email;
+  }
+
+  // Explorer mode (?view=): the server applies the saved view, filters and
+  // search and returns one page plus per-view counts, so the browser never
+  // downloads every ticket. Without ?view= the plain list below is unchanged.
+  const view = url.searchParams.get("view");
+  if (view) {
+    if (!isTicketViewId(view)) return fail("Unknown view.");
+    const found = await searchTickets(
+      tenantId,
+      where,
+      { meId: actor.id ?? "", view, filters: filtersFromParams(url.searchParams), q: url.searchParams.get("q")?.slice(0, 200) || undefined },
+      { skip: pagination.skip, take: pagination.take }
+    );
+    return paginated(found.data, found.total, pagination, { counts: found.counts });
   }
 
   const { data, total } = await listTickets(

@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { apiGetAll, apiSend } from "@/lib/api";
+import { apiGetAll, apiGetPage, apiSend } from "@/lib/api";
 import type {
   AssignmentGroupRow,
   ImpactLevel,
@@ -14,7 +14,7 @@ import type {
 } from "@/server/domain/models";
 import { PRIORITY_ORDER } from "@/shared/priority";
 import { WORKFLOW_LABELS } from "@/shared/workflow";
-import { applyTicketFilters, filtersFromParams, SLA_STATE_LABELS, TICKET_CATEGORIES, type SlaState, type TicketFilters } from "@/lib/ticketFilters";
+import { filtersFromParams, SLA_STATE_LABELS, TICKET_CATEGORIES, type SlaState, type TicketFilters } from "@/lib/ticketFilters";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
 import {
   Avatar,
@@ -45,7 +45,6 @@ import { PriorityPreview } from "./PriorityPreview";
 // surface toasts; nothing here writes to the store directly.
 // =============================================================================
 
-const UNSOLVED: TicketStatus[] = ["new", "open", "in_progress", "pending", "pending_agent", "escalated", "reopened"];
 const SOLVED: TicketStatus[] = ["auto_resolved", "resolved", "closed"];
 const CATEGORIES: TicketCategory[] = ["IT", "HR", "Access", "Software", "Hardware", "Network", "Billing", "Other"];
 
@@ -56,8 +55,6 @@ interface ViewDef {
   label: string;
   desc: string;
   icon: ViewIcon;
-  predicate: (t: TicketRow, meId: string) => boolean;
-  sort?: (a: TicketRow, b: TicketRow) => number;
 }
 
 const VIEWS: ViewDef[] = [
@@ -66,51 +63,42 @@ const VIEWS: ViewDef[] = [
     label: "Your unsolved tickets",
     desc: "Assigned to you and still open",
     icon: "user",
-    predicate: (t, me) => t.assigneeId === me && UNSOLVED.includes(t.status),
   },
   {
     id: "unassigned",
     label: "Unassigned tickets",
     desc: "Waiting for an owner",
     icon: "inbox",
-    predicate: (t) => !t.assigneeId && UNSOLVED.includes(t.status),
   },
   {
     id: "all_unsolved",
     label: "All unsolved tickets",
     desc: "The full open backlog",
     icon: "stack",
-    predicate: (t) => UNSOLVED.includes(t.status),
   },
   {
     id: "pending",
     label: "Pending",
     desc: "On hold or awaiting review",
     icon: "pause",
-    predicate: (t) => t.status === "pending_agent" || t.status === "pending",
   },
   {
     id: "recently_updated",
     label: "Recently updated",
     desc: "Everything, newest activity first",
     icon: "clock",
-    predicate: () => true,
-    sort: (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   },
   {
     id: "recently_solved",
     label: "Recently solved",
     desc: "Resolved and closed work",
     icon: "check",
-    predicate: (t) => SOLVED.includes(t.status),
-    sort: (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   },
   {
     id: "all",
     label: "All tickets",
     desc: "No filter applied",
     icon: "grid",
-    predicate: () => true,
   },
 ];
 
@@ -195,9 +183,12 @@ export default function TicketsExplorer() {
   const initialFilters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
   const initialView = searchParams.get("view");
 
+  // Agents load server-side pages inside AgentExplorer; only requesters
+  // (their own few tickets) still read the whole list here.
   const refresh = useCallback(() => {
+    if (isAgent) return;
     apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
-  }, []);
+  }, [isAgent]);
 
   useEffect(() => {
     if (ready) refresh();
@@ -213,10 +204,8 @@ export default function TicketsExplorer() {
   }
   return (
     <AgentExplorer
-      tickets={tickets}
       query={q}
       openFormOnMount={newFlag}
-      refresh={refresh}
       initialFilters={initialFilters}
       initialView={initialView}
     />
@@ -227,18 +216,16 @@ export default function TicketsExplorer() {
    AgentExplorer — saved views, dense-but-rich table, sectioned intake form.
    ============================================================================= */
 
+const EXPLORER_PAGE_SIZE = 100;
+
 function AgentExplorer({
-  tickets,
   query,
   openFormOnMount,
-  refresh,
   initialFilters,
   initialView,
 }: {
-  tickets: TicketRow[] | null;
   query: string;
   openFormOnMount: boolean;
-  refresh: () => void;
   initialFilters: TicketFilters;
   initialView: string | null;
 }) {
@@ -256,6 +243,48 @@ function AgentExplorer({
     setFilters(initialFilters);
     setActiveView(startView);
   }, [initialFilters, startView]);
+
+  // Server-side pages for the active view/filters/search. `pages` is how many
+  // pages the user has loaded; refreshes re-read all of them so the visible
+  // list keeps its place and stays complete.
+  const [tickets, setTickets] = useState<TicketRow[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [pages, setPages] = useState(1);
+  const requestSeq = useRef(0);
+  const filterKey = useMemo(() => {
+    const p = new URLSearchParams({ view: activeView, pageSize: String(EXPLORER_PAGE_SIZE) });
+    if (query) p.set("q", query);
+    if (filters.priority) p.set("priority", filters.priority);
+    if (filters.groupId) p.set("group", filters.groupId);
+    if (filters.assigneeId) p.set("assignee", filters.assigneeId);
+    if (filters.category) p.set("category", filters.category);
+    if (filters.slaState) p.set("sla", filters.slaState);
+    if (filters.phase) p.set("phase", filters.phase);
+    if (filters.overdue) p.set("overdue", "1");
+    if (filters.escalated) p.set("escalated", "1");
+    if (filters.assigned) p.set("assigned", "1");
+    return p.toString();
+  }, [activeView, query, filters]);
+  // Changing view, filters or search starts again from the first page.
+  useEffect(() => { setPages(1); }, [filterKey]);
+
+  const refresh = useCallback(async () => {
+    const seq = ++requestSeq.current;
+    try {
+      const results = await Promise.all(Array.from({ length: pages }, (_, i) => apiGetPage<TicketRow>(`/tickets?${filterKey}&page=${i + 1}`)));
+      if (seq !== requestSeq.current) return; // a newer request superseded this one
+      setTickets(results.flatMap((r) => r.data));
+      setTotal(results[0].meta.total);
+      setCounts(results[0].meta.counts ?? {});
+    } catch {
+      if (seq === requestSeq.current) setTickets((prev) => prev ?? []);
+    }
+  }, [filterKey, pages]);
+
+  useEffect(() => {
+    if (ready) void refresh();
+  }, [ready, persona.id, refresh]);
 
   useLiveRefresh(refresh, { enabled: ready });
 
@@ -280,27 +309,7 @@ function AgentExplorer({
     [groups]
   );
 
-  const counts = useMemo(() => {
-    const map: Record<string, number> = {};
-    const all = tickets ?? [];
-    for (const v of VIEWS) map[v.id] = all.filter((t) => v.predicate(t, persona.id)).length;
-    return map;
-  }, [tickets, persona.id]);
-
-  const rows = useMemo(() => {
-    let list = applyTicketFilters((tickets ?? []).filter((t) => view.predicate(t, persona.id)), filters);
-    if (view.sort) list = [...list].sort(view.sort);
-    if (query) {
-      const needle = query.toLowerCase();
-      list = list.filter(
-        (t) =>
-          t.subject.toLowerCase().includes(needle) ||
-          t.requesterEmail.toLowerCase().includes(needle) ||
-          t.reference.toLowerCase().includes(needle)
-      );
-    }
-    return list;
-  }, [tickets, persona.id, view, query, filters]);
+  const rows = tickets ?? [];
 
   if (tickets === null || !ready)
     return (
@@ -449,14 +458,14 @@ function AgentExplorer({
           onChange={setFilters}
           groups={groups}
           users={users}
-          shown={rows.length}
+          shown={total}
           total={counts[view.id] ?? 0}
         />
 
         <div className="table-scroll anim-fade-in" style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
           {rows.length === 0 ? (
             <AgentEmptyState
-              hasAny={(tickets?.length ?? 0) > 0}
+              hasAny={(counts.all ?? 0) > 0}
               onShowAll={() => setActiveView("all")}
               onCreate={() => setShowForm(true)}
             />
@@ -571,6 +580,13 @@ function AgentExplorer({
                 })}
               </tbody>
             </table>
+          )}
+          {rows.length < total && (
+            <div style={{ padding: "0.75rem", textAlign: "center" }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setPages((n) => n + 1)}>
+                Load more ({rows.length} of {total})
+              </button>
+            </div>
           )}
         </div>
       </div>

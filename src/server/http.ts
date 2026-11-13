@@ -51,14 +51,15 @@ export type PaginationParseResult<K extends string> =
 export function paginated<T, K extends string>(
   data: T,
   total: number,
-  pagination: Pick<ParsedPagination<K>, "page" | "pageSize">
+  pagination: Pick<ParsedPagination<K>, "page" | "pageSize">,
+  extraMeta?: Record<string, unknown>
 ): NextResponse {
   const { page, pageSize } = pagination;
   const totalPages = Math.ceil(total / pageSize);
   return NextResponse.json({
     ok: true,
     data,
-    meta: { total, page, pageSize, limit: pageSize, totalPages },
+    meta: { total, page, pageSize, limit: pageSize, totalPages, ...extraMeta },
   });
 }
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiGet, apiSend } from "@/lib/api";
+import { subscribeLiveEvents } from "@/lib/liveEvents";
 import { usePersona } from "@/components/Persona";
 import { useToast } from "@/components/Toast";
 import { LabelWithHint, PriorityBadge, timeAgo } from "@/components/ui";
@@ -65,10 +66,9 @@ function LegacyTriageView() {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
   useEffect(() => {
-    if (!ready || !canTriage || typeof EventSource === "undefined") return;
-    const source = new EventSource("/api/v1/events");
+    if (!ready || !canTriage) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
-    source.onmessage = (e) => {
+    const unsubscribe = subscribeLiveEvents((e) => {
       let event: { type?: string };
       try {
         event = JSON.parse(e.data) as { type?: string };
@@ -79,9 +79,9 @@ function LegacyTriageView() {
       // Coalesce: routing, automations and the assign itself all fire together.
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => refreshRef.current(), 400);
-    };
+    });
     return () => {
-      source.close();
+      unsubscribe();
       if (timer) clearTimeout(timer);
     };
   }, [ready, canTriage]);

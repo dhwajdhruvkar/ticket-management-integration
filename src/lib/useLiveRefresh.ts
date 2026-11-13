@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { subscribeLiveEvents } from "./liveEvents";
 
 // =============================================================================
 // Live refresh with a polling fallback.
@@ -21,28 +22,35 @@ export function useLiveRefresh(onChange: () => void, opts: { enabled?: boolean; 
     if (!enabled) return;
 
     let debounce: ReturnType<typeof setTimeout> | null = null;
+    let missedWhileHidden = false;
+    const run = () => {
+      if (document.visibilityState !== "visible") { missedWhileHidden = true; return; }
+      onChangeRef.current();
+    };
     const trigger = () => {
       if (debounce) clearTimeout(debounce);
-      debounce = setTimeout(() => { debounce = null; onChangeRef.current(); }, debounceMs);
+      debounce = setTimeout(() => { debounce = null; run(); }, debounceMs);
     };
 
-    const source = typeof EventSource === "undefined" ? null : new EventSource("/api/v1/events");
-    if (source) {
-      source.onmessage = (message) => {
-        let event: LiveEvent;
-        try { event = JSON.parse(message.data) as LiveEvent; } catch { return; }
-        if (event.type === "ticket.updated" || event.type === "notification") trigger();
-      };
-      // onerror is left alone: the browser retries the stream on its own.
-    }
+    const unsubscribe = subscribeLiveEvents((message) => {
+      let event: LiveEvent;
+      try { event = JSON.parse(message.data) as LiveEvent; } catch { return; }
+      if (event.type === "ticket.updated" || event.type === "notification") trigger();
+    });
 
     const poll = setInterval(() => {
       if (document.visibilityState === "visible") onChangeRef.current();
     }, pollMs);
+    // Hidden tabs do no work; catch up once when the tab is shown again.
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && missedWhileHidden) { missedWhileHidden = false; onChangeRef.current(); }
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      source?.close();
+      unsubscribe();
       clearInterval(poll);
+      document.removeEventListener("visibilitychange", onVisible);
       if (debounce) clearTimeout(debounce);
     };
   }, [enabled, debounceMs, pollMs]);

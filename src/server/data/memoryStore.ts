@@ -298,6 +298,41 @@ export class MemoryStore implements DataStore {
   acknowledgements = new MemoryCollection<TicketAcknowledgementRow>(() => this.db.acknowledgements, () => this.persist(), undefined, "tokenHash");
   notificationDeliveries = new MemoryCollection<NotificationDeliveryRow>(() => this.db.notificationDeliveries, () => this.persist());
 
+  private activeTicketIds(tenantId: string): Set<string> {
+    return new Set(this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt).map((t) => t.id));
+  }
+
+  async resolutionsForTenant(tenantId: string) {
+    const ids = this.activeTicketIds(tenantId);
+    return this.db.resolutions
+      .filter((r) => ids.has(r.ticketId))
+      .map(({ ticketId, decision, confidence }) => ({ ticketId, decision, confidence }));
+  }
+
+  async eventsForTenant(tenantId: string, type: TicketEventRow["type"]) {
+    const ids = this.activeTicketIds(tenantId);
+    return this.db.events.filter((e) => e.type === type && ids.has(e.ticketId)).map(({ ticketId, type, createdAt }) => ({ ticketId, type, createdAt }));
+  }
+
+  private mineNotifications(tenantId: string, email: string) {
+    const needle = email.toLowerCase();
+    return this.db.notifications.filter((n) => n.tenantId === tenantId && n.toAddress.toLowerCase() === needle);
+  }
+
+  async notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }) {
+    const mine = this.mineNotifications(tenantId, email).sort((a, b) => {
+      const primary = a.createdAt.localeCompare(b.createdAt);
+      return primary !== 0 ? (page.dir === "asc" ? primary : -primary) : a.id.localeCompare(b.id);
+    });
+    return { items: mine.slice(page.skip, page.skip + page.take).map(clone), total: mine.length, unread: mine.filter((n) => !n.readAt).length };
+  }
+
+  async markNotificationsRead(tenantId: string, email: string, readAt: string, id?: string) {
+    const targets = this.mineNotifications(tenantId, email).filter((n) => !n.readAt && (!id || n.id === id));
+    for (const n of targets) await this.notifications.update(n.id, { readAt });
+    return targets.length;
+  }
+
   ready(): Promise<void> {
     this.initPromise ??= this.init();
     return this.initPromise;

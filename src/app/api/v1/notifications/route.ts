@@ -24,23 +24,12 @@ export async function GET(req: Request) {
   }
 
   const store = await getStore();
-  const all = await store.notifications.list({ tenantId });
-  const mine = all
-    .filter((n) => n.toAddress.toLowerCase() === actor.email!.toLowerCase())
-    .sort((a, b) => {
-      const primary = a.createdAt.localeCompare(b.createdAt);
-      if (primary !== 0) return pagination.sortDir === "asc" ? primary : -primary;
-      return a.id.localeCompare(b.id);
-    });
-
-  return paginated(
-    {
-      items: mine.slice(pagination.skip, pagination.skip + pagination.take),
-      unread: mine.filter((n) => !n.readAt).length,
-    },
-    mine.length,
-    pagination
-  );
+  const { items, total, unread } = await store.notificationsFor(tenantId, actor.email, {
+    skip: pagination.skip,
+    take: pagination.take,
+    dir: pagination.sortDir,
+  });
+  return paginated({ items, unread }, total, pagination);
 }
 
 /** Mark the caller's notifications read: { op: "mark_read", id? } (no id = all). */
@@ -54,15 +43,6 @@ export async function POST(req: Request) {
   if (body?.op !== "mark_read") return fail("Unsupported op.");
 
   const store = await getStore();
-  const all = await store.notifications.list({ tenantId });
-  const targets = all.filter(
-    (n) =>
-      n.toAddress.toLowerCase() === actor.email!.toLowerCase() &&
-      !n.readAt &&
-      (!body.id || n.id === body.id)
-  );
-  for (const n of targets) {
-    await store.notifications.update(n.id, { readAt: now() });
-  }
-  return ok({ marked: targets.length });
+  const marked = await store.markNotificationsRead(tenantId, actor.email, now(), body.id || undefined);
+  return ok({ marked });
 }
