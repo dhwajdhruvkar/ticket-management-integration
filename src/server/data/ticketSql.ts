@@ -126,7 +126,8 @@ export function workflowAlertQueries(tenantId: string, visibleTo: WorkflowAlertV
     ? Prisma.sql`AND ("assigneeId" = ${visibleTo.userId}${visibleTo.groupIds.length ? Prisma.sql` OR "assignmentGroupId" IN (${Prisma.join(visibleTo.groupIds)})` : Prisma.empty})`
     : Prisma.empty;
   return {
-    rows: Prisma.sql`SELECT ${cols(WORKFLOW_ALERT_COLUMNS)} FROM "Ticket" WHERE ${where} ${visible}`,
+    // Byte-order id ordering keeps the result deterministic and identical to the MemoryStore's.
+    rows: Prisma.sql`SELECT ${cols(WORKFLOW_ALERT_COLUMNS)} FROM "Ticket" WHERE ${where} ${visible} ORDER BY "id" COLLATE "C" ASC`,
     count: Prisma.sql`SELECT count(*)::int AS "total" FROM "Ticket" WHERE ${where}`,
   };
 }

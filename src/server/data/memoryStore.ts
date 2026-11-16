@@ -326,7 +326,8 @@ export class MemoryStore implements DataStore {
   async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null) {
     const work = this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt && !!t.workflow && !["closed", "cancelled"].includes(t.status));
     const visible = visibleTo ? work.filter((t) => t.assigneeId === visibleTo.userId || (!!t.assignmentGroupId && visibleTo.groupIds.includes(t.assignmentGroupId))) : work;
-    return { tickets: visible.map(clone), workflowCount: work.length };
+    const byId = [...visible].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)); // same order as the SQL (id, byte order)
+    return { tickets: byId.map(clone), workflowCount: work.length };
   }
 
   private mineNotifications(tenantId: string, email: string) {

@@ -10,45 +10,10 @@ import { ticketSearchQueries, workflowAlertQueries } from "@/server/data/ticketS
 import { searchTicketRows, TICKET_VIEW_RULES, type TicketViewId } from "@/lib/ticketViews";
 import type { TicketFilters } from "@/lib/ticketFilters";
 import type { TicketRow } from "@/server/domain/models";
+import { buildFixture } from "./helpers/ticketFixture";
 
 const NOW = new Date("2026-10-01T12:00:00.000Z");
 const ms = (offsetMin: number) => new Date(NOW.getTime() + offsetMin * 60_000).toISOString();
-
-const STATUSES = ["new", "open", "in_progress", "pending", "auto_resolved", "pending_agent", "escalated", "resolved", "reopened", "closed", "cancelled"] as const;
-const PRIORITIES = ["critical", "high", "medium", "low", "very_low"] as const;
-const CATEGORIES = ["IT", "HR", "Access", "Software", "Hardware", "Network", "Billing", "Other"] as const;
-const WORKFLOWS: (Record<string, unknown> | null)[] = [
-  null, { phase: "department" }, { phase: "in_progress" }, { phase: "awaiting_acceptance", managerEscalatedAt: ms(-5) },
-  { phase: "department", rmEscalatedAt: "" }, { phase: "department", resolutionEscalatedAt: ms(-1) },
-];
-
-function buildFixture(): TicketRow[] {
-  let seed = 7;
-  const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return (seed >> 8) % n; };
-  const rows: Partial<TicketRow>[] = [];
-  for (let i = 0; i < 90; i++) {
-    const created = -600 - rnd(5000);
-    const dueKind = rnd(9);
-    // Deadlines around "now": past, future, exactly now, and fractions of the 80% at-risk line.
-    const due = dueKind === 0 ? null : dueKind === 1 ? ms(-30) : dueKind === 2 ? ms(0) : dueKind === 3 ? ms(500) : dueKind === 4 ? ms(created + (0 - created) * 1.25) : dueKind === 6 ? ms(created + (0 - created) * 1.1) : dueKind === 7 ? ms(created + (0 - created) * 2) : ms(created);
-    const status = STATUSES[rnd(STATUSES.length)];
-    const solved = ["resolved", "closed", "auto_resolved"].includes(status);
-    rows.push({
-      id: `t${String(i).padStart(3, "0")}`, reference: `NL-${1000 + i}`, tenantId: i % 9 === 0 ? "other" : "org",
-      subject: ["Printer jam", "VPN down", "Reset password", "50% slower_login"][rnd(4)], requesterEmail: ["a@x.com", "B@x.com", "c@y.com"][rnd(3)],
-      status, priority: PRIORITIES[rnd(5)], category: CATEGORIES[rnd(8)], type: "incident",
-      assigneeId: [null, "u1", "u2", ""][rnd(4)] as string | null, assignmentGroupId: [null, "g1", "g2"][rnd(3)],
-      createdAt: ms(created), updatedAt: ms(-(rnd(40) * 10)),
-      dueResponseAt: due, dueResolveAt: rnd(2) ? due : ms(-rnd(100)),
-      firstRespondedAt: rnd(3) === 0 ? ms(created + 5) : null,
-      resolvedAt: solved ? ms(created + rnd(900)) : rnd(15) === 0 ? ms(-3) : null,
-      slaPausedAt: rnd(8) === 0 ? ms(-20) : null, slaPausedMins: 0, workflowVersion: 0,
-      workflow: WORKFLOWS[rnd(WORKFLOWS.length)] as TicketRow["workflow"],
-      deletedAt: i % 11 === 0 ? ms(-10) : null,
-    });
-  }
-  return rows as TicketRow[];
-}
 
 const DDL = `
 CREATE TYPE "TicketStatus" AS ENUM ('new','open','in_progress','pending','auto_resolved','pending_agent','escalated','resolved','reopened','closed','cancelled');
@@ -139,11 +104,15 @@ describe.skipIf(!pglitePath)("explorer + alert SQL parity with the shared JS rul
     const db = await openDb();
     const all = buildFixture().filter((t) => t.tenantId === "org" && !t.deletedAt && !!t.workflow && !["closed", "cancelled"].includes(t.status));
     const everyone = workflowAlertQueries("org", null);
-    expect((await run(db, everyone.rows)).rows.map((r) => r.id).sort()).toEqual(all.map((t) => t.id).sort());
+    // R2: the query orders by id in byte order, so the sequence (not just the set) is fixed and repeatable.
+    const byteOrder = (ids: string[]) => [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const firstRun = (await run(db, everyone.rows)).rows.map((r) => r.id as string);
+    expect(firstRun).toEqual(byteOrder(all.map((t) => t.id)));
+    for (let i = 0; i < 3; i++) expect((await run(db, everyone.rows)).rows.map((r) => r.id)).toEqual(firstRun);
     expect((await run(db, everyone.count)).rows[0].total).toBe(all.length);
     const mine = workflowAlertQueries("org", { userId: "u1", groupIds: ["g1"] });
     const expected = all.filter((t) => t.assigneeId === "u1" || t.assignmentGroupId === "g1").map((t) => t.id).sort();
-    expect((await run(db, mine.rows)).rows.map((r) => r.id).sort()).toEqual(expected);
+    expect((await run(db, mine.rows)).rows.map((r) => r.id)).toEqual(byteOrder(expected));
     expect((await run(db, mine.count)).rows[0].total).toBe(all.length);
     const noGroups = workflowAlertQueries("org", { userId: "u2", groupIds: [] });
     expect((await run(db, noGroups.rows)).rows.map((r) => r.id).sort()).toEqual(all.filter((t) => t.assigneeId === "u2").map((t) => t.id).sort());

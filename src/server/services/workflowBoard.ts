@@ -4,7 +4,7 @@ import { defaultWorkflowSettings, type WorkflowSettings } from "@/shared/workflo
 import { WorkflowError, type WorkflowActor } from "./workflowService";
 import { activeWorkload, calculateAvailability, rankExperiencedAgents, type AgentAvailability, type AgentSuggestion } from "./availabilityService";
 import { refreshTeamsPresence, teamsPresenceConfigured } from "../integrations/teamsPresence";
-import { bucketHealth, type BucketHealth } from "./workflowMonitoring";
+import { safeBucketHealth, type BucketHealth } from "./workflowMonitoring";
 import { outboundEmailConfigured, publicAppOrigin } from "../notify/workflowOutbox";
 
 export interface WorkflowAlerts {
@@ -49,8 +49,8 @@ export async function getWorkflowBoard(tenantId: string, actor: WorkflowActor, l
   const policies = await store.slaPolicies.list({ tenantId });
   const queueHealth = Object.fromEntries(tickets.map((ticket) => {
     const policy = policies.find((row) => row.priority === ticket.priority) ?? null;
-    return [ticket.id, bucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null)];
-  }));
+    return [ticket.id, safeBucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null, "board")] as const;
+  }).filter((entry): entry is readonly [string, BucketHealth] => entry[1] !== null));
   const monitoring = await buildMonitoring(store, tenantId, user.role, settings, work.length > 0, tickets, queueHealth);
   return { settings, groups, canDispatch, hasWorkflowTickets: work.length > 0, tickets, suggestions, queueHealth, monitoring, teamsConfigured: teamsPresenceConfigured(tenantId),
     staff: presenceUsers.map(({ id, name, role }) => ({ id, name, role, availability: availability[id] })),
@@ -58,15 +58,23 @@ export async function getWorkflowBoard(tenantId: string, actor: WorkflowActor, l
 }
 
 type Store = Awaited<ReturnType<typeof getStore>>;
+
+// Most urgent first; then the earliest due date; then ticket id so identical data always renders identically.
+const ALERT_SEVERITY: Record<string, number> = { senior_rm: 0, manager: 1, resolution_breach: 2, warning: 3 };
+function sortAlerts(alerts: WorkflowAlerts["alerts"]): WorkflowAlerts["alerts"] {
+  const code = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0); // code-unit order, independent of locale
+  return [...alerts].sort((a, b) => (ALERT_SEVERITY[a.level] ?? 9) - (ALERT_SEVERITY[b.level] ?? 9) || code(a.dueAt ?? "", b.dueAt ?? "") || code(a.ticketId, b.ticketId));
+}
 async function buildMonitoring(store: Store, tenantId: string, role: string, settings: WorkflowSettings, hasWork: boolean, tickets: TicketRow[], queueHealth: Record<string, BucketHealth>): Promise<WorkflowAlerts> {
   const [monitor, pendingEmails, failedEmails] = await Promise.all([store.jobLeases.get("workflow-monitor"), store.notificationDeliveries.count({ tenantId, status: "pending" }), store.notificationDeliveries.count({ tenantId, status: "failed" })]);
   return { enabled: settings.enabled || hasWork, canRetryEmails: ["tenant_admin", "super_admin"].includes(role),
-    alerts: tickets.flatMap((ticket): WorkflowAlerts["alerts"] => {
+    alerts: sortAlerts(tickets.flatMap((ticket): WorkflowAlerts["alerts"] => {
       const health = queueHealth[ticket.id];
+      if (!health) return []; // malformed workflow data: skipped (and logged) rather than guessed at
       if (["warning", "manager", "senior_rm"].includes(health.level)) return [{ ticketId: ticket.id, reference: ticket.reference, subject: ticket.subject, level: health.level, dueAt: health.managerDueAt }];
       if (health.level === "accepted" && !ticket.slaPausedAt && ticket.dueResolveAt && Date.parse(ticket.dueResolveAt) <= Date.now()) return [{ ticketId: ticket.id, reference: ticket.reference, subject: ticket.subject, level: "resolution_breach", dueAt: ticket.dueResolveAt }];
       return [];
-    }),
+    })),
     health: { monitorFresh: !!monitor?.lastSuccessAt && Date.now() - Date.parse(monitor.lastSuccessAt) < 3 * 60_000 && !monitor.lastError,
       lastSuccessAt: monitor?.lastSuccessAt ?? null, lastError: monitor?.lastError ?? null, emailConfigured: outboundEmailConfigured() && !!publicAppOrigin(),
       confirmationConfigured: (process.env.AUTH_SECRET?.length ?? 0) >= 32 && !!publicAppOrigin(), pendingEmails, failedEmails } };
@@ -89,7 +97,7 @@ export async function getWorkflowAlerts(tenantId: string, actor: WorkflowActor):
   const { tickets, workflowCount } = await store.workflowAlertTickets(tenantId, canDispatch ? null : { userId: user.id, groupIds });
   const queueHealth = Object.fromEntries(tickets.map((ticket) => {
     const policy = policies.find((row) => row.priority === ticket.priority) ?? null;
-    return [ticket.id, bucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null)];
-  }));
+    return [ticket.id, safeBucketHealth(ticket, settings, policy, calendars.find((row) => row.id === policy?.calendarId) ?? null, "alerts")] as const;
+  }).filter((entry): entry is readonly [string, BucketHealth] => entry[1] !== null));
   return buildMonitoring(store, tenantId, user.role, settings, workflowCount > 0, tickets, queueHealth);
 }

@@ -16,6 +16,7 @@ import { PRIORITY_ORDER } from "@/shared/priority";
 import { WORKFLOW_LABELS } from "@/shared/workflow";
 import { filtersFromParams, SLA_STATE_LABELS, TICKET_CATEGORIES, type SlaState, type TicketFilters } from "@/lib/ticketFilters";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { ExplorerController, type ExplorerState } from "@/lib/explorerPaging";
 import {
   Avatar,
   IMPACT_LEVELS,
@@ -218,6 +219,9 @@ export default function TicketsExplorer() {
 
 const EXPLORER_PAGE_SIZE = 100;
 
+/** What a loaded page set was requested for; kept with the rows so the heading never disagrees with them. */
+interface ExplorerSpec { view: string; filters: TicketFilters; query: string }
+
 function AgentExplorer({
   query,
   openFormOnMount,
@@ -244,14 +248,16 @@ function AgentExplorer({
     setActiveView(startView);
   }, [initialFilters, startView]);
 
-  // Server-side pages for the active view/filters/search. `pages` is how many
-  // pages the user has loaded; refreshes re-read all of them so the visible
-  // list keeps its place and stays complete.
-  const [tickets, setTickets] = useState<TicketRow[] | null>(null);
-  const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [pages, setPages] = useState(1);
-  const requestSeq = useRef(0);
+  // Server-side pages for the requested view/filters/search, owned by a small
+  // state machine (lib/explorerPaging.ts): rows, total and view change together
+  // only after a successful response, Load more fetches just the next page, and
+  // stale or failed responses never replace what is on screen.
+  const toast = useToast();
+  const [paging, setPaging] = useState<ExplorerState<TicketRow, ExplorerSpec>>({ committed: null, pendingKey: null, loadingMore: false, error: null });
+  const controller = useMemo(
+    () => new ExplorerController<TicketRow, ExplorerSpec>((key, page) => apiGetPage<TicketRow>(`/tickets?${key}&page=${page}`), setPaging),
+    []
+  );
   const filterKey = useMemo(() => {
     const p = new URLSearchParams({ view: activeView, pageSize: String(EXPLORER_PAGE_SIZE) });
     if (query) p.set("q", query);
@@ -266,27 +272,55 @@ function AgentExplorer({
     if (filters.assigned) p.set("assigned", "1");
     return p.toString();
   }, [activeView, query, filters]);
-  // Changing view, filters or search starts again from the first page.
-  useEffect(() => { setPages(1); }, [filterKey]);
 
-  const refresh = useCallback(async () => {
-    const seq = ++requestSeq.current;
-    try {
-      const results = await Promise.all(Array.from({ length: pages }, (_, i) => apiGetPage<TicketRow>(`/tickets?${filterKey}&page=${i + 1}`)));
-      if (seq !== requestSeq.current) return; // a newer request superseded this one
-      setTickets(results.flatMap((r) => r.data));
-      setTotal(results[0].meta.total);
-      setCounts(results[0].meta.counts ?? {});
-    } catch {
-      if (seq === requestSeq.current) setTickets((prev) => prev ?? []);
-    }
-  }, [filterKey, pages]);
-
+  // A new view, filter or search loads page 1; the committed view stays on screen until it succeeds.
+  const lastPersona = useRef(persona.id);
   useEffect(() => {
-    if (ready) void refresh();
-  }, [ready, persona.id, refresh]);
+    if (!ready) return;
+    const personaChanged = lastPersona.current !== persona.id;
+    lastPersona.current = persona.id;
+    const { committed: shown, pendingKey } = controller.getState();
+    // The controls returning to the request that is already on screen (e.g. after a failed switch) needs no new load,
+    // which would also discard the extra pages the user has loaded.
+    if (!personaChanged && !pendingKey && shown?.key === filterKey) return;
+    void controller.select(filterKey, { view: activeView, filters, query });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filterKey already encodes view, filters and query
+  }, [ready, persona.id, filterKey, controller]);
 
+  const refresh = useCallback(() => { void controller.refresh(); }, [controller]);
   useLiveRefresh(refresh, { enabled: ready });
+
+  // A failed switch keeps the previous view's records, so put the controls back on that view and say why.
+  const switchError = paging.error?.kind === "switch" ? paging.error : null;
+  useEffect(() => {
+    if (!switchError || !paging.committed) return;
+    setActiveView(paging.committed.spec.view);
+    setFilters(paging.committed.spec.filters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to a new error object only
+  }, [switchError]);
+  // After a successful retry of a failed switch, the controls follow the view that is now showing.
+  const committedKey = paging.committed?.key;
+  useEffect(() => {
+    const spec = paging.committed?.spec;
+    if (!spec) return;
+    if (spec.view !== activeView) setActiveView(spec.view);
+    if (JSON.stringify(spec.filters) !== JSON.stringify(filters)) setFilters(spec.filters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when a new set of rows is committed
+  }, [committedKey]);
+  useEffect(() => {
+    if (!paging.error) return;
+    toast.error({
+      title: paging.error.kind === "more" ? "Could not load more tickets" : paging.error.kind === "switch" ? "Could not switch view" : "Could not load tickets",
+      description: paging.error.message,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one toast per error
+  }, [paging.error]);
+
+  const committed = paging.committed;
+  const tickets = committed?.rows ?? null;
+  const total = committed?.total ?? 0;
+  const counts = committed?.counts ?? {};
+  const hasMore = !!committed && committed.loadedPages < committed.totalPages;
 
   useEffect(() => {
     if (!ready) return;
@@ -298,7 +332,9 @@ function AgentExplorer({
     if (openFormOnMount) setShowForm(true);
   }, [openFormOnMount]);
 
-  const view = VIEWS.find((v) => v.id === activeView) ?? VIEWS[0];
+  // The heading, sidebar highlight and rows always describe the committed (loaded) view.
+  const shownView = committed?.spec.view ?? activeView;
+  const view = VIEWS.find((v) => v.id === shownView) ?? VIEWS[0];
 
   const userName = useCallback(
     (id: string | null | undefined) => users.find((u) => u.id === id)?.name ?? "Unassigned",
@@ -311,7 +347,7 @@ function AgentExplorer({
 
   const rows = tickets ?? [];
 
-  if (tickets === null || !ready)
+  if (!ready || (tickets === null && !paging.error))
     return (
       <div className="page-pad">
         <TableSkeleton title={180} rows={8} columns={6} />
@@ -320,7 +356,7 @@ function AgentExplorer({
 
   return (
     <div style={{ height: "100%", display: "flex", minHeight: 0 }}>
-      <ViewsSidebar activeView={activeView} counts={counts} onSelect={setActiveView} />
+      <ViewsSidebar activeView={shownView} counts={counts} onSelect={setActiveView} />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
         {/* Header */}
@@ -460,11 +496,23 @@ function AgentExplorer({
           users={users}
           shown={total}
           total={counts[view.id] ?? 0}
+          loading={!!paging.pendingKey}
         />
 
-        <div className="table-scroll anim-fade-in" style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-          {rows.length === 0 ? (
+        {paging.error && paging.error.kind !== "more" ? (
+          <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0.55rem 1.25rem", borderBottom: "1px solid var(--border)", background: "var(--danger-bg)", color: "var(--danger-fg)", fontSize: "0.8rem" }}>
+            <span>{paging.error.kind === "switch" ? `Could not load that view (${paging.error.message}). Still showing \u201c${view.label}\u201d.` : `Could not load tickets (${paging.error.message}).`}</span>
+            <button type="button" className="btn" onClick={() => void controller.retry()}>Try again</button>
+          </div>
+        ) : null}
+
+        <div className="table-scroll anim-fade-in" aria-busy={!!paging.pendingKey} style={{ flex: 1, overflow: "auto", minHeight: 0, opacity: paging.pendingKey ? 0.6 : 1 }}>
+          {rows.length === 0 && !committed ? null : rows.length === 0 ? (
             <AgentEmptyState
+              hasQuery={!!committed?.spec.query}
+              query={committed?.spec.query ?? ""}
+              hasFilters={Object.values(committed?.spec.filters ?? {}).some((value) => value !== undefined && value !== false)}
+              onClearFilters={() => setFilters({})}
               hasAny={(counts.all ?? 0) > 0}
               onShowAll={() => setActiveView("all")}
               onCreate={() => setShowForm(true)}
@@ -581,11 +629,17 @@ function AgentExplorer({
               </tbody>
             </table>
           )}
-          {rows.length < total && (
+          {hasMore && (
             <div style={{ padding: "0.75rem", textAlign: "center" }}>
-              <button type="button" className="btn btn-ghost" onClick={() => setPages((n) => n + 1)}>
-                Load more ({rows.length} of {total})
+              <button type="button" className="btn btn-ghost" disabled={paging.loadingMore || !!paging.pendingKey} onClick={() => void controller.loadMore()}>
+                {paging.loadingMore ? "Loading\u2026" : `Load more (${rows.length} of ${total})`}
               </button>
+              {paging.error?.kind === "more" ? (
+                <p role="alert" className="muted" style={{ fontSize: "0.78rem", margin: "6px 0 0" }}>
+                  Could not load the next page ({paging.error.message}). The tickets above are still current.{" "}
+                  <button type="button" className="btn btn-ghost" onClick={() => void controller.retry()}>Try again</button>
+                </p>
+              ) : null}
             </div>
           )}
         </div>
@@ -603,6 +657,7 @@ function FilterBar({
   users,
   shown,
   total,
+  loading = false,
 }: {
   filters: TicketFilters;
   onChange: (next: TicketFilters) => void;
@@ -610,6 +665,7 @@ function FilterBar({
   users: UserRow[];
   shown: number;
   total: number;
+  loading?: boolean;
 }) {
   const active = Object.values(filters).some((value) => value !== undefined && value !== false);
   const set = (patch: Partial<TicketFilters>) => onChange({ ...filters, ...patch });
@@ -629,7 +685,7 @@ function FilterBar({
       </select>
     </label>
   );
-  const check = (key: "overdue" | "escalated", label: string) => (
+  const check = (key: "overdue" | "escalated" | "assigned", label: string) => (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}>
       <input type="checkbox" checked={!!filters[key]} onChange={(event) => set({ [key]: event.target.checked || undefined })} />
       {label}
@@ -652,11 +708,12 @@ function FilterBar({
       {pick("phase", "Workflow phase", Object.entries(WORKFLOW_LABELS).map(([value, label]) => ({ value, label })))}
       {check("overdue", "Overdue only")}
       {check("escalated", "Escalated only")}
+      {check("assigned", "Assigned only")}
       <button type="button" className="btn" disabled={!active} onClick={() => onChange({})}>
         Clear filters
       </button>
       <span className="muted" role="status" aria-live="polite" style={{ fontSize: "0.78rem", marginLeft: "auto" }}>
-        {shown} of {total} tickets
+        {shown} of {total} tickets{loading ? " \u00b7 Loading\u2026" : ""}
       </span>
     </div>
   );
@@ -684,10 +741,18 @@ function PersonCell({ name }: { name: string; tone?: "brand" | "info" }) {
 
 function AgentEmptyState({
   hasAny,
+  hasQuery,
+  query,
+  hasFilters,
+  onClearFilters,
   onShowAll,
   onCreate,
 }: {
   hasAny: boolean;
+  hasQuery: boolean;
+  query: string;
+  hasFilters: boolean;
+  onClearFilters: () => void;
   onShowAll: () => void;
   onCreate: () => void;
 }) {
@@ -720,15 +785,24 @@ function AgentEmptyState({
       </div>
       <div>
         <div style={{ fontSize: "1rem", fontWeight: 700 }}>
-          {hasAny ? "Nothing in this view" : "No tickets yet"}
+          {!hasAny ? "No tickets yet" : hasQuery ? "No matching tickets" : hasFilters ? "No tickets match these filters" : "Nothing in this view"}
         </div>
         <p className="muted" style={{ fontSize: "0.85rem", margin: "4px 0 0", maxWidth: 380 }}>
-          {hasAny
-            ? "This queue is clear. Switch views or create a ticket on behalf of a requester."
-            : "Create the first ticket, or wait for intake from email, Teams, or the portal."}
+          {!hasAny
+            ? "Create the first ticket, or wait for intake from email, Teams, or the portal."
+            : hasQuery
+              ? `Nothing in this view matches \u201c${query}\u201d. Check the spelling, or show all tickets.`
+              : hasFilters
+                ? "No tickets in this view match the selected filters. Adjust or clear the filters."
+                : "This queue is clear. Switch views or create a ticket on behalf of a requester."}
         </p>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
+        {hasAny && hasFilters && !hasQuery ? (
+          <button className="btn btn-ghost" onClick={onClearFilters}>
+            Clear filters
+          </button>
+        ) : null}
         {hasAny ? (
           <button className="btn btn-ghost" onClick={onShowAll}>
             Show all tickets

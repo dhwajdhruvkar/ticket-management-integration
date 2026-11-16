@@ -8,12 +8,49 @@ import { newId } from "../domain/ids";
 import { appendAudit } from "../audit/auditChain";
 import { WorkflowError } from "./workflowService";
 import { queueTicketWebhookEvent } from "./integrationWebhookService";
+import { logger } from "../observability/logger";
 
 export interface BucketHealth {
   level: "on_track" | "warning" | "manager" | "senior_rm" | "paused" | "accepted" | "finished";
   warningDueAt?: string;
   managerDueAt?: string;
   rmDueAt?: string;
+}
+
+/**
+ * A ticket's workflow data cannot be evaluated (e.g. no usable `queuedAt`).
+ * Callers isolate it per ticket: the ticket is skipped and never gets an
+ * alert or escalation computed from an invented timestamp. Any other error is
+ * a real failure and must propagate.
+ */
+export class InvalidWorkflowDataError extends Error {
+  constructor(readonly ticketId: string, readonly reason: string) {
+    super(`Invalid workflow data on ticket ${ticketId}: ${reason}`);
+    this.name = "InvalidWorkflowDataError";
+  }
+}
+
+const REPORT_INTERVAL_MS = 10 * 60_000;
+const reported = new Map<string, number>();
+
+/** Structured warning (ticket id and reason only, no ticket content), at most once per ticket per 10 minutes. */
+export function warnInvalidWorkflow(error: InvalidWorkflowDataError, context: "alerts" | "board" | "sweep", at = Date.now()): void {
+  const key = `${error.ticketId}:${error.reason}`;
+  if (at - (reported.get(key) ?? -Infinity) < REPORT_INTERVAL_MS) return;
+  if (reported.size > 1000) reported.clear();
+  reported.set(key, at);
+  logger.warn("workflow.ticket.skipped_invalid_workflow", { ticketId: error.ticketId, reason: error.reason, context });
+}
+
+/** bucketHealth() for a list view: a malformed ticket yields `null` (and a warning) instead of failing the whole request. */
+export function safeBucketHealth(ticket: TicketRow, settings: WorkflowSettings, policy: SlaPolicyRow | null, calendar: BusinessCalendarRow | null, context: "alerts" | "board"): BucketHealth | null {
+  try {
+    return bucketHealth(ticket, settings, policy, calendar);
+  } catch (error) {
+    if (!(error instanceof InvalidWorkflowDataError)) throw error;
+    warnInvalidWorkflow(error, context);
+    return null;
+  }
 }
 
 function workflowCalendar(tenantId: string, settings: WorkflowSettings, policy: SlaPolicyRow | null, calendar: BusinessCalendarRow | null): CalendarSpec | null {
@@ -26,13 +63,23 @@ export function bucketHealth(ticket: TicketRow, settings: WorkflowSettings, poli
   if (!workflow || ticket.deletedAt || ["resolved", "auto_resolved", "closed", "cancelled"].includes(ticket.status)) return { level: "finished" };
   if (workflow.phase === "in_progress") return { level: "accepted" };
   const stage = settings.stages[ticket.priority];
+  if (!stage) throw new InvalidWorkflowDataError(ticket.id, "no workflow stage is configured for the ticket priority");
+  const rawQueued: unknown = workflow.queuedAt;
+  const queuedMs = typeof rawQueued === "string" && rawQueued.trim() ? Date.parse(rawQueued) : typeof rawQueued === "number" ? rawQueued : NaN;
+  if (!Number.isFinite(queuedMs)) throw new InvalidWorkflowDataError(ticket.id, "workflow.queuedAt is missing or not a valid timestamp");
+  // Pause credits must be real numbers: NaN would silently collapse a calendar deadline to the queue time (a false escalation).
+  const timings: unknown[] = [workflow.queuedPauseMins, workflow.queueWorkingPauseMins, ticket.slaPausedMins];
+  if (timings.some((value) => value !== undefined && value !== null && !(typeof value === "number" && Number.isFinite(value)))) {
+    throw new InvalidWorkflowDataError(ticket.id, "workflow pause minutes are not valid numbers");
+  }
   const effectiveCalendar = workflowCalendar(ticket.tenantId, settings, policy, calendar);
-  const queued = new Date(workflow.queuedAt);
+  const queued = new Date(queuedMs);
   const shift = Math.max(0, (ticket.slaPausedMins ?? 0) - (workflow.queuedPauseMins ?? 0)) * 60_000;
   const deadline = (minutes: number) => effectiveCalendar ? addCalendarMinutes(queued, minutes + (workflow.queueWorkingPauseMins ?? 0), effectiveCalendar).getTime() : queued.getTime() + minutes * 60_000 + shift;
   const warning = deadline(stage.pickupMins * 0.8);
   const manager = deadline(stage.pickupMins);
   const rm = deadline(stage.pickupMins + stage.managerMins);
+  if (![warning, manager, rm].every(Number.isFinite)) throw new InvalidWorkflowDataError(ticket.id, "workflow deadlines could not be calculated from the stored timing values");
   return { level: ticket.slaPausedAt || ticket.status === "pending" ? "paused" : at >= rm ? "senior_rm" : at >= manager ? "manager" : at >= warning ? "warning" : "on_track",
     warningDueAt: new Date(warning).toISOString(), managerDueAt: new Date(manager).toISOString(), rmDueAt: new Date(rm).toISOString() };
 }

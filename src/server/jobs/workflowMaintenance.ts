@@ -1,7 +1,7 @@
 import { getStore } from "../data";
 import type { DataStore } from "../data/store";
 import { acquireLease, finishLease } from "./durableLease";
-import { monitorWorkflowTicket } from "../services/workflowMonitoring";
+import { InvalidWorkflowDataError, monitorWorkflowTicket, warnInvalidWorkflow } from "../services/workflowMonitoring";
 import { drainWorkflowOutbox } from "../notify/workflowOutbox";
 import { logger } from "../observability/logger";
 import { cleanWorkflowMetadata } from "./workflowRetention";
@@ -21,7 +21,16 @@ export async function runWorkflowMaintenance(entryPoint: "cron" | "local_schedul
       const page = await store.tickets.list({ deletedAt: null }, { afterId: cursor ?? undefined, take: 100, orderBy: { field: "id", dir: "asc" } });
       for (const ticket of page) {
         if (Date.now() - started >= 20_000) break;
-        if (ticket.workflow && !["closed", "cancelled"].includes(ticket.status) && await monitorWorkflowTicket(store, ticket.id)) changed++;
+        if (ticket.workflow && !["closed", "cancelled"].includes(ticket.status)) {
+          try {
+            if (await monitorWorkflowTicket(store, ticket.id)) changed++;
+          } catch (error) {
+            // One ticket with unusable workflow data must not stop the sweep or pin the cursor behind it.
+            // Only that known condition is isolated; database and other errors still fail the sweep.
+            if (!(error instanceof InvalidWorkflowDataError)) throw error;
+            warnInvalidWorkflow(error, "sweep");
+          }
+        }
         cursor = ticket.id; processed++;
       }
       if (page.length < 100 && (!page.length || cursor === page.at(-1)?.id)) { complete = true; cursor = null; break; }
