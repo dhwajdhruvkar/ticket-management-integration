@@ -275,10 +275,10 @@ export async function deliverWebhookDelivery(id: string): Promise<boolean> {
 
 export async function retryPendingWebhookDeliveries(limit = 100): Promise<number> {
   const store = await getStore();
-  const due = (await store.webhookDeliveries.list())
-    .filter((row) => new Date(row.nextAttemptAt).getTime() <= Date.now())
-    .sort((a, b) => a.nextAttemptAt.localeCompare(b.nextAttemptAt))
-    .slice(0, limit);
+  // Due rows are exactly the oldest nextAttemptAt values, so reading only the `limit` oldest and applying the time test
+  // here returns the same rows as sorting every delivery (the equality-only list filter cannot express "<= now").
+  const due = (await store.webhookDeliveries.list(undefined, { orderBy: { field: "nextAttemptAt", dir: "asc" }, take: limit }))
+    .filter((row) => new Date(row.nextAttemptAt).getTime() <= Date.now());
   for (const row of due) await deliverWebhookDelivery(row.id);
   return due.length;
 }
