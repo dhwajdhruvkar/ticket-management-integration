@@ -3,9 +3,9 @@ import type { ArticleRow, AssignmentGroupRow, TicketRow, UserRow } from "../doma
 import { defaultWorkflowSettings } from "@/shared/workflow";
 import { bowEmbed, cosineSimilarity } from "../ai/embeddings";
 import { search, type SearchHit } from "../ai/vectorSearch";
-import { activeWorkload, calculateAvailability, rankExperiencedAgents, type AgentAvailability, type AgentSuggestion } from "./availabilityService";
+import { calculateAvailability, rankExperiencedAgents, type AgentAvailability, type AgentSuggestion } from "./availabilityService";
 import { WorkflowError } from "./workflowService";
-import { BOARD_TICKET_FIELDS, HISTORY_TICKET_FIELDS } from "./workflowBoard";
+import { HISTORY_TICKET_FIELDS } from "./workflowBoard";
 
 export interface GroupRecommendation {
   groupId: string; name: string; score: number; confidence: "high" | "medium" | "low"; reasons: string[];
@@ -105,14 +105,14 @@ export async function recommendRouting(tenantId: string, ticketId: string, actor
   if (ticket.workflow?.phase !== "service_desk") throw new WorkflowError("Routing suggestions are only available while a ticket is in the Service Desk bucket.", 409);
 
   const departmentIds = new Set(settings.buckets.filter((bucket) => bucket.kind === "department").map((bucket) => bucket.groupId));
-  const [groups, allTickets, users, calendars] = await Promise.all([
-    store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }, { select: BOARD_TICKET_FIELDS }), store.users.list({ tenantId, active: true }), store.calendars.list({ tenantId }),
+  const [groups, workloads, users, calendars] = await Promise.all([ // per-agent counts from the database, not the tenant's tickets
+    store.groups.list({ tenantId }), store.activeWorkloads(tenantId), store.users.list({ tenantId, active: true }), store.calendars.list({ tenantId }),
   ]);
   const departmentGroups = groups.filter((group) => departmentIds.has(group.id));
   // Same bounded history window as workflowBoard.ts, fetched by the database.
   const history = await store.recentResolvedTickets(tenantId, 500, HISTORY_TICKET_FIELDS);
   const staff: UserRow[] = users.filter((row) => staffRoles.includes(row.role));
-  const availability: Record<string, AgentAvailability> = Object.fromEntries(staff.map((row) => [row.id, calculateAvailability(row, activeWorkload(allTickets, row.id), calendars.find((calendar) => calendar.id === row.availabilitySettings?.calendarId), settings.availabilityMode)]));
+  const availability: Record<string, AgentAvailability> = Object.fromEntries(staff.map((row) => [row.id, calculateAvailability(row, workloads[row.id] ?? 0, calendars.find((calendar) => calendar.id === row.availabilitySettings?.calendarId), settings.availabilityMode)]));
   const availableCount = Object.fromEntries(departmentGroups.map((group) => [group.id, group.memberIds.filter((id) => availability[id]?.status === "available").length]));
 
   const kb = await search(tenantId, `${ticket.subject} ${ticket.body}`, 4);

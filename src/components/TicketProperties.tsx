@@ -1,6 +1,7 @@
 "use client";
 
 import { readIssueContext } from "@/shared/issueContext";
+import { TICKET_TYPE_LABELS, typeDetailRows } from "@/shared/ticketTypes";
 import { useState } from "react";
 import { usePersona } from "@/components/Persona";
 import { useConfigurationItems } from "@/lib/useReferenceData";
@@ -112,6 +113,16 @@ export default function TicketProperties({
       <Field label="Location">
         <span style={{ fontSize: "0.86rem" }}>{String(ticket.customFields?.requesterLocation ?? "—")}</span>
       </Field>
+
+      <Field label="Type">
+        <span style={{ fontSize: "0.86rem" }}>{TICKET_TYPE_LABELS[ticket.type] ?? ticket.type}</span>
+      </Field>
+      {typeDetailRows(ticket.type, ticket.customFields, ticket.approvals).map((row) => (
+        <Field key={row.label} label={row.label}>
+          {/* Plain text only: requester-supplied content is never rendered as HTML. */}
+          <span style={{ fontSize: "0.86rem", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.value}</span>
+        </Field>
+      ))}
 
       {issueContext ? (
         <Field label="Requester notes">

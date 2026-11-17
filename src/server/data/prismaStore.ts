@@ -11,8 +11,9 @@ import { PrismaClient } from "@prisma/client";
 import { config } from "../config";
 import type { Collection, DataStore, ListOptions, TicketSearchSpec } from "./store";
 import type { TicketRow } from "../domain/models";
-import { ticketSearchQueries, workflowAlertQueries } from "./ticketSql";
+import { activeWorkloadQuery, requesterTicketQueries, ticketSearchQueries, workflowAlertQueries } from "./ticketSql";
 import type { Entity } from "../domain/models";
+import type { RequesterCounts, RequesterListSpec } from "@/shared/requesterBuckets";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -202,8 +203,19 @@ export class PrismaStore implements DataStore {
     return { data: (rows as unknown[]).map((r) => serialize<any>(r)), total: (total as any[])[0].total as number, counts: { ...(counts as any[])[0] } };
   }
 
-  async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null) {
-    const q = workflowAlertQueries(tenantId, visibleTo);
+  async requesterTickets(tenantId: string, email: string, spec: RequesterListSpec) {
+    const q = requesterTicketQueries(tenantId, email, spec);
+    const [rows, total, counts] = await Promise.all([this.p.$queryRaw(q.rows), this.p.$queryRaw(q.total), this.p.$queryRaw(q.counts)]);
+    return { data: (rows as unknown[]).map((r) => serialize<any>(r)), total: (total as any[])[0].total as number, counts: { ...(counts as any[])[0] } as RequesterCounts };
+  }
+
+  async activeWorkloads(tenantId: string) {
+    const rows = (await this.p.$queryRaw(activeWorkloadQuery(tenantId))) as { assigneeId: string; total: number }[];
+    return Object.fromEntries(rows.map((r) => [r.assigneeId, Number(r.total)]));
+  }
+
+  async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null, select?: (keyof TicketRow)[]) {
+    const q = workflowAlertQueries(tenantId, visibleTo, select);
     const [rows, count] = await Promise.all([this.p.$queryRaw(q.rows), this.p.$queryRaw(q.count)]);
     return { tickets: (rows as unknown[]).map((r) => serialize<any>(r)), workflowCount: (count as any[])[0].total as number };
   }

@@ -74,6 +74,8 @@ export interface TicketSearchScope {
   requesterEmail?: string;
 }
 
+import type { RequesterCounts, RequesterListSpec } from "@/shared/requesterBuckets";
+
 export interface TicketSearchSpec {
   scope: TicketSearchScope;
   meId: string;
@@ -140,9 +142,21 @@ export interface DataStore {
    * Tickets taking part in workflow monitoring (workflow present, not deleted,
    * not closed/cancelled), narrowed to `visibleTo` when given (assigned to the
    * user or in one of their groups), plus the count of ALL such tickets in the
-   * tenant. Prisma rows carry only the columns bucketHealth() reads.
+   * tenant. Prisma rows carry only the columns bucketHealth() reads, or `select` when given.
    */
-  workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null): Promise<{ tickets: TicketRow[]; workflowCount: number }>;
+  workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null, select?: (keyof TicketRow)[]): Promise<{ tickets: TicketRow[]; workflowCount: number }>;
+  /**
+   * One requester's own tickets for the "My requests" list: a page filtered by
+   * bucket/search and sorted, plus bucket totals over all their tickets.
+   * Always scoped to `email` within the tenant.
+   */
+  requesterTickets(tenantId: string, email: string, spec: RequesterListSpec): Promise<{ data: TicketRow[]; total: number; counts: RequesterCounts }>;
+  /**
+   * Capacity-occupying tickets per assignee (userId -> count): not deleted, an
+   * active status, and either outside the workflow or already accepted. Grouped
+   * in the database so workload never needs the tenant's tickets.
+   */
+  activeWorkloads(tenantId: string): Promise<Record<string, number>>;
   transaction<T>(work: (store: DataStore) => Promise<T>): Promise<T>;
 
   tenants: Collection<TenantRow>;

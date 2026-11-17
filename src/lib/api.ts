@@ -64,16 +64,17 @@ async function handle<T>(res: Response): Promise<T> {
   return (await readEnvelope<T>(res)).data as T;
 }
 
-async function getResponse(path: string): Promise<Response> {
+async function getResponse(path: string, signal?: AbortSignal): Promise<Response> {
   try {
-    return await fetch(`/api/v1${path}`, { cache: "no-store" });
-  } catch {
+    return await fetch(`/api/v1${path}`, { cache: "no-store", signal });
+  } catch (error) {
+    if (signal?.aborted) throw error; // a deliberate cancel, not a connectivity problem
     throw new ApiError("Could not reach the server. Check your connection and try again.", 0);
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  return handle<T>(await getResponse(path));
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return handle<T>(await getResponse(path, signal));
 }
 
 /** One page of a list plus its pagination metadata. */
@@ -137,11 +138,14 @@ export function uploadTicketAttachment(
   ticketId: string,
   file: File,
   onProgress?: (percent: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** True when re-sending a file whose earlier attempt failed: the server then returns an already-stored copy instead of adding a duplicate. */
+  retry = false
 ): Promise<AttachmentRow> {
   return new Promise<AttachmentRow>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/v1/tickets/${encodeURIComponent(ticketId)}/attachments`);
+    if (retry) xhr.setRequestHeader("X-Upload-Retry", "1");
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
     };

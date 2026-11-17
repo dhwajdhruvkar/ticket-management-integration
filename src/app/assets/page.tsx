@@ -9,6 +9,7 @@ import { LabelWithHint } from "@/components/ui";
 import { useToast } from "@/components/Toast";
 import { useAgentOnly } from "@/components/Persona";
 import { EmptyState } from "@/components/primitives";
+import { invalidateReferenceData } from "@/lib/useReferenceData";
 import { AlertTriangle } from "lucide-react";
 
 // =============================================================================
@@ -104,6 +105,7 @@ export default function AssetsPage() {
       "ci",
       async () => {
         await apiSend("/cis", "POST", ciForm);
+        invalidateReferenceData();
         setCIForm({ name: "", type: "service" });
       },
       "Configuration item added"
@@ -115,6 +117,7 @@ export default function AssetsPage() {
       "link",
       async () => {
         await apiSend("/cis", "POST", { link: { sourceId: link.sourceId, targetId: link.targetId } });
+        invalidateReferenceData();
         setLink({ sourceId: "", targetId: "" });
       },
       "Dependency linked"

@@ -12,20 +12,58 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { X, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion, EASE_OUT } from "@/components/motion";
 
-function useOverlayBehavior(open: boolean, onClose: () => void) {
+// Open overlays, innermost last: Escape closes only the top one, so a confirm
+// dialog opened from a drawer does not close both.
+const overlayStack: symbol[] = [];
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Shared dialog behaviour: Escape closes the top-most overlay, the page behind
+ * does not scroll, focus moves into the dialog on open (unless a child already
+ * took it), Tab stays inside it, and focus returns to the opener on close.
+ */
+function useOverlayBehavior(open: boolean, onClose: () => void, dialogRef: React.RefObject<HTMLElement | null>) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose; // always the latest handler without re-running the effect
   useEffect(() => {
     if (!open) return;
+    const me = Symbol("overlay");
+    overlayStack.push(me);
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (overlayStack[overlayStack.length - 1] !== me) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeRef.current();
+      } else if (e.key === "Tab") {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const items = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null || el === document.activeElement);
+        if (items.length === 0) { e.preventDefault(); dialog.focus(); return; }
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || !dialog.contains(active))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (active === last || !dialog.contains(active))) { e.preventDefault(); first.focus(); }
+      }
     };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    // Wait a frame so the dialog is mounted; a child that autofocuses itself keeps focus.
+    const raf = requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      if (dialog && !dialog.contains(document.activeElement)) dialog.focus({ preventScroll: true });
+    });
     return () => {
+      cancelAnimationFrame(raf);
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
+      const at = overlayStack.indexOf(me);
+      if (at >= 0) overlayStack.splice(at, 1);
+      if (overlayStack.length === 0) document.body.style.overflow = prev;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
     };
-  }, [open, onClose]);
+  }, [open, dialogRef]);
 }
 
 const scrimStyle: React.CSSProperties = {
@@ -51,7 +89,8 @@ export function Modal({
   ariaLabel?: string;
   maxWidth?: number;
 }) {
-  useOverlayBehavior(open, onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useOverlayBehavior(open, onClose, dialogRef);
   return (
     <AnimatePresence>
       {open ? (
@@ -64,6 +103,8 @@ export function Modal({
           onClick={onClose}
         >
           <motion.div
+            ref={dialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}
@@ -102,7 +143,8 @@ export function Drawer({
   ariaLabel?: string;
   width?: number;
 }) {
-  useOverlayBehavior(open, onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useOverlayBehavior(open, onClose, dialogRef);
   return (
     <AnimatePresence>
       {open ? (
@@ -115,6 +157,8 @@ export function Drawer({
           onClick={onClose}
         >
           <motion.div
+            ref={dialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}

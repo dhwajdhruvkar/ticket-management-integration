@@ -12,6 +12,7 @@
 
 import { useReferenceData } from "@/lib/useReferenceData";
 import { readIssueContext } from "@/shared/issueContext";
+import { TICKET_TYPE_LABELS, typeDetailRows } from "@/shared/ticketTypes";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -757,6 +758,10 @@ function RequesterView({
         value={`${ticket.category}${ticket.subcategory ? ` › ${ticket.subcategory}` : ""}`}
         info={HINTS.category}
       />
+      <Row label="Type" value={TICKET_TYPE_LABELS[ticket.type] ?? ticket.type} />
+      {typeDetailRows(ticket.type, ticket.customFields, ticket.approvals).map((row) => (
+        <Row key={row.label} label={row.label} value={<span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{row.value}</span>} />
+      ))}
       <Row label="Created" value={timeAgo(ticket.createdAt)} />
       <Row label="Updated" value={timeAgo(ticket.updatedAt)} />
       {issueContext?.notes ? (

@@ -13,6 +13,7 @@
     "security:check": "node scripts/check-production-security.cjs",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "knip": "knip",
     "agent-tools:check": "node scripts/check-agent-tools.cjs",
     "graphify": "node scripts/run-graphify.cjs",
     "graph:build": "node scripts/run-graphify.cjs --build",

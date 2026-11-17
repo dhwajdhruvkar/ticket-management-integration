@@ -8,6 +8,7 @@ import { usePersona } from "@/components/Persona";
 import { InfoHint, LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
 import { CloseButton, Drawer } from "@/components/primitives";
 import { HINTS } from "@/lib/hints";
+import { createLatestSearch, type LatestSearch, type SearchState } from "@/lib/latestSearch";
 import type { TicketCategory, TicketRow, TicketStatus } from "@/server/domain/models";
 
 // =============================================================================
@@ -66,7 +67,8 @@ export default function PortalPage() {
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [recent, setRecent] = useState<TicketRow[]>([]);
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [search, setSearch] = useState<SearchState<SearchHit>>({ query: "", status: "idle", results: [], error: null });
+  const hits = search.results;
   const [activeCategory, setActiveCategory] = useState<CategoryFilter>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subject, setSubject] = useState("");
@@ -94,15 +96,26 @@ export default function PortalPage() {
       .catch(() => setRecent([]));
   }, [ready, persona.email]);
 
-  async function runSearch(value: string) {
+  // Typing waits for a pause, cancels the previous request and ignores late responses (lib/latestSearch.ts).
+  // Created in an effect so it is rebuilt after React's dev-mode mount/unmount/mount check disposes the first one.
+  const searcher = useRef<LatestSearch | null>(null);
+  useEffect(() => {
+    const instance = createLatestSearch<SearchHit>({
+      fetcher: async (query, signal) => (await apiGet<{ hits: SearchHit[] }>(`/kb/search?q=${encodeURIComponent(query)}`, signal)).hits,
+      onChange: setSearch,
+      debounceMs: 300,
+      minLength: 3,
+    });
+    searcher.current = instance;
+    return () => {
+      instance.dispose();
+      searcher.current = null;
+    };
+  }, []);
+  function runSearch(value: string, immediate = false) {
     setQ(value);
-    if (value.trim().length < 3) return setHits([]);
-    try {
-      const res = await apiGet<{ hits: SearchHit[] }>(`/kb/search?q=${encodeURIComponent(value)}`);
-      setHits(res.hits);
-    } catch {
-      setHits([]);
-    }
+    if (immediate) searcher.current?.now(value);
+    else searcher.current?.input(value);
   }
 
   /**
@@ -185,7 +198,8 @@ export default function PortalPage() {
     return counts;
   }, [articles]);
 
-  const showHits = q.trim().length >= 3 && hits.length > 0;
+  const searching = q.trim().length >= 3;
+  const showHits = searching && search.status === "done" && hits.length > 0;
 
   return (
     <div className="page-pad" style={{ maxWidth: 1120, margin: "0 auto" }}>
@@ -283,7 +297,7 @@ export default function PortalPage() {
                 key={c.label}
                 type="button"
                 onClick={() => {
-                  runSearch(c.query);
+                  runSearch(c.query, true);
                   searchRef.current?.focus();
                 }}
                 className="hover-lift"
@@ -325,6 +339,17 @@ export default function PortalPage() {
           ) : null}
         </div>
       </section>
+
+      {/* Search status: loading, no results and errors are stated, never silent ---- */}
+      {searching && (search.status !== "done" || hits.length === 0) ? (
+        <p role={search.status === "error" ? "alert" : "status"} aria-live="polite" className="muted" style={{ margin: "14px 0 0", textAlign: "center", fontSize: "0.88rem", color: search.status === "error" ? "var(--danger-fg)" : undefined }}>
+          {search.status === "error"
+            ? `Search is unavailable right now (${search.error}). Try again, or raise a request below.`
+            : search.status === "done"
+              ? `No articles match “${q.trim()}”. Try different words, or raise a request below.`
+              : "Searching…"}
+        </p>
+      ) : null}
 
       {/* Search hits ------------------------------------------------------ */}
       {showHits ? (

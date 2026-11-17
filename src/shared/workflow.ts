@@ -49,3 +49,6 @@ export const WORKFLOW_LABELS: Record<TicketWorkflow["phase"], string> = {
   service_desk: "Service-desk review", department: "Department queue", awaiting_acceptance: "Assigned · awaiting acceptance",
   in_progress: "Accepted · in progress", resolved: "Resolved · awaiting confirmation", closed: "Closed",
 };
+
+/** Statuses that occupy an agent's capacity (shared by the JS workload rule and its SQL twin). */
+export const CAPACITY_STATUSES: ReadonlySet<string> = new Set(["new", "open", "in_progress", "pending_agent", "escalated", "reopened"]);

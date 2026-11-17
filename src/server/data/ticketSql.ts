@@ -13,6 +13,9 @@
 
 import { Prisma } from "@prisma/client";
 import type { TicketSearchSpec } from "./store";
+import { CAPACITY_STATUSES } from "@/shared/workflow";
+import { BUCKET_STATUSES, type RequesterListSpec } from "@/shared/requesterBuckets";
+import { PRIORITY_ORDER } from "@/shared/priority";
 import { TICKET_VIEW_RULES, type TicketViewId } from "@/lib/ticketViews";
 
 /** Every Ticket column except `body`, which the explorer table never shows. */
@@ -113,6 +116,39 @@ export function ticketSearchQueries(tenantId: string, spec: TicketSearchSpec, at
   };
 }
 
+const bucketSql = (bucket: keyof typeof BUCKET_STATUSES) => Prisma.sql`"status"::text IN (${Prisma.join([...BUCKET_STATUSES[bucket]])})`;
+const OPEN_BUCKET = Prisma.sql`NOT ("status"::text IN (${Prisma.join(Object.values(BUCKET_STATUSES).flat())}))`;
+
+/**
+ * "My requests": one requester's own tickets, a page of them for a bucket,
+ * search and sort, plus the bucket totals (over all of the requester's tickets,
+ * not narrowed by search or bucket). The SQL twin of MemoryStore.requesterTickets().
+ */
+export function requesterTicketQueries(tenantId: string, email: string, spec: RequesterListSpec) {
+  const base = Prisma.sql`"tenantId" = ${tenantId} AND "deletedAt" IS NULL AND "requesterEmail" = ${email}`;
+  const parts: Prisma.Sql[] = [base];
+  if (spec.bucket !== "all") parts.push(spec.bucket === "open" ? OPEN_BUCKET : bucketSql(spec.bucket));
+  const needle = spec.q?.trim().toLowerCase();
+  if (needle) {
+    parts.push(Prisma.sql`(position(${needle} in lower("subject")) > 0 OR position(${needle} in lower("reference")) > 0 OR position(${needle} in lower(COALESCE("subcategory", ''))) > 0 OR position(${needle} in lower("category"::text)) > 0)`);
+  }
+  const where = Prisma.join(parts.map((p) => Prisma.sql`(${p})`), " AND ");
+  const priorityRank = Prisma.sql`CASE "priority"::text ${Prisma.join(PRIORITY_ORDER.map((p, i) => Prisma.sql`WHEN ${p} THEN ${i}`), " ")} ELSE ${PRIORITY_ORDER.length} END`;
+  // Byte-order comparisons (COLLATE "C") match the MemoryStore's code-unit ordering of ISO timestamps and ids.
+  const order = spec.sort === "oldest" ? Prisma.sql`"createdAt" ASC, "id" COLLATE "C" ASC`
+    : spec.sort === "priority" ? Prisma.sql`${priorityRank} ASC, "updatedAt" DESC, "id" COLLATE "C" ASC`
+    : Prisma.sql`"updatedAt" DESC, "id" COLLATE "C" ASC`;
+  const bucketCount = (name: string, pred: Prisma.Sql) => Prisma.sql`(count(*) FILTER (WHERE ${pred}))::int AS ${Prisma.raw(`"${name}"`)}`;
+  return {
+    rows: Prisma.sql`SELECT ${cols(TICKET_LIST_COLUMNS)} FROM "Ticket" WHERE ${where} ORDER BY ${order} LIMIT ${spec.take} OFFSET ${spec.skip}`,
+    total: Prisma.sql`SELECT count(*)::int AS "total" FROM "Ticket" WHERE ${where}`,
+    counts: Prisma.sql`SELECT count(*)::int AS "all", ${Prisma.join([
+      bucketCount("open", OPEN_BUCKET),
+      ...(Object.keys(BUCKET_STATUSES) as (keyof typeof BUCKET_STATUSES)[]).map((b) => bucketCount(b, bucketSql(b))),
+    ], ", ")} FROM "Ticket" WHERE ${base}`,
+  };
+}
+
 export interface WorkflowAlertVisibility { userId: string; groupIds: string[] }
 
 /**
@@ -120,14 +156,30 @@ export interface WorkflowAlertVisibility { userId: string; groupIds: string[] }
  * (SQL NULL and JSON null both mean "none"), and not closed/cancelled. A null
  * `visibleTo` means dispatcher-level visibility.
  */
-export function workflowAlertQueries(tenantId: string, visibleTo: WorkflowAlertVisibility | null) {
+/**
+ * Open tickets per assignee that count against capacity: the SQL twin of
+ * activeWorkload() (not deleted, a capacity status, and either outside the
+ * workflow or already accepted).
+ */
+export function activeWorkloadQuery(tenantId: string) {
+  return Prisma.sql`SELECT "assigneeId", count(*)::int AS "total" FROM "Ticket"
+    WHERE "tenantId" = ${tenantId} AND "deletedAt" IS NULL AND "assigneeId" IS NOT NULL
+      AND "status"::text IN (${Prisma.join([...CAPACITY_STATUSES])})
+      AND ("workflow" IS NULL OR jsonb_typeof("workflow") = 'null' OR COALESCE("workflow"->>'acceptedAt', '') <> '')
+    GROUP BY "assigneeId"`;
+}
+
+export function workflowAlertQueries(tenantId: string, visibleTo: WorkflowAlertVisibility | null, columns: readonly string[] = WORKFLOW_ALERT_COLUMNS) {
+  const allowed = new Set<string>(["body", ...TICKET_LIST_COLUMNS]);
+  const bad = columns.find((c) => !allowed.has(c));
+  if (bad) throw new Error(`Unknown ticket column: ${bad}`);
   const where = Prisma.sql`"tenantId" = ${tenantId} AND "deletedAt" IS NULL AND "workflow" IS NOT NULL AND jsonb_typeof("workflow") <> 'null' AND "status" NOT IN ${NOT_FINAL_WORKFLOW}`;
   const visible = visibleTo
     ? Prisma.sql`AND ("assigneeId" = ${visibleTo.userId}${visibleTo.groupIds.length ? Prisma.sql` OR "assignmentGroupId" IN (${Prisma.join(visibleTo.groupIds)})` : Prisma.empty})`
     : Prisma.empty;
   return {
     // Byte-order id ordering keeps the result deterministic and identical to the MemoryStore's.
-    rows: Prisma.sql`SELECT ${cols(WORKFLOW_ALERT_COLUMNS)} FROM "Ticket" WHERE ${where} ${visible} ORDER BY "id" COLLATE "C" ASC`,
+    rows: Prisma.sql`SELECT ${cols(columns)} FROM "Ticket" WHERE ${where} ${visible} ORDER BY "id" COLLATE "C" ASC`,
     count: Prisma.sql`SELECT count(*)::int AS "total" FROM "Ticket" WHERE ${where}`,
   };
 }

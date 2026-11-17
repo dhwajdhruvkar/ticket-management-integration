@@ -6,6 +6,8 @@
 // (ticket + messages + events + resolution + assignee) for the API and UI.
 // =============================================================================
 
+import type { RequesterListSpec } from "@/shared/requesterBuckets";
+import { sanitizeTypeDetails, type TicketTypeDetails } from "@/shared/ticketTypes";
 import { sanitizeIssueContext, type IssueContext } from "@/shared/issueContext";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
@@ -38,6 +40,7 @@ import type {
   TicketRow,
   TicketType,
   UserRow,
+  CatalogItemRow,
 } from "../domain/models";
 
 export interface TicketView extends TicketRow {
@@ -53,11 +56,15 @@ export interface TicketView extends TicketRow {
   sla: SlaStatus;
 }
 
-function newTicketCustomFields(input: NewTicketInput): Record<string, unknown> | null {
+function newTicketCustomFields(input: NewTicketInput, type: string, catalogItem: CatalogItemRow | null): Record<string, unknown> | null {
   const fields: Record<string, unknown> = {};
   if (input.requesterLocation?.trim()) fields.requesterLocation = input.requesterLocation.trim().slice(0, 160);
   const issueContext = sanitizeIssueContext(input.issueContext);
   if (issueContext) fields.issueContext = issueContext;
+  const details = (sanitizeTypeDetails(type, input.typeDetails) ?? {}) as Record<string, unknown>;
+  // Approval need comes from the tenant's catalog item, never from the caller.
+  if (type === "service_request" && catalogItem) details.approvalRequired = catalogItem.requiresApproval;
+  if (Object.keys(details).length) fields.typeDetails = details;
   return Object.keys(fields).length ? fields : null;
 }
 
@@ -81,6 +88,8 @@ export interface NewTicketInput {
   requesterLocation?: string;
   /** Requester notes about screenshots/the issue; stored in customFields.issueContext. */
   issueContext?: IssueContext;
+  /** Type-specific details (see shared/ticketTypes); stored in customFields.typeDetails. */
+  typeDetails?: TicketTypeDetails;
   tags?: string[];
   source?: string;
   catalogItemId?: string;
@@ -129,6 +138,15 @@ export async function searchTickets(
   if (where.assignmentGroupId) scope.assignmentGroupId = where.assignmentGroupId;
   if (where.requesterEmail) scope.requesterEmail = where.requesterEmail;
   return store.searchTickets(tenantId, { scope, ...search, skip: page.skip, take: page.take });
+}
+
+/**
+ * "My requests": the requester's own tickets, one page at a time, with bucket
+ * totals over all of them. The caller passes the signed-in user's own email.
+ */
+export async function listRequesterTickets(tenantId: string, email: string, spec: RequesterListSpec) {
+  const store = await getStore();
+  return store.requesterTickets(tenantId, email, spec);
 }
 
 /** Operational reads always hide soft-deleted tickets. */
@@ -235,6 +253,8 @@ export async function createTicket(
   const store = await getStore();
   const ts = now();
   const type = input.type ?? "incident";
+  const found = input.catalogItemId ? await store.catalogItems.get(input.catalogItemId) : null;
+  const catalogItem = found && found.tenantId === tenantId ? found : null; // another tenant's item reads as missing
   // ITIL: impact x urgency drives priority; an explicit priority wins.
   const priority =
     input.priority ?? (input.impact && input.urgency ? derivePriority(input.impact, input.urgency) : "medium");
@@ -255,7 +275,7 @@ export async function createTicket(
     source: input.source ?? null,
     tags: input.tags ?? [],
     // A new ticket starts with only the requester's location snapshot and their issue notes.
-    customFields: newTicketCustomFields(input),
+    customFields: newTicketCustomFields(input, type, catalogItem),
     requesterEmail: input.requesterEmail.trim(),
     requesterId: input.requesterId ?? null,
     externalTicketId: input.externalTicketId?.trim() || null,
@@ -266,7 +286,7 @@ export async function createTicket(
     assignmentGroupId: null,
     problemId: null,
     changeId: null,
-    catalogItemId: input.catalogItemId ?? null,
+    catalogItemId: catalogItem?.id ?? null,
     ciIds: input.ciIds ?? [],
     linkedTicketIds: [],
     mergedIntoId: null,

@@ -42,14 +42,41 @@ describe("getGraphToken", () => {
 
 describe("clientIp / clientKey", () => {
   const req = (headers: Record<string, string>) => new Request("http://x.test/", { headers });
-  it("uses the first x-forwarded-for entry, then x-real-ip, then 'local'", () => {
-    expect(clientIp(req({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1" }))).toBe("203.0.113.9");
-    expect(clientIp(req({ "x-real-ip": "198.51.100.7" }))).toBe("198.51.100.7");
-    expect(clientIp(req({ "x-forwarded-for": "", "x-real-ip": "198.51.100.7" }))).toBe("198.51.100.7");
-    expect(clientIp(req({}))).toBe("local");
+  afterEach(() => vi.unstubAllEnvs());
+
+  describe("on Vercel (forwarded headers are rewritten by the platform)", () => {
+    beforeEach(() => { vi.stubEnv("VERCEL", "1"); vi.stubEnv("TRUST_PROXY_HEADERS", ""); });
+    it("prefers x-vercel-forwarded-for, then x-forwarded-for, then x-real-ip, then 'local'", () => {
+      expect(clientIp(req({ "x-vercel-forwarded-for": "203.0.113.5", "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.5");
+      expect(clientIp(req({ "x-forwarded-for": " 203.0.113.9 , 10.0.0.1" }))).toBe("203.0.113.9");
+      expect(clientIp(req({ "x-real-ip": "198.51.100.7" }))).toBe("198.51.100.7");
+      expect(clientIp(req({ "x-forwarded-for": "", "x-real-ip": "198.51.100.7" }))).toBe("198.51.100.7");
+      expect(clientIp(req({}))).toBe("local");
+    });
+    it("accepts IPv6 and rejects malformed values instead of keying on them", () => {
+      expect(clientIp(req({ "x-forwarded-for": "2001:DB8::1" }))).toBe("2001:db8::1");
+      for (const bad of ["not-an-ip", "999.1.1.1", "1.2.3", "a".repeat(200), "<script>", "1.2.3.4:80"]) {
+        expect(clientIp(req({ "x-forwarded-for": bad })), bad).toBe("local");
+      }
+      expect(clientIp(req({ "x-forwarded-for": "garbage", "x-real-ip": "198.51.100.7" }))).toBe("198.51.100.7");
+    });
+    it("keeps rate-limit keys in the same shape", () => {
+      expect(clientKey(req({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }), "webhook")).toBe("webhook:203.0.113.9");
+      expect(clientKey(req({}), "attachments")).toBe("attachments:local");
+    });
   });
-  it("keeps rate-limit keys exactly as before", () => {
-    expect(clientKey(req({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }), "webhook")).toBe("webhook:203.0.113.9");
-    expect(clientKey(req({}), "attachments")).toBe("attachments:local");
+
+  describe("elsewhere (no trusted proxy): spoofed headers cannot choose the key", () => {
+    beforeEach(() => { vi.stubEnv("VERCEL", ""); vi.stubEnv("TRUST_PROXY_HEADERS", ""); });
+    it("ignores x-forwarded-for, x-real-ip and x-vercel-forwarded-for", () => {
+      for (const header of ["x-forwarded-for", "x-real-ip", "x-vercel-forwarded-for"]) {
+        expect(clientIp(req({ [header]: "203.0.113.9" })), header).toBe("local");
+      }
+      expect(clientKey(req({ "x-forwarded-for": "1.1.1.1" }), "tickets")).toBe(clientKey(req({ "x-forwarded-for": "2.2.2.2" }), "tickets"));
+    });
+    it("honours the headers only when TRUST_PROXY_HEADERS=1 is set explicitly", () => {
+      vi.stubEnv("TRUST_PROXY_HEADERS", "1");
+      expect(clientIp(req({ "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
+    });
   });
 });

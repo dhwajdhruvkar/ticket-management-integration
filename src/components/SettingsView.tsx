@@ -27,6 +27,7 @@ import { CloseButton, Modal, PromptDialog, useConfirm } from "@/components/primi
 import { customFieldHint, HINTS } from "@/lib/hints";
 import { WorkflowSettings } from "./WorkflowSettings";
 import { AvailabilityPreferences } from "./AvailabilityPreferences";
+import { invalidateReferenceData } from "@/lib/useReferenceData";
 
 // =============================================================================
 // SettingsView — the admin/agent configuration surface (route: /settings).
@@ -300,6 +301,7 @@ export default function SettingsView() {
                             apiSend(`/groups/${g.id}`, "PATCH", { strategy })
                               .then(() => {
                                 toast.success({ title: "Strategy updated", description: `${g.name} → ${strategy.replace("_", " ")}` });
+                                invalidateReferenceData();
                                 refresh();
                               })
                               .catch((err) =>
@@ -1648,6 +1650,7 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       toast.success({ title: "Invitation created", description: form.email.trim() });
       setForm({ name: "", email: "", role: "agent", departmentId: "" });
       setOpen(false);
+      invalidateReferenceData();
       load();
     } catch (err) {
       toast.error({ title: "Could not create user", description: err instanceof Error ? err.message : String(err) });
@@ -1661,6 +1664,7 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     try {
       await apiSend("/users/" + u.id + organizationQuery, "PATCH", { role });
       toast.success({ title: "Role updated", description: `${u.name} → ${role.replace("_", " ")}` });
+      invalidateReferenceData();
       load();
     } catch (err) {
       toast.error({ title: "Could not update role", description: err instanceof Error ? err.message : String(err) });
@@ -1676,6 +1680,7 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         await apiSend("/users/" + u.id + organizationQuery, "PATCH", { active: true });
         toast.success({ title: "User reactivated", description: u.name });
       }
+      invalidateReferenceData();
       load();
     } catch (err) {
       toast.error({ title: "Could not update user", description: err instanceof Error ? err.message : String(err) });

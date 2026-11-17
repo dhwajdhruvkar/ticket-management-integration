@@ -315,6 +315,22 @@ export async function saveAttachment(
   return record;
 }
 
+const RETRY_WINDOW_MS = 15 * 60_000;
+
+/**
+ * An attachment on the ticket with this name and size stored in the last 15
+ * minutes: used only for an explicit upload retry, so a deliberate second copy
+ * of a file is still possible.
+ */
+export async function findRecentUpload(tenantId: string, ticketId: string, fileName: string, sizeBytes: number): Promise<AttachmentRow | null> {
+  const store = await getStore();
+  const ticket = await store.tickets.get(ticketId);
+  if (!ticket || ticket.tenantId !== tenantId) return null;
+  const since = Date.now() - RETRY_WINDOW_MS;
+  const rows = await store.attachments.list({ ticketId });
+  return rows.find((a) => !a.messageId && a.fileName === fileName && a.sizeBytes === sizeBytes && Date.parse(a.createdAt) >= since) ?? null;
+}
+
 export async function listAttachments(
   tenantId: string,
   ticketId: string,

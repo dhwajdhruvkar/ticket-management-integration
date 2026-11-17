@@ -203,6 +203,37 @@ describe.skipIf(!DIR)("PrismaStore on real PostgreSQL vs MemoryStore", () => {
     expect((await pg.workflowAlertTickets("other", null)).tickets.every((t) => t.tenantId === "other")).toBe(true);
   });
 
+  it("requesterTickets matches the MemoryStore for every bucket, sort, search and page (order, totals, counts)", async () => {
+    const emails = [...new Set((await mem.tickets.list({ tenantId: "org" })).map((t) => t.requesterEmail))];
+    expect(emails.length).toBeGreaterThan(0);
+    for (const email of emails.slice(0, 3)) {
+      for (const bucket of ["all", "open", "waiting", "resolved", "escalated", "closed"] as const) {
+        for (const sort of ["recent", "oldest", "priority"] as const) {
+          for (const q of [undefined, "a", "%", "_", "it"]) {
+            for (const [skip, take] of [[0, 5], [3, 4]]) {
+              const spec = { bucket, sort, q, skip, take };
+              const [a, b] = [await pg.requesterTickets("org", email, spec), await mem.requesterTickets("org", email, spec)];
+              const label = JSON.stringify({ email, ...spec });
+              expect(a.data.map((t) => t.id), label).toEqual(b.data.map((t) => t.id));
+              expect(a.total, label).toBe(b.total);
+              expect(a.counts, label).toEqual(b.counts);
+            }
+          }
+        }
+      }
+    }
+    expect((await pg.requesterTickets("other", emails[0], { bucket: "all", sort: "recent", skip: 0, take: 5 })).data.every((t) => t.tenantId === "other")).toBe(true);
+  });
+
+  it("activeWorkloads (grouped in SQL) matches the MemoryStore, incl. unaccepted workflow tickets and JSON null", async () => {
+    const [a, b] = [await pg.activeWorkloads("org"), await mem.activeWorkloads("org")];
+    expect(a).toEqual(b);
+    expect(Object.keys(a).length).toBeGreaterThan(0);
+    expect(await pg.activeWorkloads("nobody")).toEqual({});
+    const rows = (await pg.workflowAlertTickets("org", null, ["id", "body", "workflow"])).tickets;
+    expect(Object.keys(rows[0]).sort()).toEqual(["body", "id", "workflow"]); // board projection honoured
+  });
+
   it("getWorkflowAlerts returns identical output on PrismaStore and MemoryStore for every role", async () => {
     // bucketHealth() needs queuedAt, so give every workflow ticket a well-formed workflow with varied ages.
     let n = 0;

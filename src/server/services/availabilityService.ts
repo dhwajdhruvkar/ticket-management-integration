@@ -1,5 +1,6 @@
 import { bowEmbed, cosineSimilarity } from "../ai/embeddings";
 import type { BusinessCalendarRow, TicketRow, UserRow } from "../domain/models";
+import { CAPACITY_STATUSES } from "@/shared/workflow";
 
 export interface AvailabilitySettings {
   calendarId?: string;
@@ -41,7 +42,6 @@ export function calculateAvailability(user: UserRow, openCount: number, calendar
   return base;
 }
 
-export const CAPACITY_STATUSES = new Set(["new", "open", "in_progress", "pending_agent", "escalated", "reopened"]);
 export function activeWorkload(tickets: TicketRow[], userId: string): number {
   return tickets.filter((ticket) => !ticket.deletedAt && ticket.assigneeId === userId && CAPACITY_STATUSES.has(ticket.status) && (!ticket.workflow || !!ticket.workflow.acceptedAt)).length;
 }

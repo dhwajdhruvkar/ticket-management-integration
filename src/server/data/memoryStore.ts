@@ -15,6 +15,8 @@ import { logger } from "../observability/logger";
 import { buildSeed } from "./seed";
 import { matchesWhere, type Collection, type DataStore, type ListOptions, type TicketSearchSpec } from "./store";
 import { searchTicketRows } from "@/lib/ticketViews";
+import { CAPACITY_STATUSES } from "@/shared/workflow";
+import { bucketOf, compareRequesterTickets, emptyRequesterCounts, type RequesterListSpec } from "@/shared/requesterBuckets";
 import type {
   ApiKeyRow,
   ApprovalRow,
@@ -323,7 +325,30 @@ export class MemoryStore implements DataStore {
     return { data: rows.slice(spec.skip, spec.skip + spec.take), total: rows.length, counts };
   }
 
-  async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null) {
+  async requesterTickets(tenantId: string, email: string, spec: RequesterListSpec) {
+    const mine = this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt && t.requesterEmail === email);
+    const counts = emptyRequesterCounts();
+    for (const t of mine) { counts.all += 1; counts[bucketOf(t.status)] += 1; }
+    const needle = spec.q?.trim().toLowerCase();
+    const matching = mine
+      .filter((t) => spec.bucket === "all" || bucketOf(t.status) === spec.bucket)
+      .filter((t) => !needle || [t.subject, t.reference, t.subcategory ?? "", t.category].some((field) => field.toLowerCase().includes(needle)))
+      .sort(compareRequesterTickets(spec.sort));
+    return { data: matching.slice(spec.skip, spec.skip + spec.take).map(clone), total: matching.length, counts };
+  }
+
+  async activeWorkloads(tenantId: string) {
+    const out: Record<string, number> = {};
+    for (const t of this.db.tickets) {
+      if (t.tenantId !== tenantId || t.deletedAt || !t.assigneeId || !CAPACITY_STATUSES.has(t.status)) continue;
+      if (t.workflow && !t.workflow.acceptedAt) continue;
+      out[t.assigneeId] = (out[t.assigneeId] ?? 0) + 1;
+    }
+    return out;
+  }
+
+  async workflowAlertTickets(tenantId: string, visibleTo: { userId: string; groupIds: string[] } | null, select?: (keyof TicketRow)[]) {
+    void select; // full rows are a superset of any projection
     const work = this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt && !!t.workflow && !["closed", "cancelled"].includes(t.status));
     const visible = visibleTo ? work.filter((t) => t.assigneeId === visibleTo.userId || (!!t.assignmentGroupId && visibleTo.groupIds.includes(t.assignmentGroupId))) : work;
     const byId = [...visible].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)); // same order as the SQL (id, byte order)

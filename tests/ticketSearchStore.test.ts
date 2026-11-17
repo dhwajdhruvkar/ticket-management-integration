@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryStore } from "@/server/data/memoryStore";
 import { getWorkflowAlerts, getWorkflowBoard } from "@/server/services/workflowBoard";
 import { defaultWorkflowSettings } from "@/shared/workflow";
+import { activeWorkload } from "@/server/services/availabilityService";
 import type { TicketRow, UserRow } from "@/server/domain/models";
 
 const STAMP = "2026-09-30T09:00:00.000Z";
@@ -139,5 +140,50 @@ describe("workflow alerts: optimised query equals the board's monitoring", () =>
     const mine = await store.workflowAlertTickets("org", { userId: "solo", groupIds: [] });
     expect(mine.tickets.map((t) => t.id)).toEqual(["rm"]);
     expect(mine.workflowCount).toBe(9);
+  });
+});
+
+describe("workflow board reads", () => {
+  async function seed() {
+    const store = new MemoryStore(false);
+    await store.tenants.create({ id: "org", name: "Org", slug: "org", isInternal: false, createdAt: STAMP, updatedAt: STAMP, workflowSettings: { ...defaultWorkflowSettings(), enabled: true } } as never);
+    const users = [["admin", "tenant_admin"], ["agent", "agent"], ["peer", "agent"]].map(([id, role]) => ({ id, tenantId: "org", name: id, email: `${id}@example.test`, role, active: true, createdAt: STAMP, updatedAt: STAMP }) as UserRow);
+    for (const user of users) await store.users.create(user);
+    await store.groups.create({ id: "it", tenantId: "org", name: "it", memberIds: ["agent"], categories: [], createdAt: STAMP, updatedAt: STAMP });
+    await store.groups.create({ id: "net", tenantId: "org", name: "net", memberIds: ["peer"], categories: [], createdAt: STAMP, updatedAt: STAMP });
+    const wf = (accepted: boolean) => ({ phase: accepted ? "in_progress" : "department", visitId: "v", queuedAt: minsAgo(1), queuedPauseMins: 0, ...(accepted ? { acceptedAt: minsAgo(1) } : {}) }) as TicketRow["workflow"];
+    const rows = [
+      ticket({ id: "plain1", assigneeId: "agent", status: "open" }),
+      ticket({ id: "plain2", assigneeId: "agent", status: "in_progress" }),
+      ticket({ id: "done", assigneeId: "agent", status: "resolved" }),
+      ticket({ id: "gone", assigneeId: "agent", deletedAt: STAMP }),
+      ticket({ id: "accepted", assigneeId: "agent", assignmentGroupId: "it", status: "in_progress", workflow: wf(true) }),
+      ticket({ id: "queued", assigneeId: "agent", assignmentGroupId: "it", workflow: wf(false) }), // not accepted: no capacity used
+      ticket({ id: "peerwork", assigneeId: "peer", assignmentGroupId: "net", workflow: wf(false) }),
+      ticket({ id: "foreign", tenantId: "other", assigneeId: "agent" }),
+    ];
+    for (const row of rows) await store.tickets.create(row);
+    g.__netlinkStore = Promise.resolve(store);
+    return { store, rows, users };
+  }
+
+  it("activeWorkloads equals the per-user activeWorkload() rule over the tenant's tickets", async () => {
+    const { store, rows, users } = await seed();
+    const mine = rows.filter((t) => t.tenantId === "org");
+    const counts = await store.activeWorkloads("org");
+    for (const user of users) expect(counts[user.id] ?? 0, user.id).toBe(activeWorkload(mine, user.id));
+    expect(counts).toEqual({ agent: 3 });
+  });
+
+  it("the board never lists the tenant's tickets and still shows the same workload and visibility", async () => {
+    const { store } = await seed();
+    const list = vi.spyOn(store.tickets, "list");
+    const admin = await getWorkflowBoard("org", { id: "admin" } as never, true);
+    const agent = await getWorkflowBoard("org", { id: "agent" } as never, true);
+    expect(list).not.toHaveBeenCalled();
+    expect(admin.tickets.map((t) => t.id)).toEqual(["accepted", "peerwork", "queued"]);
+    expect(agent.tickets.map((t) => t.id)).toEqual(["accepted", "queued"]); // own group/assignment only
+    expect(admin.hasWorkflowTickets).toBe(true);
+    expect(agent.staff.find((s) => s.id === "agent")?.availability).toBeTruthy();
   });
 });

@@ -108,8 +108,9 @@ export async function configureWorkflow(tenantId: string, input: WorkflowSetting
     }
     const desks = settings.buckets.filter((bucket) => bucket.kind === "service_desk");
     if (settings.enabled && (desks.length !== 1 || desks[0].groupId !== settings.serviceDeskGroupId || !settings.buckets.some((bucket) => bucket.kind === "department"))) throw new WorkflowError("Configure one service-desk bucket and at least one department bucket before enabling.", 400);
-    const active = await tx.tickets.list({ tenantId, deletedAt: null });
-    if (active.some((ticket) => ticket.workflow && !["closed", "cancelled"].includes(ticket.status) && !settings.buckets.some((bucket) => bucket.groupId === ticket.assignmentGroupId))) throw new WorkflowError("A bucket with active workflow tickets cannot be removed.");
+    // Only the open workflow tickets, not every ticket of the tenant.
+    const { tickets: active } = await tx.workflowAlertTickets(tenantId, null, ["id", "assignmentGroupId", "status", "workflow"]);
+    if (active.some((ticket) => !settings.buckets.some((bucket) => bucket.groupId === ticket.assignmentGroupId))) throw new WorkflowError("A bucket with active workflow tickets cannot be removed.");
     await tx.tenants.update(tenantId, { workflowSettings: settings, updatedAt: now() });
     await appendAudit({ tenantId, actor: admin.name, action: "workflow.configured", payload: { enabled: settings.enabled, buckets: settings.buckets.length } }, tx);
     return settings;

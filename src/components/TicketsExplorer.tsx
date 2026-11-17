@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiGetAll, apiGetPage, apiSend, uploadTicketAttachment } from "@/lib/api";
 import { ScreenshotUploader, type ScreenshotItem } from "./ScreenshotUploader";
+import { bucketOf, emptyRequesterCounts, type RequesterCounts, type RequesterFilter, type RequesterSort } from "@/shared/requesterBuckets";
 import { ISSUE_CONTEXT_LIMITS } from "@/shared/issueContext";
+import { CREATABLE_TICKET_TYPES, TICKET_TYPE_HINTS, TYPE_DETAIL_LIMITS, CHANGE_RISKS, typeDetailsProblem, type CreatableTicketType } from "@/shared/ticketTypes";
 import type {
   AssignmentGroupRow,
   ImpactLevel,
@@ -182,21 +184,9 @@ export default function TicketsExplorer() {
   const q = searchParams.get("q") ?? "";
   const newFlag = searchParams.get("new") === "1";
 
-  const [tickets, setTickets] = useState<TicketRow[] | null>(null);
   // Dashboard tiles deep-link here with ?view=, ?overdue=1 and similar filters.
   const initialFilters = useMemo(() => filtersFromParams(searchParams), [searchParams]);
   const initialView = searchParams.get("view");
-
-  // Agents load server-side pages inside AgentExplorer; only requesters
-  // (their own few tickets) still read the whole list here.
-  const refresh = useCallback(() => {
-    if (isAgent) return;
-    apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
-  }, [isAgent]);
-
-  useEffect(() => {
-    if (ready) refresh();
-  }, [ready, persona.id, refresh]);
 
   // Requesters raise requests through the portal.
   useEffect(() => {
@@ -204,7 +194,13 @@ export default function TicketsExplorer() {
   }, [newFlag, isAgent, ready, router]);
 
   if (!isAgent) {
-    return <MyRequestsView tickets={tickets} query={q} refresh={refresh} />;
+    return ready ? (
+      <MyRequestsView query={q} personaId={persona.id} />
+    ) : (
+      <div className="page-pad">
+        <TableSkeleton title={180} rows={6} columns={3} />
+      </div>
+    );
   }
   return (
     <AgentExplorer
@@ -820,17 +816,13 @@ function AgentEmptyState({
    search, sort, quick reopen, and card-based rows with a colored status spine.
    ============================================================================= */
 
-type BucketKey = "open" | "waiting" | "resolved" | "escalated" | "closed";
-type FilterKey = "all" | BucketKey;
-type SortKey = "recent" | "oldest" | "priority";
+type FilterKey = RequesterFilter;
+type SortKey = RequesterSort;
 
-function bucketOf(status: TicketStatus): BucketKey {
-  if (status === "auto_resolved" || status === "resolved") return "resolved";
-  if (status === "closed" || status === "cancelled") return "closed";
-  if (status === "escalated") return "escalated";
-  if (status === "pending" || status === "pending_agent") return "waiting";
-  return "open";
-}
+/** Requesters see their tickets one server-side page at a time. */
+const REQUEST_PAGE_SIZE = 30;
+const SEARCH_DEBOUNCE_MS = 300;
+interface RequestSpec { filter: RequesterFilter; sort: RequesterSort; q: string }
 
 const STATUS_SPINE: Record<TicketStatus, string> = {
   new: "var(--danger-solid)",
@@ -846,66 +838,73 @@ const STATUS_SPINE: Record<TicketStatus, string> = {
   cancelled: "var(--muted-soft)",
 };
 
-function MyRequestsView({
-  tickets,
-  query,
-  refresh,
-}: {
-  tickets: TicketRow[] | null;
-  query: string;
-  refresh: () => void;
-}) {
+function MyRequestsView({ query, personaId }: { query: string; personaId: string }) {
   const router = useRouter();
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [search, setSearch] = useState(query);
+  const [q, setQ] = useState(query.trim());
   const toast = useToast();
   const [reopeningId, setReopeningId] = useState<string | null>(null);
 
   useEffect(() => {
     setSearch(query);
+    setQ(query.trim());
   }, [query]);
+  // Search runs on the server; wait for a pause in typing instead of asking on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(search.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-  const buckets = useMemo(() => {
-    const counts: Record<FilterKey, number> = {
-      all: 0,
-      open: 0,
-      waiting: 0,
-      resolved: 0,
-      escalated: 0,
-      closed: 0,
-    };
-    for (const t of tickets ?? []) {
-      counts.all += 1;
-      counts[bucketOf(t.status)] += 1;
-    }
-    return counts;
-  }, [tickets]);
+  // Same paging state machine as the agent explorer: the committed rows, total and
+  // KPI counts change together after a successful response; Load more fetches one page.
+  const [paging, setPaging] = useState<ExplorerState<TicketRow, RequestSpec>>({ committed: null, pendingKey: null, loadingMore: false, error: null });
+  const controller = useMemo(
+    () => new ExplorerController<TicketRow, RequestSpec>((key, page) => apiGetPage<TicketRow>(`/tickets?${key}&page=${page}`), setPaging),
+    []
+  );
+  const requestKey = useMemo(() => {
+    const p = new URLSearchParams({ mode: "requests", bucket: filter, sort, pageSize: String(REQUEST_PAGE_SIZE) });
+    if (q) p.set("q", q);
+    return p.toString();
+  }, [filter, sort, q]);
 
-  const rows = useMemo(() => {
-    let list = tickets ?? [];
-    if (filter !== "all") list = list.filter((t) => bucketOf(t.status) === filter);
-    const s = search.trim().toLowerCase();
-    if (s) {
-      list = list.filter(
-        (t) =>
-          t.subject.toLowerCase().includes(s) ||
-          t.reference.toLowerCase().includes(s) ||
-          (t.subcategory ?? "").toLowerCase().includes(s) ||
-          t.category.toLowerCase().includes(s)
-      );
-    }
-    const cmpRecent = (a: TicketRow, b: TicketRow) =>
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    const cmpOldest = (a: TicketRow, b: TicketRow) =>
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    const cmpPriority = (a: TicketRow, b: TicketRow) =>
-      PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority);
-    list = [...list].sort(
-      sort === "oldest" ? cmpOldest : sort === "priority" ? cmpPriority : cmpRecent
-    );
-    return list;
-  }, [tickets, filter, search, sort]);
+  const lastPersona = useRef(personaId);
+  useEffect(() => {
+    const personaChanged = lastPersona.current !== personaId;
+    lastPersona.current = personaId;
+    const { committed: shown, pendingKey } = controller.getState();
+    if (!personaChanged && !pendingKey && shown?.key === requestKey) return;
+    void controller.select(requestKey, { filter, sort, q });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestKey already encodes filter, sort and q
+  }, [personaId, requestKey, controller]);
+
+  const refresh = useCallback(() => { void controller.refresh(); }, [controller]);
+  useLiveRefresh(refresh, { enabled: true });
+
+  // A failed switch keeps the previous results on screen, so put the controls back on what is showing.
+  const switchError = paging.error?.kind === "switch" ? paging.error : null;
+  useEffect(() => {
+    const spec = paging.committed?.spec;
+    if (!switchError || !spec) return;
+    setFilter(spec.filter);
+    setSort(spec.sort);
+    setSearch(spec.q);
+    setQ(spec.q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to a new error object only
+  }, [switchError]);
+  useEffect(() => {
+    if (paging.error?.kind !== "more") return;
+    toast.error({ title: "Could not load more requests", description: paging.error.message });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one toast per error
+  }, [paging.error]);
+
+  const committed = paging.committed;
+  const tickets = committed?.rows ?? null;
+  const buckets = (committed?.counts as RequesterCounts | undefined) ?? emptyRequesterCounts();
+  const rows = tickets ?? [];
+  const hasMore = !!committed && committed.loadedPages < committed.totalPages;
 
   async function reopen(ticket: TicketRow) {
     setReopeningId(ticket.id);
@@ -929,7 +928,7 @@ function MyRequestsView({
     }
   }
 
-  if (tickets === null) {
+  if (tickets === null && !paging.error) {
     return (
       <div className="page-pad">
         <TableSkeleton title={180} rows={6} columns={3} />
@@ -975,6 +974,13 @@ function MyRequestsView({
           </Link>
         </div>
       </div>
+
+      {paging.error && paging.error.kind !== "more" ? (
+        <div role="alert" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0.55rem 0.9rem", marginBottom: 12, borderRadius: 8, background: "var(--danger-bg)", color: "var(--danger-fg)", fontSize: "0.82rem" }}>
+          <span>{paging.error.kind === "switch" ? `Could not update the list (${paging.error.message}). Still showing your previous results.` : `Could not load your requests (${paging.error.message}).`}</span>
+          <button type="button" className="btn" onClick={() => void controller.retry()}>Try again</button>
+        </div>
+      ) : null}
 
       {/* KPI strip (clickable filters) ------------------------------------ */}
       <div className="grid-kpis stagger" style={{ gap: 12, marginBottom: 14 }}>
@@ -1075,7 +1081,7 @@ function MyRequestsView({
       </div>
 
       {/* List ------------------------------------------------------------ */}
-      {rows.length === 0 ? (
+      {rows.length === 0 && !committed ? null : rows.length === 0 ? (
         <EmptyMyRequests
           hasAny={buckets.all > 0}
           onClear={() => {
@@ -1084,7 +1090,7 @@ function MyRequestsView({
           }}
         />
       ) : (
-        <div className="stagger" style={{ display: "grid", gap: 10 }}>
+        <div className="stagger" aria-busy={!!paging.pendingKey} style={{ display: "grid", gap: 10, opacity: paging.pendingKey ? 0.6 : 1 }}>
           {rows.map((t) => (
             <RequestCard
               key={t.id}
@@ -1096,6 +1102,19 @@ function MyRequestsView({
           ))}
         </div>
       )}
+      {hasMore ? (
+        <div style={{ padding: "0.9rem 0", textAlign: "center" }}>
+          <button type="button" className="btn btn-ghost" disabled={paging.loadingMore || !!paging.pendingKey} onClick={() => void controller.loadMore()}>
+            {paging.loadingMore ? "Loading\u2026" : `Load more (${rows.length} of ${committed?.total ?? rows.length})`}
+          </button>
+          {paging.error?.kind === "more" ? (
+            <p role="alert" className="muted" style={{ fontSize: "0.78rem", margin: "6px 0 0" }}>
+              Could not load the next page ({paging.error.message}). The requests above are still current.{" "}
+              <button type="button" className="btn btn-ghost" onClick={() => void controller.retry()}>Try again</button>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1708,7 +1727,18 @@ function NewTicketForm({
   lockRequester: boolean;
   onCreated: () => void;
 }) {
-  const [type, setType] = useState<"incident" | "service_request">("incident");
+  const [type, setType] = useState<CreatableTicketType>("incident");
+  const [affectedService, setAffectedService] = useState("");
+  const [catalogItemId, setCatalogItemId] = useState("");
+  const [requestedItem, setRequestedItem] = useState("");
+  const [fulfilmentDetails, setFulfilmentDetails] = useState("");
+  const [changeRisk, setChangeRisk] = useState("");
+  const [changeImpact, setChangeImpact] = useState("");
+  const [implementationPlan, setImplementationPlan] = useState("");
+  const [rollbackPlan, setRollbackPlan] = useState("");
+  const [windowStart, setWindowStart] = useState("");
+  const [windowEnd, setWindowEnd] = useState("");
+  const [catalog, setCatalog] = useState<{ id: string; name: string; requiresApproval: boolean }[]>([]);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [requester, setRequester] = useState(defaultRequester);
@@ -1731,6 +1761,21 @@ function NewTicketForm({
   const toast = useToast();
 
   useEffect(() => () => abort.current?.abort(), []);
+  // The catalog is only needed for service requests; load it once, on first use.
+  useEffect(() => {
+    if (type !== "service_request" || catalog.length) return;
+    let live = true;
+    apiGetAll<{ id: string; name: string; requiresApproval: boolean }>("/catalog").then((rows) => { if (live) setCatalog(rows); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [type, catalog.length]);
+
+  const iso = (local: string) => { const t = Date.parse(local); return Number.isFinite(t) ? new Date(t).toISOString() : undefined; };
+  const typeDetails =
+    type === "incident" ? { affectedService: affectedService.trim() }
+    : type === "service_request" ? { requestedItem: requestedItem.trim(), fulfilmentDetails: fulfilmentDetails.trim() }
+    : { risk: changeRisk, impact: changeImpact, implementationPlan: implementationPlan.trim(), rollbackPlan: rollbackPlan.trim(), maintenanceStart: iso(windowStart), maintenanceEnd: iso(windowEnd) };
+  // The server re-validates; this only gives quick feedback before submitting.
+  const detailsProblem = typeDetailsProblem(type, typeDetails);
 
   const patchShot = (id: string, patch: Partial<ScreenshotItem>) =>
     setShots((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
@@ -1741,7 +1786,7 @@ function NewTicketForm({
     setUploading((n) => n + 1);
     patchShot(item.id, { status: "uploading", progress: 0, error: undefined });
     try {
-      await uploadTicketAttachment(ticketId, item.file, (progress) => patchShot(item.id, { progress }), abort.current.signal);
+      await uploadTicketAttachment(ticketId, item.file, (progress) => patchShot(item.id, { progress }), abort.current.signal, item.status === "failed");
       patchShot(item.id, { status: "uploaded", progress: 100 });
     } catch (err) {
       patchShot(item.id, { status: "failed", error: err instanceof Error ? err.message : "Upload failed." });
@@ -1757,6 +1802,8 @@ function NewTicketForm({
     setAffectedPeople("one");
     setWorkStopped(false);
     setLocation("");
+    setAffectedService(""); setCatalogItemId(""); setRequestedItem(""); setFulfilmentDetails("");
+    setChangeRisk(""); setChangeImpact(""); setImplementationPlan(""); setRollbackPlan(""); setWindowStart(""); setWindowEnd("");
     setNotes("");
     setShots([]);
     setCreated(null);
@@ -1764,19 +1811,20 @@ function NewTicketForm({
   }
 
   async function submit() {
-    if (!subject || !body || !requester) return;
+    if (!subject || !body || !requester || detailsProblem) return;
     setSubmitting(true);
     try {
       const ticket = await apiSend<TicketRow>("/tickets", "POST", {
         type,
+        typeDetails,
+        catalogItemId: type === "service_request" && catalogItemId ? catalogItemId : undefined,
         subject,
         body,
         requesterEmail: requester,
         priorityMode: isAgent && overridePriority ? "manual" : "automatic",
         category: category as TicketCategory,
         subcategory: subcategory.trim() || undefined,
-        affectedPeople,
-        workStopped,
+        ...(type === "incident" ? { affectedPeople, workStopped } : {}),
         requesterLocation: location.trim() || undefined,
         issueContext: notes.trim() ? { notes: notes.trim() } : undefined,
         // Requesters don't pick impact/urgency — AI classification fills them.
@@ -1877,9 +1925,8 @@ function NewTicketForm({
           <div className="label" style={{ marginBottom: 6 }}>What happened?</div>
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <select className="select" aria-label="Ticket type" value={type} onChange={(e) => setType(e.target.value as typeof type)}>
-                <option value="incident">Incident (something is broken)</option>
-                <option value="service_request">Service request (I need something)</option>
+              <select className="select" aria-label="Ticket type" value={type} onChange={(e) => setType(e.target.value as CreatableTicketType)}>
+                {CREATABLE_TICKET_TYPES.map((t) => <option key={t} value={t}>{TICKET_TYPE_HINTS[t]}</option>)}
               </select>
               <input className="input" aria-label="Subject" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
@@ -1891,6 +1938,43 @@ function NewTicketForm({
               value={body}
               onChange={(e) => setBody(e.target.value)}
             />
+            {type === "incident" ? (
+              <input className="input" aria-label="Affected service" placeholder="Affected service (e.g. VPN, email)" maxLength={TYPE_DETAIL_LIMITS.short} value={affectedService} onChange={(e) => setAffectedService(e.target.value)} />
+            ) : null}
+            {type === "service_request" ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <select className="select" aria-label="Catalog item" value={catalogItemId} onChange={(e) => { setCatalogItemId(e.target.value); const item = catalog.find((c) => c.id === e.target.value); if (item && !requestedItem) setRequestedItem(item.name); }}>
+                  <option value="">No catalog item</option>
+                  {catalog.map((c) => <option key={c.id} value={c.id}>{c.name}{c.requiresApproval ? " (needs approval)" : ""}</option>)}
+                </select>
+                {catalog.find((c) => c.id === catalogItemId)?.requiresApproval ? (
+                  <p className="muted" role="note" style={{ margin: 0, fontSize: "0.78rem" }}>This item needs a manager&apos;s approval before it is fulfilled.</p>
+                ) : null}
+                <input className="input" aria-label="Requested item or service" placeholder="Requested item or service" maxLength={TYPE_DETAIL_LIMITS.short} value={requestedItem} onChange={(e) => setRequestedItem(e.target.value)} />
+                <textarea className="textarea" rows={2} aria-label="Fulfilment details" placeholder="Fulfilment details (quantity, delivery location, needed-by date)" maxLength={TYPE_DETAIL_LIMITS.long} value={fulfilmentDetails} onChange={(e) => setFulfilmentDetails(e.target.value)} />
+              </div>
+            ) : null}
+            {type === "change" ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+                  <select className="select" aria-label="Change risk" value={changeRisk} onChange={(e) => setChangeRisk(e.target.value)}>
+                    <option value="">Risk…</option>
+                    {CHANGE_RISKS.map((r) => <option key={r} value={r}>Risk: {r}</option>)}
+                  </select>
+                  <select className="select" aria-label="Change impact" value={changeImpact} onChange={(e) => setChangeImpact(e.target.value)}>
+                    <option value="">Impact…</option>
+                    {CHANGE_RISKS.map((r) => <option key={r} value={r}>Impact: {r}</option>)}
+                  </select>
+                </div>
+                <textarea className="textarea" rows={2} aria-label="Implementation plan" placeholder="Implementation plan" maxLength={TYPE_DETAIL_LIMITS.long} value={implementationPlan} onChange={(e) => setImplementationPlan(e.target.value)} />
+                <textarea className="textarea" rows={2} aria-label="Rollback plan" placeholder="Rollback plan" maxLength={TYPE_DETAIL_LIMITS.long} value={rollbackPlan} onChange={(e) => setRollbackPlan(e.target.value)} />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+                  <div><label className="label" htmlFor="change-window-start">Maintenance window start</label><input id="change-window-start" type="datetime-local" className="input" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} /></div>
+                  <div><label className="label" htmlFor="change-window-end">Maintenance window end</label><input id="change-window-end" type="datetime-local" className="input" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} /></div>
+                </div>
+                {detailsProblem && (changeRisk || changeImpact || implementationPlan || rollbackPlan || windowStart || windowEnd) ? <p role="alert" style={{ margin: 0, fontSize: "0.8rem", color: "var(--danger-fg)" }}>{detailsProblem}</p> : null}
+              </div>
+            ) : null}
             <div>
               <div className="label" style={{ marginBottom: 6 }}>Screenshots (optional)</div>
               <ScreenshotUploader items={shots} onChange={setShots} disabled={submitting} />
@@ -1910,7 +1994,7 @@ function NewTicketForm({
             <p className="muted" role="note" style={{ margin: 0, fontSize: "0.78rem" }}>
               Automatic screenshot analysis isn&apos;t available yet. Your screenshots are attached to the ticket for the support team to review.
             </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+            {type === "incident" ? <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
               <select
                 className="select"
                 aria-label="People affected"
@@ -1926,7 +2010,7 @@ function NewTicketForm({
                 <input type="checkbox" checked={workStopped} onChange={(e) => setWorkStopped(e.target.checked)} />
                 I cannot work because of this
               </label>
-            </div>
+            </div> : null}
           </div>
         </section>
 
@@ -1978,9 +2062,9 @@ function NewTicketForm({
           subject={subject}
           body={body}
           category={category as TicketCategory}
-          type={type}
-          affectedPeople={affectedPeople}
-          workStopped={workStopped}
+          type={type === "change" ? undefined : type}
+          affectedPeople={type === "incident" ? affectedPeople : "one"}
+          workStopped={type === "incident" && workStopped}
         />
         {isAgent && <label className="flex items-center" style={{ gap: 8 }}>
           <input type="checkbox" checked={overridePriority} onChange={(e) => setOverridePriority(e.target.checked)} />Override automatic priority
@@ -2026,7 +2110,7 @@ function NewTicketForm({
           <button
             className="btn btn-primary"
             onClick={submit}
-            disabled={submitting || !subject || !body || !requester || (overridePriority && !priorityOverrideReason.trim())}
+            disabled={submitting || !subject || !body || !requester || !!detailsProblem || (overridePriority && !priorityOverrideReason.trim())}
           >
             {submitting ? "Creating ticket…" : isAgent ? "Create ticket" : "Submit request"}
           </button>

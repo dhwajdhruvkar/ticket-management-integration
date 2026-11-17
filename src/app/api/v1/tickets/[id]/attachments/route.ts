@@ -12,6 +12,7 @@ import { clientKey, rateLimit } from "@/server/rateLimit";
 import { config } from "@/server/config";
 import {
   AttachmentError,
+  findRecentUpload,
   listAttachments,
   listVisibleAttachments,
   saveAttachments,
@@ -100,6 +101,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (files.length === 0) return fail("No files provided (use the \"file\" field).");
   if (files.length > MAX_FILES_PER_UPLOAD) {
     return fail(`At most ${MAX_FILES_PER_UPLOAD} files per upload.`);
+  }
+
+  // A retry of a file whose first attempt may have been stored before the response was lost must not add a second copy.
+  if (req.headers.get("x-upload-retry") === "1" && files.length === 1) {
+    const existing = await findRecentUpload(res.ticket.tenantId, id, files[0].name, files[0].size);
+    if (existing) return ok([existing], { status: 200, headers: { "Upload-Replayed": "true" } });
   }
 
   try {

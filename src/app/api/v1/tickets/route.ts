@@ -9,13 +9,15 @@ import {
 import { isResponse, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
-import { listTickets, searchTickets, type NewTicketInput } from "@/server/services/ticketService";
+import { listRequesterTickets, listTickets, searchTickets, type NewTicketInput } from "@/server/services/ticketService";
 import { intakeTicket } from "@/server/services/intake";
 import {
   findIdempotentTicket,
   IdempotencyError,
   ticketIdempotencyMetadata,
 } from "@/server/services/idempotencyService";
+import { emptyRequesterCounts, isRequesterFilter, isRequesterSort } from "@/shared/requesterBuckets";
+import { CREATABLE_TICKET_TYPES, isCreatableTicketType, sanitizeTypeDetails, typeDetailsProblem } from "@/shared/ticketTypes";
 import { sanitizeIssueContext } from "@/shared/issueContext";
 import { filtersFromParams } from "@/lib/ticketFilters";
 import { isTicketViewId } from "@/lib/ticketViews";
@@ -73,6 +75,19 @@ export async function GET(req: Request) {
   if (!isAgentRole(role)) {
     if (!actor.email) return paginated([], 0, pagination);
     where.requesterEmail = actor.email;
+  }
+
+  // "My requests" mode (?mode=requests): the signed-in user's OWN tickets, paged, with bucket totals.
+  // The scope is always the actor's own email, whatever the role or query says.
+  if (url.searchParams.get("mode") === "requests") {
+    if (!actor.email) return paginated([], 0, pagination, { counts: emptyRequesterCounts() });
+    const bucket = url.searchParams.get("bucket") ?? "all";
+    const sort = url.searchParams.get("sort") ?? "recent";
+    if (!isRequesterFilter(bucket) || !isRequesterSort(sort)) return fail("Unknown bucket or sort.");
+    const found = await listRequesterTickets(tenantId, actor.email, {
+      bucket, sort, q: url.searchParams.get("q")?.slice(0, 200) || undefined, skip: pagination.skip, take: pagination.take,
+    });
+    return paginated(found.data, found.total, pagination, { counts: found.counts });
   }
 
   // Explorer mode (?view=): the server applies the saved view, filters and
@@ -133,6 +148,17 @@ export async function POST(req: Request) {
   const email = z.string().trim().email().max(254).safeParse(body.requesterEmail);
   if (!email.success) return fail("A valid requester email is required.");
   body.requesterEmail = email.data.toLowerCase();
+  // Only the three creatable types are accepted; historical "problem" tickets are never created here.
+  if (body.type !== undefined && !isCreatableTicketType(body.type)) {
+    return fail(`type must be one of: ${CREATABLE_TICKET_TYPES.join(", ")}.`);
+  }
+  const ticketType = body.type ?? "incident";
+  // Type-specific details are re-validated here; unknown keys and caller-set approval flags are dropped.
+  const detailsProblem = typeDetailsProblem(ticketType, body.typeDetails);
+  if (detailsProblem) return fail(detailsProblem);
+  const typeDetails = sanitizeTypeDetails(ticketType, body.typeDetails);
+  if (typeDetails) body.typeDetails = typeDetails;
+  else delete body.typeDetails;
   // Classification hints are optional; malformed values are dropped rather than rejected.
   if (body.affectedPeople !== undefined && !["one", "team", "many"].includes(body.affectedPeople as string)) delete body.affectedPeople;
   if (typeof body.workStopped !== "boolean") delete body.workStopped;

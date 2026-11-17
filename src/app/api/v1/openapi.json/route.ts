@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isResponse, requirePermission } from "@/server/guards";
+import { CREATABLE_TICKET_TYPES, CHANGE_RISKS, TYPE_DETAIL_LIMITS } from "@/shared/ticketTypes";
 import { workflowPaths, workflowSchemas } from "@/server/workflowOpenApi";
 
 // =============================================================================
@@ -90,7 +91,7 @@ const BASE_SPEC = {
         properties: {
           id: { type: "string" },
           reference: { type: "string", example: "INC-8F3K2A" },
-          type: { type: "string", enum: ["incident", "service_request", "problem", "change"] },
+          type: { type: "string", enum: ["incident", "service_request", "problem", "change"], description: "problem is legacy: it can be read and filtered but not created." },
           subject: { type: "string" },
           status: { type: "string" },
           priority: { type: "string", enum: ["critical", "high", "medium", "low", "very_low"] },
@@ -175,8 +176,9 @@ const BASE_SPEC = {
       get: { summary: "List attachments", parameters: [ID, ...PAGINATION], responses: { "200": { description: "Paginated attachment metadata" } } },
       post: {
         summary: "Upload attachments (multipart/form-data, field `file`, max 5 files / 10 MB each)",
-        parameters: [ID],
+        parameters: [ID, { name: "X-Upload-Retry", in: "header", required: false, description: "Send 1 when re-uploading a single file whose earlier attempt failed. If a file with the same name and size was stored on the ticket in the last 15 minutes it is returned (200, Upload-Replayed: true) instead of being stored again.", schema: { type: "string", enum: ["1"] } }],
         responses: {
+          "200": { description: "Retry of an already stored file; the existing record is returned" },
           "201": { description: "Stored" },
           "400": { description: "Type/size rejected" },
           "503": { description: "Attachment storage is disabled" },
@@ -222,6 +224,7 @@ const BASE_SPEC = {
       },
     },
     "/kb/{id}": {
+      get: { summary: "Get one article with its full content (requesters only see published, public articles; others read as 404)", parameters: [ID], responses: { "200": { description: "Article" }, "404": { description: "Not found" } } },
       patch: { summary: "Update an article (re-embeds)", parameters: [ID], responses: { "200": { description: "Updated" } } },
       delete: { summary: "Delete an article", parameters: [ID], responses: { "200": { description: "Deleted" } } },
     },
@@ -367,12 +370,8 @@ const TICKET_STATUS = [
   "cancelled",
 ] as const;
 
-const TICKET_TYPE = [
-  "incident",
-  "service_request",
-  "problem",
-  "change",
-] as const;
+// Stored/readable values. "problem" only appears on historical tickets (PRB-); new tickets use CREATABLE_TICKET_TYPES.
+const TICKET_TYPE = ["incident", "service_request", "problem", "change"] as const;
 
 const TICKET_PRIORITY = [
   "critical",
@@ -418,6 +417,24 @@ const TICKET_PAGINATION = [
     ...PAGINATION[4],
     schema: { type: "string", enum: ["asc", "desc"], default: "desc" },
   },
+] as const;
+
+// Explorer (?view=) and "My requests" (?mode=requests) query parameters, as implemented by GET /tickets.
+const TICKET_EXPLORER_PARAMS = [
+  { name: "view", in: "query", description: "Explorer mode: a saved view. The server applies the view, filters and search, and returns one page plus per-view `meta.counts`.", schema: { type: "string", enum: ["your_unsolved", "unassigned", "all_unsolved", "pending", "recently_updated", "recently_solved", "all"] } },
+  { name: "q", in: "query", description: "Search text (max 200 characters). With view: subject, requester email or reference. With mode=requests: subject, reference, category or subcategory.", schema: { type: "string", maxLength: 200 } },
+  { name: "priority", in: "query", description: "Explorer filter.", schema: { type: "string", enum: ["critical", "high", "medium", "low", "very_low"] } },
+  { name: "group", in: "query", description: "Explorer filter: assignment group id.", schema: { type: "string" } },
+  { name: "assignee", in: "query", description: "Explorer filter: user id, or unassigned.", schema: { type: "string" } },
+  { name: "category", in: "query", description: "Explorer filter.", schema: { type: "string", enum: ["IT", "HR", "Access", "Software", "Hardware", "Network", "Billing", "Other"] } },
+  { name: "sla", in: "query", description: "Explorer filter: SLA state.", schema: { type: "string", enum: ["on_track", "at_risk", "breached", "paused", "met"] } },
+  { name: "phase", in: "query", description: "Explorer filter: workflow phase.", schema: { type: "string" } },
+  { name: "overdue", in: "query", description: "Explorer filter; 1 keeps unresolved tickets with a breached SLA.", schema: { type: "string", enum: ["1"] } },
+  { name: "escalated", in: "query", description: "Explorer filter; 1 keeps escalated tickets.", schema: { type: "string", enum: ["1"] } },
+  { name: "assigned", in: "query", description: "Explorer filter; 1 keeps tickets that have an assignee.", schema: { type: "string", enum: ["1"] } },
+  { name: "mode", in: "query", description: "requests: the caller's OWN tickets (any role), paged, with bucket totals in `meta.counts` (all, open, waiting, resolved, escalated, closed) that ignore bucket and search.", schema: { type: "string", enum: ["requests"] } },
+  { name: "bucket", in: "query", description: "With mode=requests. Unknown values are rejected with 400.", schema: { type: "string", enum: ["all", "open", "waiting", "resolved", "escalated", "closed"], default: "all" } },
+  { name: "sort", in: "query", description: "With mode=requests. Unknown values are rejected with 400.", schema: { type: "string", enum: ["recent", "oldest", "priority"], default: "recent" } },
 ] as const;
 
 const API_KEY_PAGINATION = [
@@ -643,7 +660,22 @@ const CORE_SCHEMAS = {
         description:
           "Stable partner-side ticket id. Used for idempotency when Idempotency-Key is omitted.",
       },
-      type: { type: "string", enum: TICKET_TYPE, default: "incident" },
+      type: { type: "string", enum: CREATABLE_TICKET_TYPES, default: "incident", description: "Any other value is rejected with 400. Historical problem tickets cannot be created." },
+      typeDetails: {
+        type: "object",
+        description: "Type-specific details; only the fields of the selected type are kept, unknown keys are dropped. A change request requires risk, impact, implementationPlan, rollbackPlan and a maintenance window (start before end). Service-request approvalRequired is derived from the catalog item and cannot be set.",
+        properties: {
+          affectedService: { type: "string", maxLength: TYPE_DETAIL_LIMITS.short, description: "incident" },
+          requestedItem: { type: "string", maxLength: TYPE_DETAIL_LIMITS.short, description: "service_request" },
+          fulfilmentDetails: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "service_request" },
+          risk: { type: "string", enum: CHANGE_RISKS, description: "change" },
+          impact: { type: "string", enum: CHANGE_RISKS, description: "change" },
+          implementationPlan: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "change" },
+          rollbackPlan: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "change" },
+          maintenanceStart: { type: "string", format: "date-time", description: "change" },
+          maintenanceEnd: { type: "string", format: "date-time", description: "change" },
+        },
+      },
       channel: {
         type: "string",
         enum: ["email", "portal", "chat", "api", "phone", "teams"],
@@ -1183,6 +1215,19 @@ const SPEC = {
           "429": { $ref: "#/components/responses/RateLimited" },
         },
       },
+      patch: {
+        tags: ["API Keys"],
+        operationId: "updateCurrentUserProfile",
+        summary: "Update the signed-in user's profile and preferences",
+        description: "Session users only; machine credentials are refused with 403.",
+        "x-required-permission": "ticket.read",
+        responses: {
+          "200": { description: "Profile updated" },
+          "400": { $ref: "#/components/responses/BadRequest" },
+          "401": { $ref: "#/components/responses/Unauthorized" },
+          "403": { $ref: "#/components/responses/Forbidden" },
+        },
+      },
     },
     "/tickets": {
       get: {
@@ -1212,6 +1257,7 @@ const SPEC = {
             schema: { type: "string" },
           },
           { name: "groupId", in: "query", schema: { type: "string" } },
+          ...TICKET_EXPLORER_PARAMS,
         ],
         responses: {
           "200": jsonResponse("Paginated ticket list", ref("TicketListResponse")),
