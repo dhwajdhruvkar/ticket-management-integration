@@ -14,10 +14,12 @@ import { createApiKey } from "@/server/auth/apiKeys";
 import { getStore } from "@/server/data";
 import { now } from "@/server/domain/ids";
 import {
+  AttachmentError,
   deleteAttachment,
   isAttachmentInternal,
   listAttachments,
   listVisibleAttachments,
+  sniffImageType,
   validateAttachmentFiles,
   readAttachment,
   saveAttachment,
@@ -519,8 +521,8 @@ describe("Phase E2 conversation attachments", () => {
 
   it("accepts the newly allowed file types and still rejects executables and unlisted types", () => {
     expect(() => validateAttachmentFiles([
-      file("photo.heic", "image/heic"),
-      file("scan.bmp", "image/bmp"),
+      { fileName: "photo.heic", mimeType: "image/heic", bytes: Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypheic"), Buffer.alloc(4)]) }, // real signatures: images are now content-checked
+      { fileName: "scan.bmp", mimeType: "image/bmp", bytes: Buffer.from([0x42, 0x4d, 0, 0, 0, 0]) },
       file("clip.mp4", "video/mp4"),
       file("message.msg", "application/vnd.ms-outlook"),
     ])).not.toThrow();
@@ -539,5 +541,37 @@ describe("Phase E2 conversation attachments", () => {
     expect(requester?.attachments.map((row) => row.fileName)).toEqual([`vp-${marker}.txt`]);
     const staff = await getTicketView(ticket.id, { tenantId: TENANT, includeInternal: true });
     expect(staff?.attachments.map((row) => row.fileName)).toEqual(expect.arrayContaining([`vp-${marker}.txt`, `vi-${marker}.txt`]));
+  });
+});
+
+
+describe("image content verification (magic bytes)", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+  const gif = Buffer.from("GIF89a  ", "latin1");
+  const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0x24, 0, 0, 0]), Buffer.from("WEBPVP8 ")]);
+  const bmp = Buffer.from([0x42, 0x4d, 0, 0, 0, 0, 0, 0]);
+  const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypheic"), Buffer.alloc(4)]);
+  const text = Buffer.from("this is plain text, not an image");
+  const check = (fileName: string, mimeType: string, bytes: Buffer) => () => validateAttachmentFiles([{ fileName, mimeType, bytes }]);
+
+  it("identifies images by their signatures", () => {
+    expect([png, jpeg, gif, webp, bmp, heic, text].map(sniffImageType)).toEqual(["png", "jpeg", "gif", "webp", "bmp", "heic", null]);
+    expect(sniffImageType(new Uint8Array(0))).toBeNull();
+  });
+  it("accepts real png, jpeg, webp and gif content", () => {
+    expect(check("a.png", "image/png", png)).not.toThrow();
+    expect(check("a.jpg", "image/jpeg", jpeg)).not.toThrow();
+    expect(check("a.webp", "image/webp", webp)).not.toThrow();
+    expect(check("a.gif", "image/gif", gif)).not.toThrow();
+  });
+  it("rejects text posing as an image, and image bytes of another type", () => {
+    expect(check("a.png", "image/png", text)).toThrow("File content does not match its type.");
+    expect(check("a.png", "image/png", jpeg)).toThrow("File content does not match its type.");
+    expect(check("a.png", "application/octet-stream", text)).toThrow(AttachmentError);
+  });
+  it("leaves non-images unchanged", () => {
+    expect(check("notes.txt", "text/plain", text)).not.toThrow();
+    expect(check("data.json", "application/json", Buffer.from("{}"))).not.toThrow();
   });
 });

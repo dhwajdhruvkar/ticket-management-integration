@@ -10,6 +10,7 @@
 // /api/v1/tickets/[id]; all actions go through the ticket action/message APIs.
 // =============================================================================
 
+import { readIssueContext } from "@/shared/issueContext";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -745,6 +746,7 @@ function RequesterView({
   onChanged: () => void;
 }) {
   const narrow = useNarrow(900);
+  const issueContext = readIssueContext(ticket.customFields);
 
   const details = (
     <>
@@ -764,6 +766,9 @@ function RequesterView({
       />
       <Row label="Created" value={timeAgo(ticket.createdAt)} />
       <Row label="Updated" value={timeAgo(ticket.updatedAt)} />
+      {issueContext?.notes ? (
+        <Row label="Your notes" value={<span style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{issueContext.notes}</span>} />
+      ) : null}
       {ticket.approvals.some((a) => a.state === "pending") ? (
         <p className="muted" style={{ fontSize: "0.78rem", marginTop: 10 }}>
           Your request is awaiting manager approval.

@@ -16,6 +16,7 @@ import {
   IdempotencyError,
   ticketIdempotencyMetadata,
 } from "@/server/services/idempotencyService";
+import { sanitizeIssueContext } from "@/shared/issueContext";
 import { filtersFromParams } from "@/lib/ticketFilters";
 import { isTicketViewId } from "@/lib/ticketViews";
 import type { Role, TicketRow } from "@/server/domain/models";
@@ -138,6 +139,10 @@ export async function POST(req: Request) {
   // Callers may send a location, never other customFields.
   if (body.requesterLocation !== undefined && (typeof body.requesterLocation !== "string" || body.requesterLocation.length > 160)) delete body.requesterLocation;
   delete (body as { customFields?: unknown }).customFields;
+  // Optional screenshot/issue notes: only valid, trimmed fields survive; anything else is dropped.
+  const issueContext = sanitizeIssueContext((body as { issueContext?: unknown }).issueContext);
+  if (issueContext) body.issueContext = issueContext;
+  else delete (body as { issueContext?: unknown }).issueContext;
   if (body.priorityMode !== undefined && !["automatic", "manual"].includes(body.priorityMode)) return fail("Invalid priority mode.");
   if (!isAgentRole(actor.role as Role)) body.priorityMode = "automatic";
   if (body.priorityMode === "automatic") {

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { apiGetAll, apiGetPage, apiSend } from "@/lib/api";
+import { apiGetAll, apiGetPage, apiSend, uploadTicketAttachment } from "@/lib/api";
+import { ScreenshotUploader, type ScreenshotItem } from "./ScreenshotUploader";
+import { ISSUE_CONTEXT_LIMITS } from "@/shared/issueContext";
 import type {
   AssignmentGroupRow,
   ImpactLevel,
@@ -1725,7 +1727,46 @@ function NewTicketForm({
   const [workStopped, setWorkStopped] = useState(false);
   const [location, setLocation] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [shots, setShots] = useState<ScreenshotItem[]>([]);
+  const [notes, setNotes] = useState("");
+  // Set once the ticket exists: the form is replaced by the upload progress / summary view.
+  const [created, setCreated] = useState<{ id: string; reference: string } | null>(null);
+  const [uploading, setUploading] = useState(0);
+  const abort = useRef<AbortController | null>(null);
   const toast = useToast();
+
+  useEffect(() => () => abort.current?.abort(), []);
+
+  const patchShot = (id: string, patch: Partial<ScreenshotItem>) =>
+    setShots((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+
+  // One request per file, so a batch can never exceed the platform's request-body limit.
+  async function uploadShot(ticketId: string, item: ScreenshotItem) {
+    abort.current ??= new AbortController();
+    setUploading((n) => n + 1);
+    patchShot(item.id, { status: "uploading", progress: 0, error: undefined });
+    try {
+      await uploadTicketAttachment(ticketId, item.file, (progress) => patchShot(item.id, { progress }), abort.current.signal);
+      patchShot(item.id, { status: "uploaded", progress: 100 });
+    } catch (err) {
+      patchShot(item.id, { status: "failed", error: err instanceof Error ? err.message : "Upload failed." });
+    } finally {
+      setUploading((n) => n - 1);
+    }
+  }
+
+  function finish() {
+    setSubject("");
+    setBody("");
+    setSubcategory("");
+    setAffectedPeople("one");
+    setWorkStopped(false);
+    setLocation("");
+    setNotes("");
+    setShots([]);
+    setCreated(null);
+    onCreated();
+  }
 
   async function submit() {
     if (!subject || !body || !requester) return;
@@ -1742,16 +1783,21 @@ function NewTicketForm({
         affectedPeople,
         workStopped,
         requesterLocation: location.trim() || undefined,
+        issueContext: notes.trim() ? { notes: notes.trim() } : undefined,
         // Requesters don't pick impact/urgency — AI classification fills them.
         ...(isAgent && overridePriority ? { impact, urgency, priorityOverrideReason } : {}),
       });
-      setSubject("");
-      setBody("");
-      setSubcategory("");
-      setAffectedPeople("one");
-      setWorkStopped(false);
-      setLocation("");
-      onCreated();
+      const pending = shots;
+      if (pending.length === 0) {
+        finish();
+      } else {
+        // The ticket exists now; upload the screenshots one by one and keep the form state until the user is done.
+        setCreated({ id: ticket.id, reference: ticket.reference });
+        setSubmitting(false);
+        void (async () => {
+          for (const item of pending) await uploadShot(ticket.id, item);
+        })();
+      }
       if (ticket.status === "auto_resolved") {
         toast.success({
           title: isAgent ? "Ticket auto-resolved" : "Answer ready",
@@ -1783,8 +1829,32 @@ function NewTicketForm({
     }
   }
 
+  if (created) {
+    const uploaded = shots.filter((item) => item.status === "uploaded").length;
+    const failed = shots.filter((item) => item.status === "failed").length;
+    return (
+      <div className="panel anim-fade-up" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: 12 }}>
+        <div role="status" aria-live="polite" style={{ fontSize: "0.95rem", fontWeight: 700 }}>
+          {uploading > 0
+            ? `Ticket ${created.reference} created. Uploading screenshots (${uploaded} of ${shots.length})…`
+            : failed > 0
+              ? `Ticket ${created.reference} created. ${failed} of ${shots.length} screenshot${shots.length === 1 ? "" : "s"} could not be uploaded.`
+              : `Ticket ${created.reference} created with ${uploaded} screenshot${uploaded === 1 ? "" : "s"}.`}
+        </div>
+        <ScreenshotUploader items={shots} onChange={setShots} disabled={uploading > 0} canReplace={false} onRetry={(id) => { const item = shots.find((x) => x.id === id); if (item) void uploadShot(created.id, item); }} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Link className="btn" href={`/tickets/${created.id}`}>View ticket</Link>
+          <button type="button" className="btn btn-primary" disabled={uploading > 0} onClick={finish}>
+            {failed > 0 ? "Done (skip failed uploads)" : "Done"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="panel anim-fade-up" style={{ padding: "1.1rem 1.2rem" }}>
+      <fieldset disabled={submitting} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div className="flex items-center" style={{ gap: 8, marginBottom: 14 }}>
         <span
           aria-hidden
@@ -1826,6 +1896,25 @@ function NewTicketForm({
               value={body}
               onChange={(e) => setBody(e.target.value)}
             />
+            <div>
+              <div className="label" style={{ marginBottom: 6 }}>Screenshots (optional)</div>
+              <ScreenshotUploader items={shots} onChange={setShots} disabled={submitting} />
+            </div>
+            <div>
+              <textarea
+                className="textarea"
+                rows={3}
+                maxLength={ISSUE_CONTEXT_LIMITS.notes}
+                placeholder="Notes about the screenshots or issue — what you were doing, when it happened"
+                aria-label="Notes about the screenshots or issue"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+              <div className="muted" style={{ fontSize: "0.72rem", textAlign: "right" }}>{notes.length}/{ISSUE_CONTEXT_LIMITS.notes}</div>
+            </div>
+            <p className="muted" role="note" style={{ margin: 0, fontSize: "0.78rem" }}>
+              Automatic screenshot analysis isn&apos;t available yet. Your screenshots are attached to the ticket for the support team to review.
+            </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
               <select
                 className="select"
@@ -1948,6 +2037,7 @@ function NewTicketForm({
           </button>
         </div>
       </div>
+      </fieldset>
     </div>
   );
 }

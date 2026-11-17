@@ -207,6 +207,8 @@ export const config = {
     graph: graphConfigured,
     blob: !!blobConnString,
     attachments: attachmentStorage !== "disabled",
+    // No screenshot-analysis provider is wired; see src/server/ai/screenshotAnalysis.ts.
+    screenshotAnalysis: false,
     slackInbound: !!slack.signingSecret,
     slackOutbound: !!slack.webhookUrl,
     brevoInbound: brevoConfigured,

@@ -1,5 +1,6 @@
 "use client";
 
+import { readIssueContext } from "@/shared/issueContext";
 import { useState } from "react";
 import { apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
@@ -99,6 +100,7 @@ export default function TicketProperties({
     return commit(() => apiSend<TicketRow>(`/tickets/${ticket.id}`, "PATCH", body), ok, fail);
   }
 
+  const issueContext = readIssueContext(ticket.customFields);
   const derived = ticket.impact && ticket.urgency ? MATRIX[ticket.impact][ticket.urgency] : null;
   const tagsDirty = tags.trim() !== ticket.tags.join(", ").trim();
   const subcatDirty = subcategory.trim() !== (ticket.subcategory ?? "").trim();
@@ -108,6 +110,17 @@ export default function TicketProperties({
       <Field label="Location">
         <span style={{ fontSize: "0.86rem" }}>{String(ticket.customFields?.requesterLocation ?? "—")}</span>
       </Field>
+
+      {issueContext ? (
+        <Field label="Requester notes">
+          {/* Plain text only: requester-supplied content is never rendered as HTML. */}
+          <div style={{ fontSize: "0.86rem", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {issueContext.notes ? <p style={{ margin: 0 }}>{issueContext.notes}</p> : null}
+            {issueContext.activity ? <p className="muted" style={{ margin: "4px 0 0" }}>Doing: {issueContext.activity}</p> : null}
+            {issueContext.occurredAt ? <p className="muted" style={{ margin: "4px 0 0" }}>When: {issueContext.occurredAt}</p> : null}
+          </div>
+        </Field>
+      ) : null}
 
       <Field label="Assignee" info={HINTS.assignee}>
         <select

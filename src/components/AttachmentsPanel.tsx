@@ -115,9 +115,13 @@ export default function AttachmentsPanel({
               className="panel-2"
               style={{ padding: "0.5rem 0.65rem", display: "flex", alignItems: "center", gap: 8 }}
             >
-              <span aria-hidden style={{ color: "var(--muted)", display: "inline-flex", flexShrink: 0 }}>
-                <FileIcon mime={a.mimeType} />
-              </span>
+              {THUMBNAIL_TYPES.has(a.mimeType) ? (
+                <AttachmentThumb id={a.id} name={a.fileName} mime={a.mimeType} />
+              ) : (
+                <span aria-hidden style={{ color: "var(--muted)", display: "inline-flex", flexShrink: 0 }}>
+                  <FileIcon mime={a.mimeType} />
+                </span>
+              )}
               <a
                 href={`/api/v1/attachments/${a.id}`}
                 style={{
@@ -206,5 +210,26 @@ function FileIcon({ mime }: { mime: string }) {
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <path d="M14 2v6h6" />
     </svg>
+  );
+}
+
+// Raster images only: SVG is never rendered inline (it can carry script).
+const THUMBNAIL_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** Lazy thumbnail served by the existing authenticated download route; falls back to the file icon if it cannot load. */
+function AttachmentThumb({ id, name, mime }: { id: string; name: string; mime: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span aria-hidden style={{ color: "var(--muted)", display: "inline-flex", flexShrink: 0 }}>
+        <FileIcon mime={mime} />
+      </span>
+    );
+  }
+  return (
+    <a href={`/api/v1/attachments/${id}`} style={{ flexShrink: 0, display: "inline-flex" }} tabIndex={-1} aria-hidden>
+      {/* eslint-disable-next-line @next/next/no-img-element -- authenticated same-origin download, not an optimisable static asset */}
+      <img src={`/api/v1/attachments/${id}`} alt="" loading="lazy" onError={() => setFailed(true)} title={name} style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 6, background: "var(--surface-3)" }} />
+    </a>
   );
 }

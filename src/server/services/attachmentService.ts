@@ -123,10 +123,42 @@ async function scanAttachment(fileName: string, bytes: Buffer): Promise<void> {
   return;
 }
 
+export type SniffedImageType = "png" | "jpeg" | "gif" | "webp" | "bmp" | "heic";
+
+/** Identifies an image by its leading bytes (never by name or declared type). Returns null for anything else. */
+export function sniffImageType(bytes: Uint8Array): SniffedImageType | null {
+  const at = (offset: number, ...values: number[]) => values.every((v, i) => bytes[offset + i] === v);
+  const text = (offset: number, value: string) => [...value].every((c, i) => bytes[offset + i] === c.charCodeAt(0));
+  if (at(0, 0x89, 0x50, 0x4e, 0x47)) return "png";
+  if (at(0, 0xff, 0xd8, 0xff)) return "jpeg";
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) return "gif";
+  if (text(0, "RIFF") && text(8, "WEBP")) return "webp";
+  if (at(0, 0x42, 0x4d)) return "bmp";
+  if (text(4, "ftyp") && (text(8, "heic") || text(8, "heix") || text(8, "mif1"))) return "heic";
+  return null;
+}
+
+const MIME_FAMILY: Record<string, SniffedImageType> = {
+  "image/png": "png", "image/jpeg": "jpeg", "image/jpg": "jpeg", "image/gif": "gif", "image/webp": "webp", "image/bmp": "bmp", "image/heic": "heic", "image/heif": "heic",
+};
+const EXT_FAMILY: Record<string, SniffedImageType> = { png: "png", jpg: "jpeg", jpeg: "jpeg", gif: "gif", webp: "webp", bmp: "bmp", heic: "heic" };
+
+/** An image (by declared type or extension) must really be that kind of image. Non-images are untouched. */
+function verifyImageContent(fileName: string, mimeType: string, bytes: Uint8Array): void {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  const declaredImage = mimeType.startsWith("image/") && mimeType !== "image/svg+xml";
+  const extFamily = EXT_FAMILY[ext];
+  if (!declaredImage && !extFamily) return;
+  const expected = declaredImage ? MIME_FAMILY[mimeType] : extFamily;
+  const sniffed = sniffImageType(bytes);
+  if (!sniffed || (expected && sniffed !== expected)) throw new AttachmentError("File content does not match its type.");
+}
+
 function prepareAttachment(input: AttachmentInput): AttachmentInput {
   const fileName = sanitizeFileName(input.fileName);
   const mimeType = input.mimeType.trim().toLowerCase() || "application/octet-stream";
   validate(fileName, mimeType, input.bytes.length);
+  verifyImageContent(fileName, mimeType, input.bytes);
   return { fileName, mimeType, bytes: input.bytes };
 }
 

@@ -41,7 +41,11 @@ export async function intakeTicket(
 
   let cls: Classification | null = null;
   if (!input.category || !(input.priority || (input.impact && input.urgency))) {
-    cls = await classifyTicket(input.subject, input.body, {
+    // Requester notes help classification; they are not appended to the stored ticket body.
+    const notes = input.issueContext?.notes;
+    cls = await classifyTicket(input.subject, notes ? `${input.body}
+
+${notes}` : input.body, {
       category: input.category,
       type: input.type === "incident" || input.type === "service_request" ? input.type : undefined,
       affectedPeople: input.affectedPeople,

@@ -6,6 +6,7 @@
 // (ticket + messages + events + resolution + assignee) for the API and UI.
 // =============================================================================
 
+import { sanitizeIssueContext, type IssueContext } from "@/shared/issueContext";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
 import { newId, now, ticketReference } from "../domain/ids";
@@ -52,6 +53,14 @@ export interface TicketView extends TicketRow {
   sla: SlaStatus;
 }
 
+function newTicketCustomFields(input: NewTicketInput): Record<string, unknown> | null {
+  const fields: Record<string, unknown> = {};
+  if (input.requesterLocation?.trim()) fields.requesterLocation = input.requesterLocation.trim().slice(0, 160);
+  const issueContext = sanitizeIssueContext(input.issueContext);
+  if (issueContext) fields.issueContext = issueContext;
+  return Object.keys(fields).length ? fields : null;
+}
+
 export interface NewTicketInput {
   priorityMode?: "automatic" | "manual";
   priorityOverrideReason?: string;
@@ -70,6 +79,8 @@ export interface NewTicketInput {
   workStopped?: boolean;
   /** Where the requester is; stored as a snapshot in customFields.requesterLocation. */
   requesterLocation?: string;
+  /** Requester notes about screenshots/the issue; stored in customFields.issueContext. */
+  issueContext?: IssueContext;
   tags?: string[];
   source?: string;
   catalogItemId?: string;
@@ -243,8 +254,8 @@ export async function createTicket(
     channel: input.channel ?? "portal",
     source: input.source ?? null,
     tags: input.tags ?? [],
-    // The requester's location snapshot; the only customFields a new ticket starts with.
-    customFields: input.requesterLocation?.trim() ? { requesterLocation: input.requesterLocation.trim().slice(0, 160) } : null,
+    // A new ticket starts with only the requester's location snapshot and their issue notes.
+    customFields: newTicketCustomFields(input),
     requesterEmail: input.requesterEmail.trim(),
     requesterId: input.requesterId ?? null,
     externalTicketId: input.externalTicketId?.trim() || null,

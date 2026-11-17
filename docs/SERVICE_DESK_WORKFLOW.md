@@ -243,3 +243,13 @@ restore would discard newer records and needs explicit incident approval.
   processing on Vercel requires the external minute trigger, outbound email needs
   a provider, and real Teams presence needs Microsoft credentials. The dashboard
   reports these separately; a successful deployment is not proof of activation.
+
+## Screenshots on new tickets
+
+The new-ticket form (`/tickets?new=1`) accepts up to 5 screenshots (PNG, JPEG, WebP or GIF, 4 MB each) and one optional notes field (up to 4000 characters, stored as `customFields.issueContext.notes`; `occurredAt` and `activity` are also accepted by the API).
+
+- The ticket is created first (JSON), then each file is uploaded in its own request to `POST /api/v1/tickets/{id}/attachments`, which keeps every request under the platform body limit. Removing a file before submitting is client-only, so nothing is uploaded and no orphans exist. A failed upload keeps the ticket, shows the error and offers Retry.
+- Images are verified by their leading bytes on the server (PNG, JPEG, GIF, WebP, BMP, HEIC); a file whose content does not match its declared type or extension is rejected. Other file types are unchanged.
+- Notes are shown as plain text to agents and to the requester. Thumbnails in the attachments panel are raster images only; SVG is never rendered inline.
+- **No automatic analysis exists.** The form says so and nothing calls a model. `src/server/ai/screenshotAnalysis.ts` only defines the types and a factory that returns `null`; `/api/v1/health` reports `features.screenshotAnalysis: false`.
+- **Privacy:** the form warns requesters not to include passwords, API keys, access tokens or unnecessary personal information, and to crop or blur sensitive areas. Screenshots are stored in Netlink Support's attachment storage and visible only to the support team and the requester, under the existing attachment access rules.

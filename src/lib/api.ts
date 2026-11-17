@@ -2,6 +2,8 @@
 // Identity comes from the NextAuth session cookie, which the browser attaches
 // automatically — the server resolves role, permissions and record security.
 
+import type { AttachmentRow } from "@/server/domain/models";
+
 /**
  * Carries the HTTP status alongside the message so callers can tell "this row
  * does not exist" (404) from "the request failed" (401/500/offline) and show
@@ -124,6 +126,52 @@ export async function apiSendForm<T>(path: string, form: FormData): Promise<T> {
     throw new ApiError("Could not reach the server. Check your connection and try again.", 0);
   }
   return handle<T>(res);
+}
+
+/**
+ * Upload one file to a ticket (a single "file" part per request, so large
+ * batches never exceed the platform body limit). Resolves with the stored
+ * attachment row; rejects with an ApiError carrying a readable message.
+ */
+export function uploadTicketAttachment(
+  ticketId: string,
+  file: File,
+  onProgress?: (percent: number) => void,
+  signal?: AbortSignal
+): Promise<AttachmentRow> {
+  return new Promise<AttachmentRow>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/v1/tickets/${encodeURIComponent(ticketId)}/attachments`);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+    };
+    xhr.onerror = () => reject(new ApiError("Could not reach the server. Check your connection and try again.", 0));
+    xhr.onabort = () => reject(new ApiError("Upload cancelled.", 0));
+    xhr.onload = () => {
+      let body = null as { ok?: boolean; data?: AttachmentRow[]; error?: string } | null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // Proxies answer 413/502 with HTML; fall through to a status-based message.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body?.ok && body.data?.[0]) {
+        onProgress?.(100);
+        return resolve(body.data[0]);
+      }
+      const fallback =
+        xhr.status === 413 ? "The file is too large to upload."
+        : xhr.status === 429 ? "Too many uploads right now. Wait a moment and retry."
+        : `Upload failed (${xhr.status || "no response"}).`;
+      reject(new ApiError(body?.error ?? fallback, xhr.status));
+    };
+    if (signal) {
+      if (signal.aborted) return reject(new ApiError("Upload cancelled.", 0));
+      signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    }
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
 }
 
 export async function apiSend<T>(
