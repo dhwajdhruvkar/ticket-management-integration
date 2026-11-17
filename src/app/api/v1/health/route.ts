@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { config } from "@/server/config";
+import pkg from "../../../../../package.json";
 
 // Health + capability probe for the production API surface (/api/v1).
 // Reports which optional capabilities are active in the current environment.
@@ -11,7 +12,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "netlink-support",
-    version: "2.0.0",
+    version: pkg.version,
     dataDriver: config.dataDriver,
     productionProfile: {
       authentication: config.authMode,

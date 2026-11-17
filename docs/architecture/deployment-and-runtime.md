@@ -81,8 +81,6 @@ Environment variables are read once in `src/server/config.ts` (and a few places 
 | AI | `LLM_PROVIDER`, `AZURE_OPENAI_*` (endpoint, key, chat and embedding deployments, API version), `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_API_KEY`, `GROQ_MODEL`, `RESOLVE_AUTO_THRESHOLD` (0.78), `RESOLVE_SUGGEST_THRESHOLD` (0.55) |
 | Storage | `AZURE_STORAGE_CONNECTION_STRING`, `ATTACHMENTS_CONTAINER`, `ATTACHMENT_STORAGE`, `ATTACHMENT_MAX_BYTES` |
 | Jobs | `CRON_SECRET`, `SCHEDULER_INTERVAL_MS` (default 300000), `APP_BASE_URL` |
-| Observability | `SENTRY_DSN` (inert) |
-| Declared, unused | `REDIS_URL` |
 
 `.env.example` lists only `DATA_DRIVER`, `DATABASE_URL`, `GEMINI_API_KEY`, `AUTH_SECRET`; `.env.production.example` covers the production set. Neither was found to document every variable above (the table is derived from code).
 

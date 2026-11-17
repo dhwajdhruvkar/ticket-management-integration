@@ -24,7 +24,7 @@ const nextConfig = {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
   // Server-only packages must never be bundled into client/edge output.
-  serverExternalPackages: ["@prisma/client", ".prisma/client", "bullmq", "ioredis", "pdfkit"],
+  serverExternalPackages: ["@prisma/client", ".prisma/client", "pdfkit"],
   // pdfkit reads its built-in AFM font metrics from disk at runtime; make sure
   // the standalone build traces those data files for the PDF report endpoint.
   outputFileTracingIncludes: {

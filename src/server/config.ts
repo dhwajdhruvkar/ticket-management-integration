@@ -97,7 +97,6 @@ const auth = {
   entraIssuer: val("AUTH_MICROSOFT_ENTRA_ID_ISSUER"),
 };
 
-const redisUrl = val("REDIS_URL");
 const blobConnString = val("AZURE_STORAGE_CONNECTION_STRING");
 
 const entraConfigured = allSet(
@@ -178,10 +177,8 @@ export const config = {
   graph,
   auth,
   authMode,
-  redisUrl,
   blobConnString,
   llmProvider: val("LLM_PROVIDER"),
-  sentryDsn: val("SENTRY_DSN"),
   demoMode,
   publicDemoAuth,
   localAccountAuth,
@@ -200,7 +197,6 @@ export const config = {
   features: {
     postgres: dataDriver === "prisma",
     azureOpenAI: allSet("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY"),
-    redis: !!redisUrl,
     entraId: entraConfigured,
     publicDemoAuth,
     localAccountAuth,
