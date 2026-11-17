@@ -1,4 +1,5 @@
 import { appendAudit } from "../audit/auditChain";
+import { findUserByEmail } from "./userLookup";
 import {
   hashAccessToken,
   hashPassword,
@@ -369,11 +370,7 @@ export async function authenticateOrganizationUser(
   const email = emailInput.trim().toLowerCase();
   const store = await getStore();
   const tenant = (await store.tenants.list({ slug }))[0];
-  const user = tenant
-    ? (await store.users.list({ tenantId: tenant.id })).find(
-        (candidate) => candidate.email.toLowerCase() === email
-      )
-    : undefined;
+  const user = tenant ? await findUserByEmail(store, tenant.id, email) : undefined;
 
   if (!user?.passwordHash || !user.active) {
     await verifyPassword(password, await dummyHash);

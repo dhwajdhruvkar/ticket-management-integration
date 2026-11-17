@@ -214,7 +214,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             await store.users.create({
               id: newId("user"),
               tenantId,
-              email: user.email,
+              email: user.email.toLowerCase(), // stored lowercase so equality lookups find it
               name: user.name ?? user.email,
               role: "requester",
               title: null,

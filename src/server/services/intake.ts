@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { classifyTicket, suggestTags, type Classification } from "../ai/aiService";
+import { findUserByEmail } from "./userLookup";
 import { resolveTicket } from "../ai/resolver";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
@@ -32,9 +33,7 @@ export async function intakeTicket(
   // Resolve the relation server-side; API callers can choose an email only
   // when their acting role allows it, never an arbitrary user id.
   const store0 = await getStore();
-  const requesterUser = (await store0.users.list({ tenantId })).find(
-    (u) => u.email.toLowerCase() === input.requesterEmail.toLowerCase()
-  );
+  const requesterUser = await findUserByEmail(store0, tenantId, input.requesterEmail);
   input.requesterId = requesterUser?.id;
   // Fall back to the requester's profile location when the form did not send one.
   if (!input.requesterLocation && requesterUser?.location) input.requesterLocation = requesterUser.location;

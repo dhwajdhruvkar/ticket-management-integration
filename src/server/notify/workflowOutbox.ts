@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { findUserByEmail } from "../services/userLookup";
 import type { DataStore } from "../data/store";
 import type { NotificationRow, TicketRow } from "../domain/models";
 import { config } from "../config";
@@ -82,7 +83,7 @@ export async function drainWorkflowOutbox(store: DataStore, deadline = Date.now(
     try {
       const ticket = await store.tickets.get(delivery.ticketId);
       const notification = await store.notifications.get(delivery.notificationId);
-      const recipient = notification ? (await store.users.list({ tenantId: delivery.tenantId })).find((user) => user.email.toLowerCase() === notification.toAddress) : null;
+      const recipient = notification ? await findUserByEmail(store, delivery.tenantId, notification.toAddress) : null;
       if (!notification || !ticket || ticket.tenantId !== delivery.tenantId || ticket.deletedAt || recipient?.preferences?.emailNotifications === false) {
         await store.notificationDeliveries.updateIf(delivery.id, { owner }, { status: "suppressed", owner: null, leaseUntil: null, updatedAt: new Date().toISOString() });
         continue;

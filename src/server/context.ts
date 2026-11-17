@@ -18,6 +18,7 @@ import { auth } from "@/auth";
 import { config } from "./config";
 import { extractApiKey, verifyApiKey } from "./auth/apiKeys";
 import { getStore } from "./data";
+import { findUserByEmail } from "./services/userLookup";
 import { NETLINK_TENANT_ID } from "./data/seed";
 
 async function session() {
@@ -101,9 +102,7 @@ export async function currentActor(req?: Request): Promise<ActingUser> {
     const byId = await store.users.get(impersonate);
     const target =
       (byId?.tenantId === tenantId ? byId : null) ??
-      (await store.users.list({ tenantId })).find(
-        (u) => u.email.toLowerCase() === impersonate.toLowerCase()
-      );
+      (await findUserByEmail(store, tenantId, impersonate));
     if (target?.active && canImpersonateRole(base.role, target.role)) {
       return { id: target.id, name: target.name, role: target.role, email: target.email, impersonating: true };
     }

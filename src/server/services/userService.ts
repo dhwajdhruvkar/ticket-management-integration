@@ -8,6 +8,7 @@
 // =============================================================================
 
 import { appendAudit } from "../audit/auditChain";
+import { findUserByEmail } from "./userLookup";
 import { getStore } from "../data";
 import {
   pageCollection,
@@ -108,9 +109,7 @@ export async function createUser(
   assertCanManageRole(actorRole, input.role);
 
   const store = options.store ?? (await getStore());
-  const existing = (await store.users.list({ tenantId })).find(
-    (u) => u.email.toLowerCase() === email
-  );
+  const existing = await findUserByEmail(store, tenantId, email);
   if (existing) throw new UserServiceError("A user with that email already exists.", 409);
 
   const departmentName = await resolveDepartmentName(store, tenantId, input.departmentId);
