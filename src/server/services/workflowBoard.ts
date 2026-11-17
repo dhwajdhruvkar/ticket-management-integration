@@ -26,11 +26,19 @@ export interface WorkflowBoard {
   queueHealth: Record<string, BucketHealth>;
   monitoring: WorkflowAlerts;
 }
+/** Columns the board, its workload counts and the bucket UI read; free text and integration fields stay in the database. */
+export const BOARD_TICKET_FIELDS: (keyof TicketRow)[] = [
+  "id", "tenantId", "reference", "subject", "body", "status", "priority", "category", "subcategory", "requesterEmail", "assigneeId", "assignmentGroupId",
+  "workflow", "workflowVersion", "slaPausedAt", "slaPausedMins", "dueResponseAt", "dueResolveAt", "firstRespondedAt", "createdAt", "updatedAt", "resolvedAt", "resolvedById", "problemId", "deletedAt",
+];
+/** What rankExperiencedAgents()/scoreGroups() read from past resolutions. */
+export const HISTORY_TICKET_FIELDS: (keyof TicketRow)[] = ["id", "tenantId", "reference", "subject", "body", "status", "category", "assignmentGroupId", "problemId", "createdAt", "resolvedAt", "resolvedById", "deletedAt"];
+
 export async function getWorkflowBoard(tenantId: string, actor: WorkflowActor, lightweight = false): Promise<WorkflowBoard> {
   const store = await getStore();
   const user = actor.id ? await store.users.get(actor.id) : null;
   if (!user?.active || user.tenantId !== tenantId || !["agent", "manager", "tenant_admin", "super_admin"].includes(user.role)) throw new WorkflowError("Staff access required.", 403);
-  const [tenant, groups, allTickets, users] = await Promise.all([store.tenants.get(tenantId), store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }), store.users.list({ tenantId, active: true })]);
+  const [tenant, groups, allTickets, users] = await Promise.all([store.tenants.get(tenantId), store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }, { select: BOARD_TICKET_FIELDS }), store.users.list({ tenantId, active: true })]);
   const canDispatch = user.role !== "agent";
   const settings = tenant?.workflowSettings ?? defaultWorkflowSettings();
   const work = allTickets.filter((ticket) => ticket.workflow && !["closed", "cancelled"].includes(ticket.status));
@@ -40,8 +48,8 @@ export async function getWorkflowBoard(tenantId: string, actor: WorkflowActor, l
   const calendars = await store.calendars.list({ tenantId });
   const availability = Object.fromEntries(presenceUsers.map((row) => [row.id, calculateAvailability(row, activeWorkload(allTickets, row.id), calendars.find((calendar) => calendar.id === row.availabilitySettings?.calendarId), settings.availabilityMode)]));
   const tickets = work.filter((ticket) => canDispatch || (ticket.assignmentGroupId && allowed.has(ticket.assignmentGroupId)) || ticket.assigneeId === user.id);
-  // ponytail: local matching against the 500 most recent resolutions; add a tenant-scoped index when volumes warrant it.
-  const history = allTickets.filter((row) => row.resolvedAt).sort((a, b) => b.resolvedAt!.localeCompare(a.resolvedAt!)).slice(0, 500);
+  // The 500 most recent resolutions, fetched by the database; local matching, so add a tenant-scoped index when volumes warrant it.
+  const history = lightweight ? [] : await store.recentResolvedTickets(tenantId, 500, HISTORY_TICKET_FIELDS);
   const suggestions = Object.fromEntries((lightweight ? [] : tickets).filter((ticket) => ["department", "awaiting_acceptance"].includes(ticket.workflow!.phase)).map((ticket) => {
     const group = groups.find((row) => row.id === ticket.assignmentGroupId);
     return [ticket.id, rankExperiencedAgents(ticket, presenceUsers.filter((row) => group?.memberIds.includes(row.id)), history, availability)];

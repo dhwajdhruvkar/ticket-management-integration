@@ -124,6 +124,8 @@ export interface DataStore {
   resolutionsForTenant(tenantId: string): Promise<Pick<ResolutionRow, "ticketId" | "decision" | "confidence">[]>;
   /** Events of one type on this tenant's non-deleted tickets, filtered inside the query. */
   eventsForTenant(tenantId: string, type: TicketEventRow["type"]): Promise<Pick<TicketEventRow, "ticketId" | "type" | "createdAt">[]>;
+  /** The `take` most recently resolved non-deleted tickets of a tenant (resolvedAt desc, then id), optionally projected to `select`. */
+  recentResolvedTickets(tenantId: string, take: number, select?: (keyof TicketRow)[]): Promise<TicketRow[]>;
   /** One recipient's in-app feed page (email compared case-insensitively) with its total and unread counts. */
   notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }): Promise<{ items: NotificationRow[]; total: number; unread: number }>;
   /** Mark one recipient's unread notifications read (optionally just `id`); returns how many changed. */

@@ -180,6 +180,15 @@ describe.skipIf(!DIR)("PrismaStore on real PostgreSQL vs MemoryStore", () => {
     }
   });
 
+  it("recentResolvedTickets returns the same newest-first, limited rows as the MemoryStore (projection honoured)", async () => {
+    for (const take of [3, 10, 1000]) {
+      const [a, b] = [await pg.recentResolvedTickets("org", take, ["id", "tenantId", "resolvedAt", "deletedAt"]), await mem.recentResolvedTickets("org", take)];
+      expect(a.map((t) => t.id), String(take)).toEqual(b.map((t) => t.id));
+      expect(a.every((t) => t.tenantId === "org" && !t.deletedAt && !!t.resolvedAt)).toBe(true);
+    }
+    expect(Object.keys((await pg.recentResolvedTickets("org", 1, ["id", "resolvedAt"]))[0]).sort()).toEqual(["id", "resolvedAt"]);
+  });
+
   it("workflowAlertTickets matches the MemoryStore, incl. SQL NULL vs JSON null workflow", async () => {
     for (const visibleTo of [null, { userId: "u1", groupIds: ["g1"] }, { userId: "u2", groupIds: [] }, { userId: "nobody", groupIds: ["g2", "g1"] }]) {
       const [a, b] = [await pg.workflowAlertTickets("org", visibleTo), await mem.workflowAlertTickets("org", visibleTo)];

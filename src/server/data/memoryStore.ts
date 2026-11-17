@@ -330,6 +330,15 @@ export class MemoryStore implements DataStore {
     return { tickets: byId.map(clone), workflowCount: work.length };
   }
 
+  async recentResolvedTickets(tenantId: string, take: number, select?: (keyof TicketRow)[]) {
+    void select; // full rows are a superset of any projection
+    return this.db.tickets
+      .filter((t) => t.tenantId === tenantId && !t.deletedAt && !!t.resolvedAt)
+      .sort((a, b) => b.resolvedAt!.localeCompare(a.resolvedAt!) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .slice(0, take)
+      .map(clone);
+  }
+
   private mineNotifications(tenantId: string, email: string) {
     const needle = email.toLowerCase();
     return this.db.notifications.filter((n) => n.tenantId === tenantId && n.toAddress.toLowerCase() === needle);

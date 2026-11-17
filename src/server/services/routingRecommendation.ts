@@ -5,6 +5,7 @@ import { bowEmbed, cosineSimilarity } from "../ai/embeddings";
 import { search, type SearchHit } from "../ai/vectorSearch";
 import { activeWorkload, calculateAvailability, rankExperiencedAgents, type AgentAvailability, type AgentSuggestion } from "./availabilityService";
 import { WorkflowError } from "./workflowService";
+import { BOARD_TICKET_FIELDS, HISTORY_TICKET_FIELDS } from "./workflowBoard";
 
 export interface GroupRecommendation {
   groupId: string; name: string; score: number; confidence: "high" | "medium" | "low"; reasons: string[];
@@ -105,11 +106,11 @@ export async function recommendRouting(tenantId: string, ticketId: string, actor
 
   const departmentIds = new Set(settings.buckets.filter((bucket) => bucket.kind === "department").map((bucket) => bucket.groupId));
   const [groups, allTickets, users, calendars] = await Promise.all([
-    store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }), store.users.list({ tenantId, active: true }), store.calendars.list({ tenantId }),
+    store.groups.list({ tenantId }), store.tickets.list({ tenantId, deletedAt: null }, { select: BOARD_TICKET_FIELDS }), store.users.list({ tenantId, active: true }), store.calendars.list({ tenantId }),
   ]);
   const departmentGroups = groups.filter((group) => departmentIds.has(group.id));
-  // ponytail: same bounded history window as workflowBoard.ts.
-  const history = allTickets.filter((row) => row.resolvedAt).sort((a, b) => b.resolvedAt!.localeCompare(a.resolvedAt!)).slice(0, 500);
+  // Same bounded history window as workflowBoard.ts, fetched by the database.
+  const history = await store.recentResolvedTickets(tenantId, 500, HISTORY_TICKET_FIELDS);
   const staff: UserRow[] = users.filter((row) => staffRoles.includes(row.role));
   const availability: Record<string, AgentAvailability> = Object.fromEntries(staff.map((row) => [row.id, calculateAvailability(row, activeWorkload(allTickets, row.id), calendars.find((calendar) => calendar.id === row.availabilitySettings?.calendarId), settings.availabilityMode)]));
   const availableCount = Object.fromEntries(departmentGroups.map((group) => [group.id, group.memberIds.filter((id) => availability[id]?.status === "available").length]));

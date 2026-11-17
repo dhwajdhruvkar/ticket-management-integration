@@ -10,6 +10,7 @@
 import { PrismaClient } from "@prisma/client";
 import { config } from "../config";
 import type { Collection, DataStore, ListOptions, TicketSearchSpec } from "./store";
+import type { TicketRow } from "../domain/models";
 import { ticketSearchQueries, workflowAlertQueries } from "./ticketSql";
 import type { Entity } from "../domain/models";
 
@@ -205,6 +206,16 @@ export class PrismaStore implements DataStore {
     const q = workflowAlertQueries(tenantId, visibleTo);
     const [rows, count] = await Promise.all([this.p.$queryRaw(q.rows), this.p.$queryRaw(q.count)]);
     return { tickets: (rows as unknown[]).map((r) => serialize<any>(r)), workflowCount: (count as any[])[0].total as number };
+  }
+
+  async recentResolvedTickets(tenantId: string, take: number, select?: (keyof TicketRow)[]): Promise<TicketRow[]> {
+    const rows = await this.p.ticket.findMany({
+      where: { tenantId, deletedAt: null, resolvedAt: { not: null } },
+      orderBy: [{ resolvedAt: "desc" }, { id: "asc" }],
+      take,
+      ...(select ? { select: Object.fromEntries(select.map((field) => [field, true])) } : {}),
+    });
+    return rows.map((r: unknown) => serialize<any>(r));
   }
 
   async notificationsFor(tenantId: string, email: string, page: { skip: number; take: number; dir: "asc" | "desc" }) {

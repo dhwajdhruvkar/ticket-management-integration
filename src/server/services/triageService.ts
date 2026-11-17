@@ -42,10 +42,16 @@ export interface TriageBoard {
   groups: AssignmentGroupRow[];
 }
 
+/** Everything the triage lanes sort, count and display; other columns stay in the database. */
+const TRIAGE_TICKET_FIELDS: (keyof TicketRow)[] = [
+  "id", "tenantId", "reference", "subject", "status", "priority", "category", "requesterEmail", "assigneeId", "assignmentGroupId", "workflow",
+  "createdAt", "updatedAt", "escalationReason", "escalatedById", "escalatedAt", "deletedAt",
+];
+
 export async function getTriageBoard(tenantId: string): Promise<TriageBoard> {
   const store = await getStore();
   const [tickets, users, groups] = await Promise.all([
-    listActiveTickets(tenantId),
+    listActiveTickets(tenantId, {}, { select: TRIAGE_TICKET_FIELDS }),
     store.users.list({ tenantId }),
     store.groups.list({ tenantId }),
   ]);
