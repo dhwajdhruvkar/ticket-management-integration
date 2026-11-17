@@ -8,6 +8,7 @@
 // No-op (returns 0) when Graph isn't configured.
 // =============================================================================
 
+import { getGraphToken } from "../integrations/graphToken";
 import { config } from "../config";
 import { defaultTenantId } from "../data";
 import { logger } from "../observability/logger";
@@ -37,19 +38,7 @@ interface GraphAttachment {
 }
 
 async function token(): Promise<string> {
-  const { tenantId, clientId, clientSecret } = config.graph;
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId ?? "",
-      client_secret: clientSecret ?? "",
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
-  });
-  if (!res.ok) throw new Error(`Graph token ${res.status}`);
-  return ((await res.json()) as { access_token: string }).access_token;
+  return getGraphToken(config.graph);
 }
 
 function header(m: GraphMessage, name: string): string | null {

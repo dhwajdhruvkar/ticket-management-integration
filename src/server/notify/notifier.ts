@@ -12,8 +12,10 @@
 // event bus so open SSE connections update live.
 // =============================================================================
 
+import { getGraphToken } from "../integrations/graphToken";
 import { config } from "../config";
 import { getStore } from "../data";
+import { findUserByEmail } from "../services/userLookup";
 import { newId, now } from "../domain/ids";
 import { publishEvent } from "../events/bus";
 import { logger } from "../observability/logger";
@@ -43,9 +45,7 @@ async function recipientPreferences(
   email: string
 ): Promise<UserPreferences | null> {
   const store = await getStore();
-  const user = (await store.users.list({ tenantId })).find(
-    (u) => u.email.toLowerCase() === email.toLowerCase()
-  );
+  const user = await findUserByEmail(store, tenantId, email);
   return user?.preferences ?? null;
 }
 
@@ -133,21 +133,7 @@ export async function sendSensitiveEmail(
 }
 
 async function graphToken(): Promise<string> {
-  const { tenantId, clientId, clientSecret } = config.graph;
-  const res = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-    signal: AbortSignal.timeout(5_000), redirect: "error",
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId ?? "",
-      client_secret: clientSecret ?? "",
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
-  });
-  if (!res.ok) throw new Error(`Graph token ${res.status}`);
-  const json = (await res.json()) as { access_token: string };
-  return json.access_token;
+  return getGraphToken(config.graph);
 }
 
 export async function sendGraphMail(

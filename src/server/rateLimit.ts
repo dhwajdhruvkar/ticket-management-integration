@@ -1,3 +1,4 @@
+import { clientIp } from "./clientIp";
 // =============================================================================
 // Rate limiting.
 //
@@ -27,7 +28,5 @@ export function rateLimit(key: string, limit = 60, windowMs = 60_000): boolean {
 }
 
 export function clientKey(req: Request, scope: string): string {
-  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = fwd || req.headers.get("x-real-ip") || "local";
-  return `${scope}:${ip}`;
+  return `${scope}:${clientIp(req)}`;
 }

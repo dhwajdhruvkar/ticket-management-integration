@@ -1,3 +1,4 @@
+import { getGraphToken } from "./graphToken";
 import { z } from "zod";
 import type { DataStore } from "../data/store";
 import type { UserRow } from "../domain/models";
@@ -25,12 +26,12 @@ export async function refreshTeamsPresence(store: DataStore, organizationId: str
   const snapshots = new Map<string, PresenceSnapshot>();
   const checkedAt = new Date().toISOString();
   try {
-    const tokenResponse = await fetch(`https://login.microsoftonline.com/${connection.tenantId}/oauth2/v2.0/token`, {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, redirect: "error", signal: AbortSignal.timeout(5000),
-      body: new URLSearchParams({ grant_type: "client_credentials", client_id: connection.clientId, client_secret: connection.clientSecret, scope: "https://graph.microsoft.com/.default" }),
-    });
-    if (!tokenResponse.ok) throw new Error("Presence authorization unavailable");
-    const token = Token.parse(await tokenResponse.json()).access_token;
+    let token: string;
+    try {
+      token = Token.parse({ access_token: await getGraphToken({ tenantId: connection.tenantId, clientId: connection.clientId, clientSecret: connection.clientSecret }) }).access_token;
+    } catch {
+      throw new Error("Presence authorization unavailable");
+    }
     for (let start = 0; start < stale.length; start += 650) {
       const batch = stale.slice(start, start + 650);
       const response = await fetch("https://graph.microsoft.com/v1.0/communications/getPresencesByUserId", {

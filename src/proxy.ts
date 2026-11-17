@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "@/auth.config";
 import { decideApiV1Access } from "@/server/auth/apiGateway";
+import { clientIp } from "@/server/clientIp";
 
 // =============================================================================
 // Next.js network proxy.
@@ -69,9 +70,8 @@ function handleApiV1Request(
   req: ApiGatewayRequest,
   demoMode = DEMO_MODE
 ): NextResponse {
-  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const clientIp = fwd || req.headers.get("x-real-ip") || "local";
-  if (!edgeRateLimit(clientIp, 200, 60_000)) {
+  const ip = clientIp(req);
+  if (!edgeRateLimit(ip, 200, 60_000)) {
     return NextResponse.json(
       { ok: false, error: "Too many requests. Please slow down." },
       { status: 429 }
@@ -94,9 +94,8 @@ export default auth((req) => {
   const { pathname } = req.nextUrl;
 
   if (pathname === "/api/auth/callback/demo" && (DEMO_MODE || PUBLIC_DEMO_AUTH)) {
-    const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-    const clientIp = fwd || req.headers.get("x-real-ip") || "local";
-    if (!edgeRateLimit(`public-demo-auth:${clientIp}`, 30, 60_000)) {
+    const ip = clientIp(req);
+    if (!edgeRateLimit(`public-demo-auth:${ip}`, 30, 60_000)) {
       return NextResponse.json(
         { ok: false, error: "Too many sign-in attempts. Please try again shortly." },
         { status: 429 }
