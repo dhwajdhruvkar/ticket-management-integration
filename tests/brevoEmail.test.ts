@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { POST as brevoWebhook } from "@/app/api/webhooks/brevo/route";
+import { config } from "@/server/config";
 import { parseBrevoItems } from "@/server/channels/brevoEmail";
 
 // Representative Brevo Inbound Parsing payload (subset of real fields).
@@ -85,5 +87,37 @@ describe("parseBrevoItems", () => {
     expect(email.subject).toBe("(no subject)");
     expect(email.from).toBe("unknown@external");
     expect(email.receivedAt).toBeNull();
+  });
+});
+
+
+describe("Brevo inbound webhook secret check", () => {
+  const mutable = config as unknown as { emailProvider: string; brevo: { inboundSecret?: string } };
+  const saved = { provider: mutable.emailProvider, secret: mutable.brevo.inboundSecret };
+  afterEach(() => { mutable.emailProvider = saved.provider; mutable.brevo.inboundSecret = saved.secret; });
+
+  // A body that is not JSON: an authorized request reaches the parser (400), an unauthorized one stops at 401.
+  const post = (path: string, headers: Record<string, string> = {}) => {
+    mutable.emailProvider = "brevo";
+    mutable.brevo.inboundSecret = "correct-horse-battery";
+    return brevoWebhook(new Request(`http://brevo.test/api/webhooks/brevo${path}`, { method: "POST", headers, body: "not json" })).then((r) => r.status);
+  };
+
+  it("accepts the right secret in the header or the query fallback", async () => {
+    expect(await post("", { "x-brevo-secret": "correct-horse-battery" })).toBe(400);
+    expect(await post("?token=correct-horse-battery")).toBe(400);
+  });
+  it("rejects a wrong secret of the same length", async () => {
+    expect(await post("", { "x-brevo-secret": "correct-horse-batterz" })).toBe(401);
+    expect(await post("?token=correct-horse-batterz")).toBe(401);
+  });
+  it("rejects different-length, empty and missing secrets without throwing", async () => {
+    expect(await post("", { "x-brevo-secret": "short" })).toBe(401);
+    expect(await post("", { "x-brevo-secret": "correct-horse-battery-and-more" })).toBe(401);
+    expect(await post("?token=")).toBe(401);
+    expect(await post("")).toBe(401);
+  });
+  it("prefers the header over the query token", async () => {
+    expect(await post("?token=correct-horse-battery", { "x-brevo-secret": "wrong-header-value!!" })).toBe(401);
   });
 });

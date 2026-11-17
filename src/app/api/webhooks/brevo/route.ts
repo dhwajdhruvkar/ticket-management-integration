@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { config } from "@/server/config";
 import { ingestBrevoPayload } from "@/server/channels/brevoEmail";
@@ -21,8 +22,11 @@ export const dynamic = "force-dynamic";
 function authorized(req: Request, url: URL): boolean {
   const secret = config.brevo.inboundSecret;
   if (!secret) return config.demoMode; // open in demo, rejected in production
-  const presented = url.searchParams.get("token") ?? req.headers.get("x-brevo-secret") ?? "";
-  return presented === secret;
+  // Header preferred (query strings end up in logs); ?token= stays as a fallback for existing Brevo setups.
+  const presented = Buffer.from(req.headers.get("x-brevo-secret") ?? url.searchParams.get("token") ?? "");
+  const expected = Buffer.from(secret);
+  // timingSafeEqual needs equal lengths; a length mismatch is rejected without comparing.
+  return presented.length === expected.length && timingSafeEqual(presented, expected);
 }
 
 export async function POST(req: Request) {
