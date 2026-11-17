@@ -1,5 +1,6 @@
 "use client";
 
+import { initialsOf } from "@/shared/initials";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
@@ -38,13 +39,6 @@ const TINT_CLASSES: Record<PublicDemoUser["tint"], { bg: string; fg: string; bor
   success: { bg: "var(--success-bg)", fg: "var(--success-fg)", border: "var(--success-border)" },
 };
 
-function initialsOf(name: string): string {
-  return name
-    .split(/\s+/)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("")
-    .slice(0, 2);
-}
 
 function subheading(
   ssoEnabled: boolean,
