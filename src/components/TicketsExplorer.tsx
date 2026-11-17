@@ -18,6 +18,7 @@ import { PRIORITY_ORDER } from "@/shared/priority";
 import { WORKFLOW_LABELS } from "@/shared/workflow";
 import { filtersFromParams, SLA_STATE_LABELS, TICKET_CATEGORIES, type SlaState, type TicketFilters } from "@/lib/ticketFilters";
 import { useLiveRefresh } from "@/lib/useLiveRefresh";
+import { useReferenceData } from "@/lib/useReferenceData";
 import { ExplorerController, type ExplorerState } from "@/lib/explorerPaging";
 import {
   Avatar,
@@ -237,8 +238,8 @@ function AgentExplorer({
 }) {
   const router = useRouter();
   const { persona, ready } = usePersona();
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [groups, setGroups] = useState<AssignmentGroupRow[]>([]);
+  // Cached per tab so returning to the list does not re-download users and groups.
+  const { users, groups } = useReferenceData(persona.id, ready);
   const startView = VIEWS.some((v) => v.id === initialView) ? (initialView as string) : "your_unsolved";
   const [activeView, setActiveView] = useState(startView);
   const [filters, setFilters] = useState<TicketFilters>(initialFilters);
@@ -323,12 +324,6 @@ function AgentExplorer({
   const total = committed?.total ?? 0;
   const counts = committed?.counts ?? {};
   const hasMore = !!committed && committed.loadedPages < committed.totalPages;
-
-  useEffect(() => {
-    if (!ready) return;
-    apiGetAll<UserRow>("/users").then(setUsers).catch(() => {});
-    apiGetAll<AssignmentGroupRow>("/groups").then(setGroups).catch(() => {});
-  }, [ready, persona.id]);
 
   useEffect(() => {
     if (openFormOnMount) setShowForm(true);

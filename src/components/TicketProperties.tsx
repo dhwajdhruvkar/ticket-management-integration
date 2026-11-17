@@ -2,11 +2,12 @@
 
 import { readIssueContext } from "@/shared/issueContext";
 import { useState } from "react";
+import { usePersona } from "@/components/Persona";
+import { useConfigurationItems } from "@/lib/useReferenceData";
 import { apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
 import type {
   AssignmentGroupRow,
-  CIRow,
   CustomFieldDefRow,
   ImpactLevel,
   TicketCategory,
@@ -51,17 +52,18 @@ export default function TicketProperties({
   ticket,
   users,
   groups,
-  cis,
   customFieldDefs = [],
   onChanged,
 }: {
   ticket: TicketView;
   users: UserRow[];
   groups: AssignmentGroupRow[];
-  cis: CIRow[];
   customFieldDefs?: CustomFieldDefRow[];
   onChanged: () => void;
 }) {
+  // The CI list is only needed here (the Details tab), so it is fetched (and cached per tab) on demand.
+  const { persona } = usePersona();
+  const cis = useConfigurationItems(persona.id);
   const [tags, setTags] = useState(ticket.tags.join(", "));
   const [subcategory, setSubcategory] = useState(ticket.subcategory ?? "");
   const [busy, setBusy] = useState(false);

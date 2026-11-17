@@ -10,13 +10,14 @@
 // /api/v1/tickets/[id]; all actions go through the ticket action/message APIs.
 // =============================================================================
 
+import { useReferenceData } from "@/lib/useReferenceData";
 import { readIssueContext } from "@/shared/issueContext";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { apiGet, apiGetAll, ApiError, apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
-import type { AssignmentGroupRow, CIRow, CustomFieldDefRow, UserRow } from "@/server/domain/models";
+import type { AssignmentGroupRow, CustomFieldDefRow, UserRow } from "@/server/domain/models";
 import {
   AIPanel,
   DecisionBadge,
@@ -47,9 +48,8 @@ export default function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { persona, ready } = usePersona();
   const [ticket, setTicket] = useState<TicketView | null | undefined>(undefined);
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [groups, setGroups] = useState<AssignmentGroupRow[]>([]);
-  const [cis, setCis] = useState<CIRow[]>([]);
+  // Cached per tab: moving between tickets reuses the lists instead of re-downloading them.
+  const { users, groups } = useReferenceData(persona.id, ready && persona.role === "agent");
   const [customFieldDefs, setCustomFieldDefs] = useState<CustomFieldDefRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -83,9 +83,6 @@ export default function TicketDetailPage() {
     if (!ready) return;
     refresh();
     if (persona.role === "agent") {
-      apiGetAll<UserRow>("/users").then(setUsers).catch(() => {});
-      apiGetAll<AssignmentGroupRow>("/groups").then(setGroups).catch(() => {});
-      apiGetAll<CIRow>("/cis").then(setCis).catch(() => {});
       apiGetAll<CustomFieldDefRow>("/custom-fields").then(setCustomFieldDefs).catch(() => {});
     }
   }, [ready, persona.role, persona.id, refresh]);
@@ -134,7 +131,6 @@ export default function TicketDetailPage() {
       ticket={ticket}
       users={users}
       groups={groups}
-      cis={cis}
       customFieldDefs={customFieldDefs}
       typing={typing}
       onChanged={refresh}
@@ -152,7 +148,6 @@ function AgentView({
   ticket,
   users,
   groups,
-  cis,
   customFieldDefs,
   typing,
   onChanged,
@@ -160,7 +155,6 @@ function AgentView({
   ticket: TicketView;
   users: UserRow[];
   groups: AssignmentGroupRow[];
-  cis: CIRow[];
   customFieldDefs: CustomFieldDefRow[];
   typing: TypingUser[];
   onChanged: () => void;
@@ -185,7 +179,6 @@ function AgentView({
         ticket={ticket}
         users={users}
         groups={groups}
-        cis={cis}
         customFieldDefs={customFieldDefs}
         onChanged={onChanged}
       />
