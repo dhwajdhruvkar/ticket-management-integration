@@ -8,7 +8,7 @@
 // scroll lock. EmptyState is a consistent, elegant placeholder. All presentational.
 // =============================================================================
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { X, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion, EASE_OUT } from "@/components/motion";
 
@@ -310,4 +310,71 @@ export function EmptyState({
       {action ? <div style={{ marginTop: 4 }}>{action}</div> : null}
     </div>
   );
+}
+
+
+// -----------------------------------------------------------------------------
+// ConfirmDialog + useConfirm: an accessible replacement for window.confirm().
+// Escape or the scrim cancels; focus starts on Cancel so Enter never confirms
+// a destructive action by accident.
+// -----------------------------------------------------------------------------
+
+export interface ConfirmOptions {
+  title?: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  /** Styles the confirm button as destructive. */
+  danger?: boolean;
+}
+
+export function ConfirmDialog({
+  open,
+  title = "Are you sure?",
+  message,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  danger = false,
+  onConfirm,
+  onCancel,
+}: ConfirmOptions & { open: boolean; onConfirm: () => void; onCancel: () => void }) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (open) cancelRef.current?.focus();
+  }, [open]);
+  return (
+    <Modal open={open} onClose={onCancel} ariaLabel={title} maxWidth={440}>
+      <div style={{ padding: "1.15rem 1.25rem", display: "grid", gap: 12 }}>
+        <h2 style={{ margin: 0, fontSize: "1rem" }}>{title}</h2>
+        <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--muted)", overflowWrap: "anywhere" }}>{message}</p>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
+          <button ref={cancelRef} type="button" className="btn btn-ghost" onClick={onCancel}>{cancelLabel}</button>
+          <button type="button" className={danger ? "btn btn-danger" : "btn btn-primary"} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * `const { confirm, confirmDialog } = useConfirm();` then render `{confirmDialog}` once in the component and
+ * `if (!(await confirm({ message, danger: true }))) return;` where window.confirm() used to be.
+ */
+export function useConfirm() {
+  const [pending, setPending] = useState<{ options: ConfirmOptions; resolve: (ok: boolean) => void } | null>(null);
+  const last = useRef<ConfirmOptions>({ message: "" });
+  const confirm = useCallback(
+    (options: ConfirmOptions) =>
+      new Promise<boolean>((resolve) => {
+        last.current = options;
+        setPending({ options, resolve });
+      }),
+    []
+  );
+  const settle = (ok: boolean) => {
+    pending?.resolve(ok);
+    setPending(null);
+  };
+  const confirmDialog = <ConfirmDialog open={!!pending} {...(pending?.options ?? last.current)} onConfirm={() => settle(true)} onCancel={() => settle(false)} />;
+  return { confirm, confirmDialog };
 }

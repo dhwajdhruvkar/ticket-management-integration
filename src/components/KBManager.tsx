@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/components/primitives";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiGetAll, apiSend } from "@/lib/api";
@@ -36,6 +37,7 @@ export default function KBManager() {
   const [drawer, setDrawer] = useState<DrawerState>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const toast = useToast();
+  const { confirm, confirmDialog } = useConfirm();
 
   const refresh = useCallback(() => {
     apiGetAll<ArticleRow>("/kb").then(setArticles).catch(() => setArticles([]));
@@ -75,7 +77,7 @@ export default function KBManager() {
 
   async function remove(id: string) {
     if (deleting) return;
-    if (!confirm("Delete this article? It will be removed from the vector index.")) return;
+    if (!(await confirm({ title: "Delete article", message: "Delete this article? It will be removed from the vector index.", confirmLabel: "Delete", danger: true }))) return;
     setDeleting(id);
     try {
       await apiSend(`/kb/${id}`, "DELETE");
@@ -101,6 +103,7 @@ export default function KBManager() {
 
   return (
     <div className="page-pad anim-fade-up">
+      {confirmDialog}
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
         {/* Hero ---------------------------------------------------------- */}
         <section

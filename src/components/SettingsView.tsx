@@ -23,7 +23,7 @@ import { useTheme } from "@/components/Theme";
 import { PRIORITY_ORDER, priorityCode } from "@/shared/priority";
 import type { TicketPriority } from "@/server/domain/models";
 import { InfoHint, LabelWithHint, timeAgo } from "@/components/ui";
-import { CloseButton, Modal, PromptDialog } from "@/components/primitives";
+import { CloseButton, Modal, PromptDialog, useConfirm } from "@/components/primitives";
 import { customFieldHint, HINTS } from "@/lib/hints";
 import { WorkflowSettings } from "./WorkflowSettings";
 import { AvailabilityPreferences } from "./AvailabilityPreferences";
@@ -698,6 +698,7 @@ function RuleBuilder({ onCreated }: { onCreated: () => void }) {
 }
 
 function CalendarsSection({ onChanged }: { onChanged: () => void }) {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [calendars, setCalendars] = useState<BusinessCalendarRow[] | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -740,7 +741,7 @@ function CalendarsSection({ onChanged }: { onChanged: () => void }) {
   }
 
   async function remove(cal: BusinessCalendarRow) {
-    if (!confirm(`Delete calendar "${cal.name}"? Policies fall back to their default window.`)) return;
+    if (!(await confirm({ title: "Delete calendar", message: `Delete calendar "${cal.name}"? Policies fall back to their default window.`, confirmLabel: "Delete", danger: true }))) return;
     try {
       await apiSend(`/calendars/${cal.id}`, "DELETE");
       load();
@@ -754,6 +755,7 @@ function CalendarsSection({ onChanged }: { onChanged: () => void }) {
 
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
+      {confirmDialog}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <SectionHead
           icon={<CalendarIcon />}
@@ -828,6 +830,7 @@ function CalendarIcon() {
 }
 
 function MacrosSection({ isAdmin }: { isAdmin: boolean }) {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [macros, setMacros] = useState<MacroRow[] | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -863,7 +866,7 @@ function MacrosSection({ isAdmin }: { isAdmin: boolean }) {
   }
 
   async function remove(macro: MacroRow) {
-    if (!confirm(`Delete macro "${macro.name}"?`)) return;
+    if (!(await confirm({ title: "Delete macro", message: `Delete macro "${macro.name}"?`, confirmLabel: "Delete", danger: true }))) return;
     try {
       await apiSend(`/macros/${macro.id}`, "DELETE");
       load();
@@ -875,6 +878,7 @@ function MacrosSection({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
+      {confirmDialog}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <SectionHead
           icon={<MacroIcon />}
@@ -946,6 +950,7 @@ function MacrosSection({ isAdmin }: { isAdmin: boolean }) {
 }
 
 function CustomFieldsSection() {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [fields, setFields] = useState<CustomFieldDefRow[] | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -991,7 +996,7 @@ function CustomFieldsSection() {
   }
 
   async function remove(field: CustomFieldDefRow) {
-    if (!confirm(`Delete custom field "${field.label}"? Existing ticket values are kept but no longer shown.`)) return;
+    if (!(await confirm({ title: "Delete custom field", message: `Delete custom field "${field.label}"? Existing ticket values are kept but no longer shown.`, confirmLabel: "Delete", danger: true }))) return;
     try {
       await apiSend(`/custom-fields/${field.id}`, "DELETE");
       load();
@@ -1013,6 +1018,7 @@ function CustomFieldsSection() {
 
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
+      {confirmDialog}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <SectionHead
           icon={<FieldIcon />}
@@ -1136,6 +1142,7 @@ function FieldIcon() {
 }
 
 function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: () => void }) {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const activeKeys = keys.filter((key) => key.active);
   const [open, setOpen] = useState(false);
@@ -1221,7 +1228,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
   }
 
   async function rotate(k: ApiKeyView) {
-    if (!confirm(`Replace the bearer token for "${k.name}"? The current token will stop working immediately.`)) return;
+    if (!(await confirm({ title: "Replace bearer token", message: `Replace the bearer token for "${k.name}"? The current token will stop working immediately.`, confirmLabel: "Replace token", danger: true }))) return;
     setRotatingId(k.id);
     try {
       const rotated = await apiSend<ApiKeyView & { key: string }>(`/api-keys/${k.id}/rotate`, "POST");
@@ -1254,7 +1261,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
   }
 
   async function remove(k: ApiKeyView) {
-    if (!confirm(`Delete "${k.name}" permanently? Integrations using it will stop working immediately. The audit history will be retained.`)) return;
+    if (!(await confirm({ title: "Delete API key", message: `Delete "${k.name}" permanently? Integrations using it will stop working immediately. The audit history will be retained.`, confirmLabel: "Delete", danger: true }))) return;
     try {
       await apiSend(`/api-keys/${k.id}`, "DELETE");
       onChanged();
@@ -1276,6 +1283,7 @@ function ApiKeysSection({ keys, onChanged }: { keys: ApiKeyView[]; onChanged: ()
 
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
+      {confirmDialog}
       <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
         <SectionHead
           icon={<KeyIcon />}
@@ -1866,6 +1874,7 @@ function UsersSection({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 }
 
 function DepartmentsSection() {
+  const { confirm, confirmDialog } = useConfirm();
   const toast = useToast();
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
   const [open, setOpen] = useState(false);
@@ -1913,7 +1922,7 @@ function DepartmentsSection() {
   }
 
   async function remove(d: DepartmentRow) {
-    if (!confirm(`Delete "${d.name}"? Members will be unassigned.`)) return;
+    if (!(await confirm({ title: "Delete team", message: `Delete "${d.name}"? Members will be unassigned.`, confirmLabel: "Delete", danger: true }))) return;
     try {
       await apiSend(`/departments/${d.id}`, "DELETE");
       toast.info({ title: "Department deleted", description: d.name });
@@ -1925,6 +1934,7 @@ function DepartmentsSection() {
 
   return (
     <section className="panel" style={{ padding: "1.15rem 1.25rem" }}>
+      {confirmDialog}
       <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 10 }}>
         <SectionHead
           icon={<DeptIcon />}

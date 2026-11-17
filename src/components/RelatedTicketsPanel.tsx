@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useConfirm } from "@/components/primitives";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiGetAll, apiSend } from "@/lib/api";
+import { apiGet, apiGetPage, apiSend } from "@/lib/api";
 import type { TicketView } from "@/server/services/ticketService";
 import type { TicketRow } from "@/server/domain/models";
 import { useToast } from "./Toast";
@@ -23,32 +24,50 @@ export default function RelatedTicketsPanel({
   onChanged: () => void;
 }) {
   const toast = useToast();
+  const { confirm, confirmDialog } = useConfirm();
   const router = useRouter();
-  const [all, setAll] = useState<TicketRow[]>([]);
+  // Titles of the tickets already linked/merged (a few GETs, only when there are any).
+  const [known, setKnown] = useState<Record<string, Pick<TicketRow, "id" | "reference" | "subject">>>({});
+  // Candidates come from a server-side search, and only once the picker is used.
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<TicketRow[]>([]);
   const [pick, setPick] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() => {
-    apiGetAll<TicketRow>("/tickets").then(setAll).catch(() => setAll([]));
-  }, []);
-
+  const wantedIds = [...ticket.linkedTicketIds, ...(ticket.mergedIntoId ? [ticket.mergedIntoId] : [])];
+  const wantedKey = wantedIds.join(",");
   useEffect(() => {
-    load();
-  }, [load, ticket.id, ticket.linkedTicketIds.length]);
+    let live = true;
+    for (const id of wantedKey ? wantedKey.split(",") : []) {
+      apiGet<TicketView>(`/tickets/${id}`)
+        .then((row) => { if (live) setKnown((prev) => ({ ...prev, [id]: { id: row.id, reference: row.reference, subject: row.subject } })); })
+        .catch(() => {});
+    }
+    return () => { live = false; };
+  }, [wantedKey]);
 
-  const byId = new Map(all.map((t) => [t.id, t]));
-  const linked = ticket.linkedTicketIds.map((id) => byId.get(id)).filter((t): t is TicketRow => !!t);
-  const candidates = all.filter(
-    (t) => t.id !== ticket.id && !ticket.linkedTicketIds.includes(t.id) && !t.mergedIntoId
-  );
-  const mergedTarget = ticket.mergedIntoId ? byId.get(ticket.mergedIntoId) : null;
+  // Debounced search (~250 ms) through the existing list endpoint; the server applies tenant and requester scoping.
+  useEffect(() => {
+    const text = search.trim();
+    if (text.length < 2) { setResults([]); return; }
+    let live = true;
+    const timer = setTimeout(() => {
+      apiGetPage<TicketRow>(`/tickets?view=all&q=${encodeURIComponent(text)}&page=1&pageSize=10`)
+        .then(({ data }) => { if (live) setResults(data); })
+        .catch(() => { if (live) setResults([]); });
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [search]);
+
+  const linked = ticket.linkedTicketIds.map((id) => known[id]).filter((t): t is NonNullable<typeof t> => !!t);
+  const candidates = results.filter((t) => t.id !== ticket.id && !ticket.linkedTicketIds.includes(t.id) && !t.mergedIntoId);
+  const mergedTarget = ticket.mergedIntoId ? known[ticket.mergedIntoId] : null;
 
   async function run(fn: () => Promise<unknown>, ok: string, fail: string) {
     setBusy(true);
     try {
       await fn();
       onChanged();
-      load();
       toast.success({ title: ok });
     } catch (err) {
       toast.error({ title: fail, description: err instanceof Error ? err.message : String(err) });
@@ -63,7 +82,7 @@ export default function RelatedTicketsPanel({
       () => apiSend(`/tickets/${ticket.id}/links`, "POST", { ticketId: pick, action: "link" }),
       "Ticket linked",
       "Could not link ticket"
-    ).then(() => setPick(""));
+    ).then(() => { setPick(""); setSearch(""); });
   }
 
   function unlink(id: string) {
@@ -74,22 +93,23 @@ export default function RelatedTicketsPanel({
     );
   }
 
-  function merge() {
+  async function merge() {
     if (!pick) return;
-    const target = byId.get(pick);
+    const target = results.find((t) => t.id === pick);
     if (!target) return;
-    if (!confirm(`Merge this ticket into ${target.reference}? This ticket's messages move there and this one is cancelled.`)) return;
+    if (!(await confirm({ title: "Merge tickets", message: `Merge this ticket into ${target.reference}? This ticket's messages move there and this one is cancelled.`, confirmLabel: "Merge", danger: true }))) return;
     void run(
       () => apiSend(`/tickets/${ticket.id}/merge`, "POST", { targetId: pick }),
       `Merged into ${target.reference}`,
       "Could not merge"
-    ).then(() => setPick(""));
+    ).then(() => { setPick(""); setSearch(""); });
   }
 
   const isMerged = !!ticket.mergedIntoId;
 
   return (
     <div style={{ margin: "1.25rem 0 0" }}>
+      {confirmDialog}
       <div className="label" style={{ marginBottom: 10 }}>
         Related tickets
       </div>
@@ -152,9 +172,17 @@ export default function RelatedTicketsPanel({
 
       {!isMerged ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <select className="select" value={pick} disabled={busy} onChange={(e) => setPick(e.target.value)}>
-            <option value="">Select a ticket…</option>
-            {candidates.slice(0, 200).map((t) => (
+          <input
+            className="input"
+            aria-label="Search tickets to link"
+            placeholder="Search by reference, subject or requester…"
+            value={search}
+            disabled={busy}
+            onChange={(e) => { setSearch(e.target.value); setPick(""); }}
+          />
+          <select className="select" aria-label="Matching tickets" value={pick} disabled={busy || candidates.length === 0} onChange={(e) => setPick(e.target.value)}>
+            <option value="">{search.trim().length < 2 ? "Type at least 2 characters…" : candidates.length ? "Select a ticket…" : "No matching tickets"}</option>
+            {candidates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.reference} — {t.subject.slice(0, 50)}
               </option>

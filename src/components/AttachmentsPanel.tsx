@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/components/primitives";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiGetAll } from "@/lib/api";
 import { useToast } from "./Toast";
@@ -22,6 +23,7 @@ export default function AttachmentsPanel({
   canDelete?: boolean;
 }) {
   const toast = useToast();
+  const { confirm, confirmDialog } = useConfirm();
   const [items, setItems] = useState<AttachmentRow[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -62,7 +64,7 @@ export default function AttachmentsPanel({
   }
 
   async function remove(att: AttachmentRow) {
-    if (!confirm(`Delete "${att.fileName}"?`)) return;
+    if (!(await confirm({ title: "Delete attachment", message: `Delete "${att.fileName}"?`, confirmLabel: "Delete", danger: true }))) return;
     try {
       const res = await fetch(`/api/v1/attachments/${att.id}`, { method: "DELETE" });
       const json = (await res.json()) as { ok: boolean; error?: string };
@@ -79,6 +81,7 @@ export default function AttachmentsPanel({
 
   return (
     <div>
+      {confirmDialog}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "1.25rem 0 10px" }}>
         <span className="label" style={{ margin: 0 }}>
           Attachments{items && items.length > 0 ? ` (${items.length})` : ""}
