@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiGetAll, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiGetPage, apiSend } from "@/lib/api";
 import { usePersona } from "@/components/Persona";
 import { InfoHint, LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
 import { CloseButton, Drawer } from "@/components/primitives";
@@ -88,8 +88,9 @@ export default function PortalPage() {
   useEffect(() => {
     if (!ready || !persona.email) return;
     setEmail(persona.email);
-    apiGetAll<TicketRow>("/tickets")
-      .then((all) => setRecent(all.slice(0, 3)))
+    // The newest three, from one small page (same default newest-first order as the full list).
+    apiGetPage<TicketRow>("/tickets?page=1&pageSize=3")
+      .then(({ data }) => setRecent(data))
       .catch(() => setRecent([]));
   }, [ready, persona.email]);
 
@@ -156,8 +157,8 @@ export default function PortalPage() {
       setSubject("");
       setBody("");
       setSelectedCatalog(null);
-      apiGetAll<TicketRow>("/tickets")
-        .then((all) => setRecent(all.slice(0, 3)))
+      apiGetPage<TicketRow>("/tickets?page=1&pageSize=3")
+        .then(({ data }) => setRecent(data))
         .catch(() => {});
     } finally {
       setBusy(false);

@@ -8,7 +8,7 @@ import { usePersona } from "@/components/Persona";
 import { useTheme } from "@/components/Theme";
 import { useToast } from "@/components/Toast";
 import { LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
-import { apiGet, apiGetAll, apiSend } from "@/lib/api";
+import { apiGet, apiGetAll, apiGetPage, apiSend } from "@/lib/api";
 import { HINTS } from "@/lib/hints";
 import type { TicketRow, TicketStatus, UserPreferences } from "@/server/domain/models";
 
@@ -98,6 +98,8 @@ export default function ProfileView() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<ProfileForm | null>(null);
   const [tickets, setTickets] = useState<TicketRow[]>([]);
+  // Agents: the six most recently updated tickets overall (the activity list); their stats only need tickets assigned to them.
+  const [recentActivity, setRecentActivity] = useState<TicketRow[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -119,14 +121,20 @@ export default function ProfileView() {
     if (!ready) return;
     load();
     setEditing(false);
-    apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
-  }, [ready, persona.id, load]);
+    if (persona.role === "agent") {
+      apiGetAll<TicketRow>(`/tickets?assigneeId=${encodeURIComponent(persona.id)}`).then(setTickets).catch(() => setTickets([]));
+      apiGetPage<TicketRow>("/tickets?view=recently_updated&page=1&pageSize=6").then(({ data }) => setRecentActivity(data)).catch(() => setRecentActivity([]));
+    } else {
+      // Requesters: the server only returns their own tickets.
+      apiGetAll<TicketRow>("/tickets").then(setTickets).catch(() => setTickets([]));
+    }
+  }, [ready, persona.id, persona.role, load]);
 
   const isAgent = persona.role === "agent";
 
   const stats = useMemo<StatTile[]>(() => {
     if (isAgent) {
-      const mine = tickets.filter((t) => t.assigneeId === persona.id);
+      const mine = tickets; // already limited to this agent's assigned tickets by the request
       const open = mine.filter((t) => UNSOLVED.includes(t.status)).length;
       const resolved = mine.filter((t) => SOLVED.includes(t.status)).length;
       const rated = mine.filter((t) => t.satisfaction);
@@ -193,13 +201,14 @@ export default function ProfileView() {
         info: HINTS.instantlySolved,
       },
     ];
-  }, [tickets, isAgent, persona.id]);
+  }, [tickets, isAgent]);
 
   const activity = useMemo(() => {
+    if (isAgent) return recentActivity;
     return [...tickets]
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 6);
-  }, [tickets]);
+  }, [tickets, recentActivity, isAgent]);
 
   if (!ready || !me || !form) {
     return (
