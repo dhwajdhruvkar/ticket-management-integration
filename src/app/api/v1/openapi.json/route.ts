@@ -157,6 +157,17 @@ const BASE_SPEC = {
         responses: { "200": { description: "Action applied" } },
       },
     },
+    "/tickets/{id}/summary": {
+      get: { summary: "Summarise the conversation so far", parameters: [ID], responses: { "200": { description: "{ summary }" }, "409": { description: "Nothing to summarise yet" } } },
+    },
+    "/tickets/{id}/typing": {
+      post: {
+        summary: "Publish a typing indicator (requesters only on their own tickets; submitter integrations are refused)",
+        parameters: [ID],
+        requestBody: { required: false, content: { "application/json": { schema: { type: "object", properties: { visibility: { type: "string", enum: ["public", "internal"], description: "internal is honoured for staff only" } } } } } },
+        responses: { "200": { description: "{ sent: true }" }, "403": { description: "Ticket submitter integrations cannot publish typing events" } },
+      },
+    },
     "/tickets/{id}/messages": {
       post: { summary: "Append a public reply or internal note", parameters: [ID], responses: { "200": { description: "Message added" } } },
     },
@@ -218,6 +229,10 @@ const BASE_SPEC = {
     "/problems/{id}": { get: { summary: "Problem detail", parameters: [ID], responses: { "200": { description: "Problem" } } }, patch: { summary: "Update (status, RCA, workaround, known error)", parameters: [ID], responses: { "200": { description: "Updated" } } } },
     "/problems/{id}/actions": { post: { summary: "Actions: link/unlink incident, publish workaround, raise change, AI RCA, add note", parameters: [ID], responses: { "200": { description: "Applied" } } } },
     "/changes": { get: { summary: "List changes", parameters: PAGINATION, responses: { "200": { description: "Paginated changes" } } }, post: { summary: "Create a change (AI risk-scored)", responses: { "200": { description: "Created" } } } },
+    "/changes/{id}": {
+      get: { summary: "Get a change", parameters: [ID], responses: { "200": { description: "Change view" }, "404": { description: "Change not found" } } },
+      patch: { summary: "Update a change", parameters: [ID], responses: { "200": { description: "Updated change" }, "404": { description: "Change not found" }, "409": { description: "Invalid change state transition" } } },
+    },
     "/changes/{id}/approvals": { post: { summary: "Submit for CAB / decide an approval", parameters: [ID], responses: { "200": { description: "Recorded" } } } },
     "/assets": { get: { summary: "List assets", parameters: PAGINATION, responses: { "200": { description: "Paginated assets" } } }, post: { summary: "Create an asset", responses: { "200": { description: "Created" } } } },
     "/cis": { get: { summary: "List configuration items", parameters: PAGINATION, responses: { "200": { description: "Paginated CIs" } } }, post: { summary: "Create a CI or link a dependency", responses: { "200": { description: "Created" } } } },
@@ -262,6 +277,10 @@ const BASE_SPEC = {
         responses: { "201": { description: "Safe user and one-time invitation delivery result" } },
       },
     },
+    "/users/{id}": {
+      patch: { summary: "Update a user (admin)", parameters: [ID, { name: "organizationId", in: "query", description: "Cross-tenant selection is super-admin only.", schema: { type: "string" } }], responses: { "200": { description: "Safe user view" }, "403": { description: "Admin only" } } },
+      delete: { summary: "Deactivate a user (admin)", parameters: [ID, { name: "organizationId", in: "query", description: "Cross-tenant selection is super-admin only.", schema: { type: "string" } }], responses: { "200": { description: "Deactivated" } } },
+    },
     "/users/{id}/access-link": {
       post: {
         summary: "Revoke pending links and issue a one-time activation/reset link",
@@ -284,6 +303,10 @@ const BASE_SPEC = {
         requestBody: { required: true, content: jsonContent(ref("SetupAccountRequest")) },
         responses: { "200": { description: "Account activated; returns organizationCode and email" }, "400": { description: "Invalid, expired, revoked, reused, or weak-password request" }, "429": { description: "Rate limited" } },
       },
+    },
+    "/departments/{id}": {
+      patch: { summary: "Rename or re-describe a department (admin)", parameters: [ID], responses: { "200": { description: "Updated department" }, "403": { description: "Admin only" } } },
+      delete: { summary: "Delete a department (admin)", parameters: [ID], responses: { "200": { description: "Deleted" }, "404": { description: "Department not found" } } },
     },
     "/departments": { get: { summary: "List departments", parameters: [...PAGINATION, { name: "organizationId", in: "query", description: "Cross-tenant selection is super-admin only.", schema: { type: "string" } }], responses: { "200": { description: "Paginated departments" } } }, post: { summary: "Create a department (admin)", responses: { "201": { description: "Created" } } } },
     "/organizations": {

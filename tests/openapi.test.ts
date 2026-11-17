@@ -244,3 +244,30 @@ describe("Phase 14 OpenAPI and external documentation contract", () => {
     });
   });
 });
+
+
+describe("OpenAPI covers every v1 route", () => {
+  it("documents a path for each src/app/api/v1 route handler", async () => {
+    const spec = object(await (await getOpenApi(openApiRequest())).json());
+    const paths = object(spec.paths);
+    const root = path.join(process.cwd(), "src/app/api/v1");
+    const routes: string[] = [];
+    (function walk(dir: string) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name === "route.ts") routes.push("/" + path.relative(root, dir).split(path.sep).join("/").replace(/\[(\w+)\]/g, "{$1}"));
+      }
+    })(root);
+    expect(routes.length).toBeGreaterThan(60);
+    expect(routes.filter((route) => !(route in paths))).toEqual([]);
+  });
+
+  it("documents the methods of the previously missing paths", async () => {
+    const paths = object(object(await (await getOpenApi(openApiRequest())).json()).paths);
+    for (const [route, methods] of Object.entries({
+      "/changes/{id}": ["get", "patch"], "/departments/{id}": ["patch", "delete"], "/users/{id}": ["patch", "delete"],
+      "/tickets/{id}/summary": ["get"], "/tickets/{id}/typing": ["post"],
+    })) for (const method of methods) expect(object(paths[route])[method], `${method.toUpperCase()} ${route}`).toBeDefined();
+  });
+});
