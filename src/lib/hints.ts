@@ -159,6 +159,25 @@ export const HINTS = {
   waitingOnYou: "These need a reply from you before anyone can carry on working on them.",
   availableForTickets: "Turn this off when you are away, and auto-assignment will skip you until you turn it back on.",
   weeklyDigest: "A Monday summary email of your queue, SLA position, and anything that breached over the week.",
+
+  // --- Home: agent performance ----------------------------------------------
+  perfTitle: "How each agent is doing: tickets they resolved in the chosen period next to the tickets they still have open.",
+  perfPeriod: "The time range the resolution figures cover. Choose Custom dates to pick your own start and end.",
+  perfTrend: "How the resolved-per-interval table at the bottom is grouped. Auto picks day, week or month to suit the period.",
+  perfAgent: "The agent a row of figures belongs to.",
+  perfPeriodResolutions: "Tickets this agent resolved during the selected period, credited to whoever recorded the resolution.",
+  perfLiveOpen: "Tickets currently open and assigned to this agent. This is live and is not limited to the selected period.",
+  perfToday: "Tickets this agent resolved today.",
+  perfWeek: "Tickets this agent resolved this week (Monday to Sunday).",
+  perfMonth: "Tickets this agent resolved this calendar month.",
+  perfInPeriod: "Tickets this agent resolved within the selected period.",
+  perfAvgResolution: "Average time from creation to resolution for the tickets resolved in the period. A dash means none were resolved.",
+  perfSlaMet: "Share of this agent's resolved tickets that were resolved before their SLA deadline. A dash means no SLA applied.",
+  perfReopened: "Tickets resolved by this agent that were reopened during the period.",
+  perfBacklog: "Open tickets currently assigned to this agent, regardless of the selected period.",
+  perfOldestOpen: "How long this agent's oldest still-open ticket has been waiting.",
+  perfResolvedPer: "How many tickets were resolved in each day, week or month of the selected period.",
+  perfResolvedCount: "Tickets resolved in that interval, across all agents.",
 } as const;
 
 const FIELD_TYPE_NOUNS: Record<CustomFieldType, string> = {

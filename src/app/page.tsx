@@ -1383,6 +1383,7 @@ function AgentLeaderboard({ metrics, report }: { metrics: Metrics; report?: Agen
     >
       <PanelHeader
         title="Agent performance"
+        info={HINTS.perfTitle}
         icon={<TrophyIcon />}
         right={
           <span className="muted" style={{ fontSize: "0.76rem" }}>
@@ -1399,12 +1400,12 @@ function AgentLeaderboard({ metrics, report }: { metrics: Metrics; report?: Agen
           <table className="data-table" style={{ minWidth: 560 }}>
             <thead>
               <tr>
-                <th style={{ paddingLeft: "1.2rem" }}>Agent</th>
+                <th style={{ paddingLeft: "1.2rem" }}><LabelWithHint info={HINTS.perfAgent}>Agent</LabelWithHint></th>
                 <th>
                   <LabelWithHint info="Recorded resolutions in the selected period (green) alongside live open workload (blue), not a completion-rate percentage.">Activity counts</LabelWithHint>
                 </th>
-                <th style={{ textAlign: "right" }}>Period resolutions</th>
-                <th style={{ textAlign: "right", paddingRight: "1.2rem" }}>Live open</th>
+                <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfPeriodResolutions}>Period resolutions</LabelWithHint></th>
+                <th style={{ textAlign: "right", paddingRight: "1.2rem" }}><LabelWithHint info={HINTS.perfLiveOpen}>Live open</LabelWithHint></th>
               </tr>
             </thead>
             <tbody>
@@ -1501,16 +1502,16 @@ function AgentLeaderboard({ metrics, report }: { metrics: Metrics; report?: Agen
             <table className="data-table" style={{ minWidth: 820 }}>
               <thead>
                 <tr>
-                  <th style={{ paddingLeft: "1.2rem" }}>Agent</th>
-                  <th style={{ textAlign: "right" }}>Today</th>
-                  <th style={{ textAlign: "right" }}>Week</th>
-                  <th style={{ textAlign: "right" }}>Month</th>
-                  <th style={{ textAlign: "right" }}>In period</th>
-                  <th style={{ textAlign: "right" }}>Avg resolution</th>
-                  <th style={{ textAlign: "right" }}>SLA met</th>
-                  <th style={{ textAlign: "right" }}>Reopened</th>
-                  <th style={{ textAlign: "right" }}>Backlog</th>
-                  <th style={{ textAlign: "right", paddingRight: "1.2rem" }}>Oldest open</th>
+                  <th style={{ paddingLeft: "1.2rem" }}><LabelWithHint info={HINTS.perfAgent}>Agent</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfToday}>Today</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfWeek}>Week</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfMonth}>Month</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfInPeriod}>In period</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfAvgResolution}>Avg resolution</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfSlaMet}>SLA met</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfReopened}>Reopened</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfBacklog}>Backlog</LabelWithHint></th>
+                  <th style={{ textAlign: "right", paddingRight: "1.2rem" }}><LabelWithHint info={HINTS.perfOldestOpen}>Oldest open</LabelWithHint></th>
                 </tr>
               </thead>
               <tbody>
@@ -1535,8 +1536,8 @@ function AgentLeaderboard({ metrics, report }: { metrics: Metrics; report?: Agen
             <table className="data-table" style={{ minWidth: 320 }}>
               <thead>
                 <tr>
-                  <th>Resolved per {report.granularity}</th>
-                  <th style={{ textAlign: "right" }}>Resolved</th>
+                  <th><LabelWithHint info={HINTS.perfResolvedPer}>Resolved per {report.granularity}</LabelWithHint></th>
+                  <th style={{ textAlign: "right" }}><LabelWithHint info={HINTS.perfResolvedCount}>Resolved</LabelWithHint></th>
                 </tr>
               </thead>
               <tbody>
