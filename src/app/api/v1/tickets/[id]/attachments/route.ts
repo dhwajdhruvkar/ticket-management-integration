@@ -12,7 +12,8 @@ import { clientKey, rateLimit } from "@/server/rateLimit";
 import { config } from "@/server/config";
 import {
   AttachmentError,
-  findRecentUpload,
+  isValidUploadKey,
+  saveAttachmentWithKey,
   listAttachments,
   listVisibleAttachments,
   saveAttachments,
@@ -103,10 +104,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return fail(`At most ${MAX_FILES_PER_UPLOAD} files per upload.`);
   }
 
-  // A retry of a file whose first attempt may have been stored before the response was lost must not add a second copy.
-  if (req.headers.get("x-upload-retry") === "1" && files.length === 1) {
-    const existing = await findRecentUpload(res.ticket.tenantId, id, files[0].name, files[0].size);
-    if (existing) return ok([existing], { status: 200, headers: { "Upload-Replayed": "true" } });
+  // Idempotent single-file upload: the same key re-sent for the same file returns the stored attachment.
+  const uploadKey = req.headers.get("x-upload-key");
+  if (uploadKey !== null) {
+    if (!isValidUploadKey(uploadKey)) return fail("X-Upload-Key must be 16-64 letters, digits, hyphens or underscores.");
+    if (files.length !== 1) return fail("X-Upload-Key can only be used with exactly one file.");
+    try {
+      const file = files[0];
+      const { record, replayed } = await saveAttachmentWithKey(
+        res.ticket.tenantId, id,
+        { fileName: file.name, mimeType: file.type || "application/octet-stream", bytes: Buffer.from(await file.arrayBuffer()) },
+        uploadKey, res.actor.name
+      );
+      return ok([record], { status: replayed ? 200 : 201, headers: { "Upload-Replayed": replayed ? "true" : "false" } });
+    } catch (err) {
+      if (err instanceof AttachmentError) return fail(err.message, err.status);
+      throw err;
+    }
   }
 
   try {

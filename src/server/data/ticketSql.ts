@@ -19,7 +19,7 @@ import { PRIORITY_ORDER } from "@/shared/priority";
 import { TICKET_VIEW_RULES, type TicketViewId } from "@/lib/ticketViews";
 
 /** Every Ticket column except `body`, which the explorer table never shows. */
-export const TICKET_LIST_COLUMNS = [
+const TICKET_LIST_COLUMNS = [
   "id", "workflow", "workflowVersion", "resolvedById", "reference", "tenantId", "type", "subject",
   "status", "priority", "impact", "urgency", "category", "subcategory", "channel", "source",
   "tags", "customFields", "requesterEmail", "requesterId", "externalTicketId", "idempotencyScopeHash",
@@ -31,7 +31,7 @@ export const TICKET_LIST_COLUMNS = [
 ] as const;
 
 /** The only columns bucketHealth() and the alert summary read. */
-export const WORKFLOW_ALERT_COLUMNS = [
+const WORKFLOW_ALERT_COLUMNS = [
   "id", "reference", "subject", "tenantId", "status", "priority", "workflow", "slaPausedAt", "slaPausedMins",
   "deletedAt", "dueResolveAt", "assignmentGroupId", "assigneeId",
 ] as const;
@@ -92,7 +92,7 @@ function baseWhere(tenantId: string, scope: TicketSearchSpec["scope"]): Prisma.S
   if (scope.assigneeId === null) parts.push(Prisma.sql`"assigneeId" IS NULL`);
   else if (scope.assigneeId !== undefined) parts.push(Prisma.sql`"assigneeId" = ${scope.assigneeId}`);
   if (scope.assignmentGroupId !== undefined) parts.push(Prisma.sql`"assignmentGroupId" = ${scope.assignmentGroupId}`);
-  if (scope.requesterEmail !== undefined) parts.push(Prisma.sql`"requesterEmail" = ${scope.requesterEmail}`);
+  if (scope.requesterEmail !== undefined) parts.push(Prisma.sql`lower("requesterEmail") = ${scope.requesterEmail.trim().toLowerCase()}`);
   return Prisma.join(parts, " AND ");
 }
 
@@ -125,7 +125,7 @@ const OPEN_BUCKET = Prisma.sql`NOT ("status"::text IN (${Prisma.join(Object.valu
  * not narrowed by search or bucket). The SQL twin of MemoryStore.requesterTickets().
  */
 export function requesterTicketQueries(tenantId: string, email: string, spec: RequesterListSpec) {
-  const base = Prisma.sql`"tenantId" = ${tenantId} AND "deletedAt" IS NULL AND "requesterEmail" = ${email}`;
+  const base = Prisma.sql`"tenantId" = ${tenantId} AND "deletedAt" IS NULL AND lower("requesterEmail") = ${email.trim().toLowerCase()}`;
   const parts: Prisma.Sql[] = [base];
   if (spec.bucket !== "all") parts.push(spec.bucket === "open" ? OPEN_BUCKET : bucketSql(spec.bucket));
   const needle = spec.q?.trim().toLowerCase();

@@ -16,7 +16,7 @@ export interface PageResult<R> {
   meta: { total: number; totalPages: number; counts?: Record<string, number> };
 }
 
-export interface ExplorerSnapshot<R, S> {
+interface ExplorerSnapshot<R, S> {
   key: string;
   /** What the rows were loaded for (view, filters, search), kept for display. */
   spec: S;
@@ -27,7 +27,7 @@ export interface ExplorerSnapshot<R, S> {
   totalPages: number;
 }
 
-export interface ExplorerError {
+interface ExplorerError {
   kind: "initial" | "switch" | "more";
   message: string;
 }

@@ -8,6 +8,7 @@
 // single seam where an ICAP/ClamAV call belongs — documented no-op today.
 // =============================================================================
 
+import { createHash } from "node:crypto";
 import { appendAudit } from "../audit/auditChain";
 import { config } from "../config";
 import { getStore } from "../data";
@@ -275,6 +276,108 @@ export async function saveAttachments(
   return saved;
 }
 
+// -----------------------------------------------------------------------------
+// Idempotent single-file upload.
+//
+// The browser gives every selected screenshot one random upload key and re-sends
+// the same key when it retries that file. The attachment id is derived from
+// (tenant, ticket, key), so the primary key itself is the idempotency record:
+//   - the same key on the same ticket always means the same row;
+//   - a different key (even for an identical file) is a separate attachment;
+//   - two concurrent requests with one key cannot both insert: the loser sees the
+//     winner's row and verifies the bytes, it never writes a second record;
+//   - a replay is only returned after the stored bytes match the new bytes, so a
+//     name, size or header alone is never taken as proof of identity.
+// The row is claimed BEFORE the blob is written, so a losing request never
+// touches the winner's blob. No schema change is needed.
+// -----------------------------------------------------------------------------
+
+const UPLOAD_KEY = /^[A-Za-z0-9_-]{16,64}$/;
+const STALE_CLAIM_MS = 60_000;
+const CLAIM_POLL_MS = 100;
+const CLAIM_POLLS = 10;
+
+export const isValidUploadKey = (key: unknown): key is string => typeof key === "string" && UPLOAD_KEY.test(key);
+
+const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+export const uploadAttachmentId = (tenantId: string, ticketId: string, key: string) =>
+  `att_${createHash("sha256").update(`${tenantId}\u0000${ticketId}\u0000${key}`).digest("hex").slice(0, 32)}`;
+
+function isUniqueViolation(error: unknown): boolean {
+  const e = error as { code?: string; message?: string };
+  return e?.code === "P2002" || /unique constraint/i.test(e?.message ?? "");
+}
+
+export async function saveAttachmentWithKey(
+  tenantId: string,
+  ticketId: string,
+  input: AttachmentInput,
+  uploadKey: string,
+  actor = "system",
+  dependencies: AttachmentDependencies = {}
+): Promise<{ record: AttachmentRow; replayed: boolean }> {
+  if (!isValidUploadKey(uploadKey)) throw new AttachmentError("Invalid upload key.");
+  const store = await getStore();
+  const ticket = await getTicket(ticketId, tenantId); // another tenant's ticket reads as missing
+  if (!ticket) throw new AttachmentError("Ticket not found.");
+  const prepared = prepareAttachment(input);
+  await scanAttachment(prepared.fileName, prepared.bytes);
+  const blobs = resolveBlobStore(dependencies);
+  const id = uploadAttachmentId(tenantId, ticketId, uploadKey);
+  const digest = sha256(prepared.bytes);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const existing = await store.attachments.get(id);
+    if (existing) {
+      if (existing.ticketId !== ticketId) throw new AttachmentError("Upload key conflict.", 409);
+      // The winner may still be writing its blob; give it a moment.
+      let stored: Buffer | null = null;
+      for (let poll = 0; poll < CLAIM_POLLS && !stored; poll++) {
+        stored = await blobs.get(id);
+        if (!stored) await new Promise((resolve) => setTimeout(resolve, CLAIM_POLL_MS));
+      }
+      if (stored) {
+        if (stored.length !== prepared.bytes.length || sha256(stored) !== digest) {
+          throw new AttachmentError("This upload key was already used for a different file.", 409);
+        }
+        return { record: existing, replayed: true };
+      }
+      if (Date.now() - Date.parse(existing.createdAt) < STALE_CLAIM_MS) {
+        throw new AttachmentError("This upload is still being stored. Retry shortly.", 409);
+      }
+      // An abandoned claim (the request that made it died before storing the file): clear it and claim again.
+      await store.attachments.remove(id);
+      continue;
+    }
+    const record: AttachmentRow = {
+      id, ticketId, fileName: prepared.fileName, mimeType: prepared.mimeType, sizeBytes: prepared.bytes.length,
+      blobUrl: "", messageId: null, createdAt: now(),
+    };
+    try {
+      await store.attachments.create(record);
+    } catch (error) {
+      if (isUniqueViolation(error)) continue; // lost the race: verify against the winner's row
+      throw error;
+    }
+    try {
+      record.blobUrl = await blobs.put(id, prepared.bytes, { contentType: prepared.mimeType });
+      await store.attachments.update(id, { blobUrl: record.blobUrl });
+    } catch (error) {
+      // Leave neither a metadata row nor a blob behind.
+      await store.attachments.remove(id).catch((e) => logger.error("upload claim cleanup failed", { attachmentId: id, error: e }));
+      await blobs.delete(id).catch((e) => logger.error("upload blob cleanup failed", { attachmentId: id, error: e }));
+      throw error;
+    }
+    await recordEvent(ticketId, "agent_action", `Attachment "${record.fileName}" added by ${actor}.`);
+    await appendAudit({
+      tenantId: ticket.tenantId, actor, action: "ticket.attachment.added", ticketId,
+      payload: { fileName: record.fileName, mimeType: record.mimeType, sizeBytes: record.sizeBytes, messageId: null },
+    });
+    return { record, replayed: false };
+  }
+  throw new AttachmentError("Could not store this upload. Retry shortly.", 409);
+}
+
 /** Attachments the viewer may see: staff see everything; requesters lose files on internal notes. */
 export async function listVisibleAttachments(tenantId: string, ticketId: string, includeInternal: boolean): Promise<AttachmentRow[]> {
   if (!(await getTicket(ticketId, tenantId))) return [];
@@ -313,22 +416,6 @@ export async function saveAttachment(
     dependencies
   );
   return record;
-}
-
-const RETRY_WINDOW_MS = 15 * 60_000;
-
-/**
- * An attachment on the ticket with this name and size stored in the last 15
- * minutes: used only for an explicit upload retry, so a deliberate second copy
- * of a file is still possible.
- */
-export async function findRecentUpload(tenantId: string, ticketId: string, fileName: string, sizeBytes: number): Promise<AttachmentRow | null> {
-  const store = await getStore();
-  const ticket = await store.tickets.get(ticketId);
-  if (!ticket || ticket.tenantId !== tenantId) return null;
-  const since = Date.now() - RETRY_WINDOW_MS;
-  const rows = await store.attachments.list({ ticketId });
-  return rows.find((a) => !a.messageId && a.fileName === fileName && a.sizeBytes === sizeBytes && Date.parse(a.createdAt) >= since) ?? null;
 }
 
 export async function listAttachments(

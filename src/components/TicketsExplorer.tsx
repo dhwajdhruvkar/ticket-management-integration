@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiGetAll, apiGetPage, apiSend, uploadTicketAttachment } from "@/lib/api";
 import { ScreenshotUploader, type ScreenshotItem } from "./ScreenshotUploader";
+import { createUploadRunner } from "@/lib/screenshotUploads";
 import { bucketOf, emptyRequesterCounts, type RequesterCounts, type RequesterFilter, type RequesterSort } from "@/shared/requesterBuckets";
 import { ISSUE_CONTEXT_LIMITS } from "@/shared/issueContext";
-import { CREATABLE_TICKET_TYPES, TICKET_TYPE_HINTS, TYPE_DETAIL_LIMITS, CHANGE_RISKS, typeDetailsProblem, type CreatableTicketType } from "@/shared/ticketTypes";
+import type { CreatableTicketType } from "@/shared/ticketTypes";
+import { TicketTypeFields, TicketTypeSelect, buildTypeDetails, emptyTypeDetails, typeDetailsError, type CatalogChoice } from "./TicketTypeFields";
 import type {
   AssignmentGroupRow,
   ImpactLevel,
@@ -1728,17 +1730,9 @@ function NewTicketForm({
   onCreated: () => void;
 }) {
   const [type, setType] = useState<CreatableTicketType>("incident");
-  const [affectedService, setAffectedService] = useState("");
   const [catalogItemId, setCatalogItemId] = useState("");
-  const [requestedItem, setRequestedItem] = useState("");
-  const [fulfilmentDetails, setFulfilmentDetails] = useState("");
-  const [changeRisk, setChangeRisk] = useState("");
-  const [changeImpact, setChangeImpact] = useState("");
-  const [implementationPlan, setImplementationPlan] = useState("");
-  const [rollbackPlan, setRollbackPlan] = useState("");
-  const [windowStart, setWindowStart] = useState("");
-  const [windowEnd, setWindowEnd] = useState("");
-  const [catalog, setCatalog] = useState<{ id: string; name: string; requiresApproval: boolean }[]>([]);
+  const [typeState, setTypeState] = useState(emptyTypeDetails);
+  const [catalog, setCatalog] = useState<CatalogChoice[]>([]);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [requester, setRequester] = useState(defaultRequester);
@@ -1757,43 +1751,33 @@ function NewTicketForm({
   // Set once the ticket exists: the form is replaced by the upload progress / summary view.
   const [created, setCreated] = useState<{ id: string; reference: string } | null>(null);
   const [uploading, setUploading] = useState(0);
-  const abort = useRef<AbortController | null>(null);
+  const runnerRef = useRef<ReturnType<typeof createUploadRunner> | null>(null);
   const toast = useToast();
 
-  useEffect(() => () => abort.current?.abort(), []);
+  // Leaving the screen aborts uploads in flight; the runner is rebuilt on next use (React dev mode remounts once).
+  useEffect(() => () => { runnerRef.current?.dispose(); runnerRef.current = null; }, []);
   // The catalog is only needed for service requests; load it once, on first use.
   useEffect(() => {
     if (type !== "service_request" || catalog.length) return;
     let live = true;
-    apiGetAll<{ id: string; name: string; requiresApproval: boolean }>("/catalog").then((rows) => { if (live) setCatalog(rows); }).catch(() => undefined);
+    apiGetAll<CatalogChoice>("/catalog").then((rows) => { if (live) setCatalog(rows); }).catch(() => undefined);
     return () => { live = false; };
   }, [type, catalog.length]);
 
-  const iso = (local: string) => { const t = Date.parse(local); return Number.isFinite(t) ? new Date(t).toISOString() : undefined; };
-  const typeDetails =
-    type === "incident" ? { affectedService: affectedService.trim() }
-    : type === "service_request" ? { requestedItem: requestedItem.trim(), fulfilmentDetails: fulfilmentDetails.trim() }
-    : { risk: changeRisk, impact: changeImpact, implementationPlan: implementationPlan.trim(), rollbackPlan: rollbackPlan.trim(), maintenanceStart: iso(windowStart), maintenanceEnd: iso(windowEnd) };
+  const typeDetails = buildTypeDetails(type, typeState);
   // The server re-validates; this only gives quick feedback before submitting.
-  const detailsProblem = typeDetailsProblem(type, typeDetails);
+  const detailsProblem = typeDetailsError(type, typeState);
 
   const patchShot = (id: string, patch: Partial<ScreenshotItem>) =>
     setShots((current) => current.map((item) => (item.id === id ? { ...item, ...patch } : item)));
 
-  // One request per file, so a batch can never exceed the platform's request-body limit.
-  async function uploadShot(ticketId: string, item: ScreenshotItem) {
-    abort.current ??= new AbortController();
-    setUploading((n) => n + 1);
-    patchShot(item.id, { status: "uploading", progress: 0, error: undefined });
-    try {
-      await uploadTicketAttachment(ticketId, item.file, (progress) => patchShot(item.id, { progress }), abort.current.signal, item.status === "failed");
-      patchShot(item.id, { status: "uploaded", progress: 100 });
-    } catch (err) {
-      patchShot(item.id, { status: "failed", error: err instanceof Error ? err.message : "Upload failed." });
-    } finally {
-      setUploading((n) => n - 1);
-    }
+  // One request per file, so a batch can never exceed the platform's request-body limit. Each file keeps its own
+  // upload key across retries (lib/screenshotUploads.ts), so the server never stores a retried file twice.
+  function runner() {
+    runnerRef.current ??= createUploadRunner({ upload: uploadTicketAttachment, patch: patchShot, onBusy: (delta) => setUploading((n) => n + delta) });
+    return runnerRef.current;
   }
+  const uploadShot = (ticketId: string, item: ScreenshotItem) => runner().uploadOne(ticketId, item);
 
   function finish() {
     setSubject("");
@@ -1802,8 +1786,8 @@ function NewTicketForm({
     setAffectedPeople("one");
     setWorkStopped(false);
     setLocation("");
-    setAffectedService(""); setCatalogItemId(""); setRequestedItem(""); setFulfilmentDetails("");
-    setChangeRisk(""); setChangeImpact(""); setImplementationPlan(""); setRollbackPlan(""); setWindowStart(""); setWindowEnd("");
+    setCatalogItemId("");
+    setTypeState(emptyTypeDetails());
     setNotes("");
     setShots([]);
     setCreated(null);
@@ -1837,9 +1821,7 @@ function NewTicketForm({
         // The ticket exists now; upload the screenshots one by one and keep the form state until the user is done.
         setCreated({ id: ticket.id, reference: ticket.reference });
         setSubmitting(false);
-        void (async () => {
-          for (const item of pending) await uploadShot(ticket.id, item);
-        })();
+        void runner().uploadAll(ticket.id, pending);
       }
       if (ticket.status === "auto_resolved") {
         toast.success({
@@ -1925,9 +1907,7 @@ function NewTicketForm({
           <div className="label" style={{ marginBottom: 6 }}>What happened?</div>
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <select className="select" aria-label="Ticket type" value={type} onChange={(e) => setType(e.target.value as CreatableTicketType)}>
-                {CREATABLE_TICKET_TYPES.map((t) => <option key={t} value={t}>{TICKET_TYPE_HINTS[t]}</option>)}
-              </select>
+              <TicketTypeSelect value={type} onChange={setType} />
               <input className="input" aria-label="Subject" placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
             </div>
             <textarea
@@ -1938,43 +1918,7 @@ function NewTicketForm({
               value={body}
               onChange={(e) => setBody(e.target.value)}
             />
-            {type === "incident" ? (
-              <input className="input" aria-label="Affected service" placeholder="Affected service (e.g. VPN, email)" maxLength={TYPE_DETAIL_LIMITS.short} value={affectedService} onChange={(e) => setAffectedService(e.target.value)} />
-            ) : null}
-            {type === "service_request" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <select className="select" aria-label="Catalog item" value={catalogItemId} onChange={(e) => { setCatalogItemId(e.target.value); const item = catalog.find((c) => c.id === e.target.value); if (item && !requestedItem) setRequestedItem(item.name); }}>
-                  <option value="">No catalog item</option>
-                  {catalog.map((c) => <option key={c.id} value={c.id}>{c.name}{c.requiresApproval ? " (needs approval)" : ""}</option>)}
-                </select>
-                {catalog.find((c) => c.id === catalogItemId)?.requiresApproval ? (
-                  <p className="muted" role="note" style={{ margin: 0, fontSize: "0.78rem" }}>This item needs a manager&apos;s approval before it is fulfilled.</p>
-                ) : null}
-                <input className="input" aria-label="Requested item or service" placeholder="Requested item or service" maxLength={TYPE_DETAIL_LIMITS.short} value={requestedItem} onChange={(e) => setRequestedItem(e.target.value)} />
-                <textarea className="textarea" rows={2} aria-label="Fulfilment details" placeholder="Fulfilment details (quantity, delivery location, needed-by date)" maxLength={TYPE_DETAIL_LIMITS.long} value={fulfilmentDetails} onChange={(e) => setFulfilmentDetails(e.target.value)} />
-              </div>
-            ) : null}
-            {type === "change" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
-                  <select className="select" aria-label="Change risk" value={changeRisk} onChange={(e) => setChangeRisk(e.target.value)}>
-                    <option value="">Risk…</option>
-                    {CHANGE_RISKS.map((r) => <option key={r} value={r}>Risk: {r}</option>)}
-                  </select>
-                  <select className="select" aria-label="Change impact" value={changeImpact} onChange={(e) => setChangeImpact(e.target.value)}>
-                    <option value="">Impact…</option>
-                    {CHANGE_RISKS.map((r) => <option key={r} value={r}>Impact: {r}</option>)}
-                  </select>
-                </div>
-                <textarea className="textarea" rows={2} aria-label="Implementation plan" placeholder="Implementation plan" maxLength={TYPE_DETAIL_LIMITS.long} value={implementationPlan} onChange={(e) => setImplementationPlan(e.target.value)} />
-                <textarea className="textarea" rows={2} aria-label="Rollback plan" placeholder="Rollback plan" maxLength={TYPE_DETAIL_LIMITS.long} value={rollbackPlan} onChange={(e) => setRollbackPlan(e.target.value)} />
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-                  <div><label className="label" htmlFor="change-window-start">Maintenance window start</label><input id="change-window-start" type="datetime-local" className="input" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} /></div>
-                  <div><label className="label" htmlFor="change-window-end">Maintenance window end</label><input id="change-window-end" type="datetime-local" className="input" value={windowEnd} onChange={(e) => setWindowEnd(e.target.value)} /></div>
-                </div>
-                {detailsProblem && (changeRisk || changeImpact || implementationPlan || rollbackPlan || windowStart || windowEnd) ? <p role="alert" style={{ margin: 0, fontSize: "0.8rem", color: "var(--danger-fg)" }}>{detailsProblem}</p> : null}
-              </div>
-            ) : null}
+            <TicketTypeFields type={type} value={typeState} onChange={setTypeState} catalog={catalog} catalogItemId={catalogItemId} onCatalogChange={setCatalogItemId} />
             <div>
               <div className="label" style={{ marginBottom: 6 }}>Screenshots (optional)</div>
               <ScreenshotUploader items={shots} onChange={setShots} disabled={submitting} />

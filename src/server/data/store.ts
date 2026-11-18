@@ -66,7 +66,7 @@ export interface ListOptions<T> {
 }
 
 /** Caller-supplied equality scope for the explorer query (record-level security lives here). */
-export interface TicketSearchScope {
+interface TicketSearchScope {
   status?: TicketRow["status"];
   type?: TicketRow["type"];
   assigneeId?: string | null;

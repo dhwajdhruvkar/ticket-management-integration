@@ -6,8 +6,9 @@
 // (ticket + messages + events + resolution + assignee) for the API and UI.
 // =============================================================================
 
+import { normalizeEmail } from "@/shared/email";
 import type { RequesterListSpec } from "@/shared/requesterBuckets";
-import { sanitizeTypeDetails, type TicketTypeDetails } from "@/shared/ticketTypes";
+import { CREATABLE_TICKET_TYPES, isCreatableTicketType, sanitizeTypeDetails, typeDetailsProblem, type TicketTypeDetails } from "@/shared/ticketTypes";
 import { sanitizeIssueContext, type IssueContext } from "@/shared/issueContext";
 import { appendAudit } from "../audit/auditChain";
 import { getStore } from "../data";
@@ -245,11 +246,29 @@ export async function getTicketView(
   };
 }
 
+/** A creation request the service refuses (a type that cannot be created, incomplete type details). Routes answer it with 400. */
+export class TicketInputError extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "TicketInputError";
+  }
+}
+
+/** The rules every creation path shares, enforced here so no caller can skip them by bypassing a route. */
+export function assertCreatableTicket(input: Pick<NewTicketInput, "type" | "typeDetails">): void {
+  const type = input.type ?? "incident";
+  if (!isCreatableTicketType(type)) throw new TicketInputError(`type must be one of: ${CREATABLE_TICKET_TYPES.join(", ")}.`);
+  const problem = typeDetailsProblem(type, input.typeDetails);
+  if (problem) throw new TicketInputError(problem);
+}
+
 export async function createTicket(
   tenantId: string,
   input: NewTicketInput,
   actor = "system"
 ): Promise<TicketRow> {
+  assertCreatableTicket(input);
   const store = await getStore();
   const ts = now();
   const type = input.type ?? "incident";
@@ -276,7 +295,7 @@ export async function createTicket(
     tags: input.tags ?? [],
     // A new ticket starts with only the requester's location snapshot and their issue notes.
     customFields: newTicketCustomFields(input, type, catalogItem),
-    requesterEmail: input.requesterEmail.trim(),
+    requesterEmail: normalizeEmail(input.requesterEmail),
     requesterId: input.requesterId ?? null,
     externalTicketId: input.externalTicketId?.trim() || null,
     idempotencyScopeHash: input.idempotencyScopeHash ?? null,

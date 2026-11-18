@@ -44,11 +44,19 @@ function stripUndefined<T extends object>(patch: T): Partial<T> {
 }
 
 export class PrismaCollection<T extends Entity> implements Collection<T> {
-  constructor(private readonly delegate: any) {}
+  constructor(private readonly delegate: any, private readonly insensitive: readonly string[] = []) {}
+
+  /** String columns listed in `insensitive` match regardless of case (the MemoryCollection does the same). */
+  private filter(where?: Partial<T>): any {
+    if (!where || this.insensitive.length === 0) return where ?? undefined;
+    const out: Record<string, unknown> = { ...where };
+    for (const key of this.insensitive) if (typeof out[key] === "string") out[key] = { equals: out[key], mode: "insensitive" };
+    return out;
+  }
 
   async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
-    const args: any = { where: where ?? undefined };
-    if (options?.afterId) args.where = { ...where, id: { gt: options.afterId } };
+    const args: any = { where: this.filter(where) };
+    if (options?.afterId) args.where = { ...this.filter(where), id: { gt: options.afterId } };
     if (options?.select) args.select = Object.fromEntries(options.select.map((field) => [field, true]));
     if (options?.skip !== undefined) args.skip = options.skip;
     if (options?.take !== undefined) args.take = options.take;
@@ -91,7 +99,7 @@ export class PrismaCollection<T extends Entity> implements Collection<T> {
     return result.count === 1 ? this.get(id) : null;
   }
   async count(where?: Partial<T>): Promise<number> {
-    return this.delegate.count({ where: where ?? undefined });
+    return this.delegate.count({ where: this.filter(where) });
   }
 }
 
@@ -149,7 +157,7 @@ export class PrismaStore implements DataStore {
     this.users = new PrismaCollection<any>(p.user);
     this.invitations = new PrismaCollection<any>(p.userInvitation);
     this.groups = new PrismaCollection<any>(p.assignmentGroup);
-    this.tickets = new PrismaCollection<any>(p.ticket);
+    this.tickets = new PrismaCollection<any>(p.ticket, ["requesterEmail"]);
     this.messages = new PrismaCollection<any>(p.ticketMessage);
     this.events = new PrismaCollection<any>(p.ticketEvent);
     this.resolutions = new PrismaCollection<any>(p.resolution);

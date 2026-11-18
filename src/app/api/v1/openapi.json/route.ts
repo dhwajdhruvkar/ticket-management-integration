@@ -9,6 +9,22 @@ import { workflowPaths, workflowSchemas } from "@/server/workflowOpenApi";
 // Update alongside route changes (single source below keeps review easy).
 // =============================================================================
 
+const TYPE_DETAILS_SCHEMA = {
+  type: "object",
+  description: "Type-specific details; only the fields of the selected type are kept, unknown keys are dropped. A change request requires risk, impact, implementationPlan, rollbackPlan and a maintenance window (start before end). Service-request approvalRequired is derived from the catalog item and cannot be set.",
+  properties: {
+    affectedService: { type: "string", maxLength: TYPE_DETAIL_LIMITS.short, description: "incident" },
+    requestedItem: { type: "string", maxLength: TYPE_DETAIL_LIMITS.short, description: "service_request" },
+    fulfilmentDetails: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "service_request" },
+    risk: { type: "string", enum: CHANGE_RISKS, description: "change" },
+    impact: { type: "string", enum: CHANGE_RISKS, description: "change" },
+    implementationPlan: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "change" },
+    rollbackPlan: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "change" },
+    maintenanceStart: { type: "string", format: "date-time", description: "change" },
+    maintenanceEnd: { type: "string", format: "date-time", description: "change" },
+  },
+} as const;
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -176,9 +192,10 @@ const BASE_SPEC = {
       get: { summary: "List attachments", parameters: [ID, ...PAGINATION], responses: { "200": { description: "Paginated attachment metadata" } } },
       post: {
         summary: "Upload attachments (multipart/form-data, field `file`, max 5 files / 10 MB each)",
-        parameters: [ID, { name: "X-Upload-Retry", in: "header", required: false, description: "Send 1 when re-uploading a single file whose earlier attempt failed. If a file with the same name and size was stored on the ticket in the last 15 minutes it is returned (200, Upload-Replayed: true) instead of being stored again.", schema: { type: "string", enum: ["1"] } }],
+        parameters: [ID, { name: "X-Upload-Key", in: "header", required: false, description: "Idempotency key for a single-file upload (16-64 letters, digits, hyphens or underscores, unique per selected file, reused unchanged when retrying that file). The same key on the same ticket returns the stored attachment (200, Upload-Replayed: true) once the stored bytes match; a different file under the same key is 409; a different key stores a separate attachment. Not allowed with more than one file.", schema: { type: "string", minLength: 16, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" } }],
         responses: {
-          "200": { description: "Retry of an already stored file; the existing record is returned" },
+          "200": { description: "Replay of an already stored upload (X-Upload-Key); the existing record is returned" },
+          "409": { description: "Upload key already used for a different file, or the original upload is still being stored" },
           "201": { description: "Stored" },
           "400": { description: "Type/size rejected" },
           "503": { description: "Attachment storage is disabled" },
@@ -205,7 +222,24 @@ const BASE_SPEC = {
     "/intake": {
       post: {
         summary: "Unified omnichannel intake (portal/email/chat/teams/alert payloads)",
-        responses: { "201": { description: "Ticket created" }, "429": { description: "Rate limited" } },
+        description: "Portal requests may name a creatable `type` and `typeDetails`. A catalogItemId always makes a service request (another type is 400); with no type the old defaults apply (incident, or service request for a catalog item). Requesters always file as themselves.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: {
+            type: "object",
+            properties: {
+              channel: { type: "string", enum: ["email", "portal", "chat", "api", "phone", "teams", "alert"] },
+              subject: { type: "string", maxLength: 300 },
+              body: { type: "string", maxLength: 50000 },
+              requesterEmail: { type: "string", format: "email" },
+              source: { type: "string", maxLength: 120 },
+              catalogItemId: { type: "string", maxLength: 64, description: "Tenant-owned catalog item; approval is derived from it, never from the request." },
+              type: { type: "string", enum: CREATABLE_TICKET_TYPES, description: "Any other value (including legacy problem) is rejected with 400." },
+              typeDetails: TYPE_DETAILS_SCHEMA,
+            },
+          } } },
+        },
+        responses: { "201": { description: "Ticket created" }, "400": { description: "Invalid type or incomplete type details" }, "429": { description: "Rate limited" } },
       },
     },
     "/kb": {
@@ -661,21 +695,7 @@ const CORE_SCHEMAS = {
           "Stable partner-side ticket id. Used for idempotency when Idempotency-Key is omitted.",
       },
       type: { type: "string", enum: CREATABLE_TICKET_TYPES, default: "incident", description: "Any other value is rejected with 400. Historical problem tickets cannot be created." },
-      typeDetails: {
-        type: "object",
-        description: "Type-specific details; only the fields of the selected type are kept, unknown keys are dropped. A change request requires risk, impact, implementationPlan, rollbackPlan and a maintenance window (start before end). Service-request approvalRequired is derived from the catalog item and cannot be set.",
-        properties: {
-          affectedService: { type: "string", maxLength: TYPE_DETAIL_LIMITS.short, description: "incident" },
-          requestedItem: { type: "string", maxLength: TYPE_DETAIL_LIMITS.short, description: "service_request" },
-          fulfilmentDetails: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "service_request" },
-          risk: { type: "string", enum: CHANGE_RISKS, description: "change" },
-          impact: { type: "string", enum: CHANGE_RISKS, description: "change" },
-          implementationPlan: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "change" },
-          rollbackPlan: { type: "string", maxLength: TYPE_DETAIL_LIMITS.long, description: "change" },
-          maintenanceStart: { type: "string", format: "date-time", description: "change" },
-          maintenanceEnd: { type: "string", format: "date-time", description: "change" },
-        },
-      },
+      typeDetails: TYPE_DETAILS_SCHEMA,
       channel: {
         type: "string",
         enum: ["email", "portal", "chat", "api", "phone", "teams"],

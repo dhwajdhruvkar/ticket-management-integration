@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SCREENSHOT_ACCEPT, SCREENSHOT_LIMITS, formatBytes } from "@/shared/attachments";
 import { useToast } from "./Toast";
+import { createUploadKey } from "@/lib/screenshotUploads";
 
 // Screenshot picker for the new-ticket form. Controlled: the parent owns the
 // items and the upload; this component only selects, previews, removes and
@@ -11,6 +12,8 @@ import { useToast } from "./Toast";
 
 export interface ScreenshotItem {
   id: string;
+  /** Idempotency key for this selected file; unchanged across retries, different for every selected file. */
+  uploadKey: string;
   file: File;
   previewUrl: string;
   status: "selected" | "uploading" | "uploaded" | "failed";
@@ -28,6 +31,22 @@ export function screenshotProblem(file: File): string | null {
   if (file.size > SCREENSHOT_LIMITS.maxBytes) return `${file.name} is larger than ${formatBytes(SCREENSHOT_LIMITS.maxBytes)}.`;
   if (file.size === 0) return `${file.name} is empty.`;
   return null;
+}
+
+/** Which of the picked files can be added to a list that already holds `existing` screenshots, and why the rest cannot. */
+export function selectScreenshots(existing: number, picked: File[]): { accepted: File[]; problems: string[] } {
+  const accepted: File[] = [];
+  const problems: string[] = [];
+  for (const file of picked) {
+    if (existing + accepted.length >= SCREENSHOT_LIMITS.maxFiles) {
+      problems.push(`Attach at most ${SCREENSHOT_LIMITS.maxFiles} screenshots.`);
+      break;
+    }
+    const problem = screenshotProblem(file);
+    if (problem) problems.push(problem);
+    else accepted.push(file);
+  }
+  return { accepted, problems };
 }
 
 export function ScreenshotUploader({
@@ -75,22 +94,13 @@ export function ScreenshotUploader({
     const id = nextId();
     const previewUrl = URL.createObjectURL(file);
     urls.current.set(id, previewUrl);
-    return { id, file, previewUrl, status: "selected", progress: 0 };
+    return { id, uploadKey: createUploadKey(), file, previewUrl, status: "selected", progress: 0 };
   }, []);
 
   function add(picked: FileList | File[] | null) {
     if (!picked) return;
-    const next = [...items];
-    const problems: string[] = [];
-    for (const file of Array.from(picked)) {
-      if (next.length >= SCREENSHOT_LIMITS.maxFiles) {
-        problems.push(`Attach at most ${SCREENSHOT_LIMITS.maxFiles} screenshots.`);
-        break;
-      }
-      const problem = screenshotProblem(file);
-      if (problem) problems.push(problem);
-      else next.push(make(file));
-    }
+    const { accepted, problems } = selectScreenshots(items.length, Array.from(picked));
+    const next = [...items, ...accepted.map(make)];
     setError(problems.join(" "));
     if (problems.length) toast.error({ title: "Some files were not added", description: problems[0] });
     onChange(next);

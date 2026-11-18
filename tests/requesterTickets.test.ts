@@ -3,9 +3,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const { mockAuth } = vi.hoisted(() => ({ mockAuth: vi.fn() }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-import { GET as listTickets } from "@/app/api/v1/tickets/route";
+import { GET as listTickets, POST as postTicket } from "@/app/api/v1/tickets/route";
 import { getStore } from "@/server/data";
 import type { TicketRow } from "@/server/domain/models";
+import { createTicket } from "@/server/services/ticketService";
+import { intakeTicket } from "@/server/services/intake";
+import { normalizeEmail } from "@/shared/email";
 import { bucketOf, BUCKET_STATUSES, compareRequesterTickets } from "@/shared/requesterBuckets";
 
 const BASE = "http://requester-list.test/api/v1";
@@ -20,6 +23,10 @@ const mk = (n: number, over: Partial<TicketRow> = {}): TicketRow => ({
   status: "open", priority: "medium", category: "IT", channel: "portal", tags: [], ciIds: [], linkedTicketIds: [], slaPausedMins: 0,
   createdAt: new Date(Date.UTC(2026, 10, 1, 0, n)).toISOString(), updatedAt: new Date(Date.UTC(2026, 10, 2, 0, n)).toISOString(), deletedAt: null, workflowVersion: 0, assigneeId: null, ...over,
 }) as TicketRow;
+
+const fetch_ = (body: unknown) => postTicket(new Request(`${BASE}/tickets`, { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.77" }, body: JSON.stringify(body) }));
+const POST_body = (b: unknown) => b;
+const json_ = (res: Response) => json(res);
 
 interface Page { ok: boolean; data: TicketRow[]; meta: { total: number; totalPages: number; counts: Record<string, number> }; error?: string }
 const json = async (res: Response) => (await res.json()) as Page;
@@ -147,5 +154,52 @@ describe("requester bucket rules", () => {
     expect([c, b, a].sort(compareRequesterTickets("recent")).map((t) => t.id)).toEqual(["c", "a", "b"]);
     expect([c, b, a].sort(compareRequesterTickets("priority")).map((t) => t.id)).toEqual(["a", "b", "c"]);
     expect([c, b, a].sort(compareRequesterTickets("oldest")).map((t) => t.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe.sequential("requester email normalization", () => {
+  const created: string[] = [];
+  afterAll(async () => { const store = await getStore(); for (const id of created) await store.tickets.remove(id); });
+
+  it("creation stores the address trimmed and lowercased, whichever path made the ticket", async () => {
+    const viaService = await createTicket(T1, { subject: "norm service", body: "b", requesterEmail: "  Norm.One@Example.COM " });
+    const viaIntake = await intakeTicket(T1, { subject: "norm intake", body: "b", requesterEmail: "NORM.TWO@Example.com", autoResolve: false });
+    created.push(viaService.id, viaIntake.id);
+    expect(viaService.requesterEmail).toBe("norm.one@example.com");
+    expect(viaIntake.requesterEmail).toBe("norm.two@example.com");
+    expect(normalizeEmail("  A@B.C ")).toBe("a@b.c");
+  });
+
+  it("the POST route and the list both treat different casings as one requester", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "user_norm", name: "Norm", email: "Mixed.Case@netlink.com", role: "requester", tenantId: T1 } });
+    const res = await fetch_(POST_body({ subject: "norm post", body: "b", requesterEmail: "other@netlink.com" }));
+    const json = (await res.json()) as { data: { id: string; requesterEmail: string } };
+    created.push(json.data.id);
+    expect(json.data.requesterEmail).toBe("mixed.case@netlink.com"); // requesters always file as themselves, normalized
+    const list = await json_(await listTickets(get("pageSize=50")));
+    expect(list.data.map((t) => t.id)).toContain(json.data.id);
+  });
+
+  it("legacy mixed-case rows still belong to the requester: list, search, buckets and plain list", async () => {
+    const store = await getStore();
+    const legacy = [
+      mk(901, { requesterEmail: "Legacy.Owner@Netlink.COM", subject: "Legacy upper", status: "open" }),
+      mk(902, { requesterEmail: "legacy.owner@netlink.com", subject: "Legacy lower", status: "resolved" }),
+      mk(903, { requesterEmail: "LEGACY.OWNER@NETLINK.COM", subject: "Legacy shout", status: "pending" }),
+      mk(904, { requesterEmail: "legacy.owner@netlink.com", subject: "Legacy foreign tenant", tenantId: "tenant_verify_other" }),
+    ];
+    for (const t of legacy) { await store.tickets.create(t); created.push(t.id); }
+    mockAuth.mockResolvedValue(session("user_legacy", "requester", "legacy.owner@netlink.com"));
+    const all = await json(await listTickets(get("pageSize=50")));
+    expect(all.data.map((t) => t.id).sort()).toEqual(["rq-901", "rq-902", "rq-903"]); // not the other tenant's rq-904
+    expect(all.meta.counts).toMatchObject({ all: 3, open: 1, waiting: 1, resolved: 1 });
+    expect((await json(await listTickets(get("q=legacy%20shout&pageSize=50")))).data.map((t) => t.id)).toEqual(["rq-903"]);
+    expect((await json(await listTickets(get("bucket=resolved&pageSize=50")))).data.map((t) => t.id)).toEqual(["rq-902"]);
+    // The classic list path (no mode) applies the same case-insensitive ownership.
+    const plain = (await (await listTickets(new Request(`${BASE}/tickets?pageSize=50`))).json()) as Page;
+    expect(plain.data.map((t) => t.id).sort()).toEqual(["rq-901", "rq-902", "rq-903"]);
+    // Another requester never sees them.
+    mockAuth.mockResolvedValue(session("user_other", "requester", "someone.else@netlink.com"));
+    expect((await json(await listTickets(get("pageSize=50")))).data.map((t) => t.id)).toEqual([]);
   });
 });

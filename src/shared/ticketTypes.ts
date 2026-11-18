@@ -151,3 +151,19 @@ export function typeDetailRows(
   }
   return rows;
 }
+
+/**
+ * The one entry point for a request's `type` and `typeDetails`: the type must be
+ * creatable and the details complete for it. Returns the sanitized details (or
+ * undefined when none are usable) or the message to answer with (HTTP 400).
+ */
+export function checkTypeDetails(
+  type: unknown,
+  rawDetails: unknown
+): { error: string } | { type: CreatableTicketType; details: TicketTypeDetails | undefined } {
+  const resolved = type === undefined ? "incident" : type;
+  if (!isCreatableTicketType(resolved)) return { error: `type must be one of: ${CREATABLE_TICKET_TYPES.join(", ")}.` };
+  const problem = typeDetailsProblem(resolved, rawDetails);
+  if (problem) return { error: problem };
+  return { type: resolved, details: sanitizeTypeDetails(resolved, rawDetails) ?? undefined };
+}

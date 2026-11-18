@@ -21,9 +21,10 @@ import { applySla } from "./slaService";
 import { requestTicketApproval } from "./approvalService";
 import { routeTicketToGroup } from "./groupService";
 import { runAutomationsSafe } from "./automationService";
-import { createTicket, getTicket, type NewTicketInput } from "./ticketService";
+import { assertCreatableTicket, createTicket, getTicket, type NewTicketInput } from "./ticketService";
 import { derivePriority, priorityCode } from "../domain/priority";
 import type { TicketRow } from "../domain/models";
+import { normalizeEmail } from "@/shared/email";
 
 export async function intakeTicket(
   tenantId: string,
@@ -32,6 +33,8 @@ export async function intakeTicket(
   // Resolve the requester first: VIP status is a classification input.
   // Resolve the relation server-side; API callers can choose an email only
   // when their acting role allows it, never an arbitrary user id.
+  assertCreatableTicket(input); // refuse bad types/details before any classification work
+  input.requesterEmail = normalizeEmail(input.requesterEmail); // one rule for every channel, before any lookup
   const store0 = await getStore();
   const requesterUser = await findUserByEmail(store0, tenantId, input.requesterEmail);
   input.requesterId = requesterUser?.id;

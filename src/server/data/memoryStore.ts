@@ -14,6 +14,7 @@ import { config } from "../config";
 import { logger } from "../observability/logger";
 import { buildSeed } from "./seed";
 import { matchesWhere, type Collection, type DataStore, type ListOptions, type TicketSearchSpec } from "./store";
+import { normalizeEmail } from "@/shared/email";
 import { searchTicketRows } from "@/lib/ticketViews";
 import { CAPACITY_STATUSES } from "@/shared/workflow";
 import { bucketOf, compareRequesterTickets, emptyRequesterCounts, type RequesterListSpec } from "@/shared/requesterBuckets";
@@ -142,11 +143,25 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
      * collides throws, exactly as the database would, instead of quietly
      * accumulating duplicates only this driver can hold.
      */
-    private readonly uniqueBy?: keyof T
+    private readonly uniqueBy?: keyof T,
+    /** String columns compared case-insensitively in list()/count(), as the Prisma collection does with mode: "insensitive". */
+    private readonly insensitive: readonly (keyof T)[] = []
   ) {}
 
+  private matches(row: T, where?: Partial<T>): boolean {
+    if (!where) return true;
+    for (const key of Object.keys(where) as (keyof T)[]) {
+      const want = where[key];
+      const have = row[key];
+      if (this.insensitive.includes(key) && typeof want === "string" && typeof have === "string") {
+        if (have.toLowerCase() !== want.toLowerCase()) return false;
+      } else if (have !== want) return false;
+    }
+    return true;
+  }
+
   async list(where?: Partial<T>, options?: ListOptions<T>): Promise<T[]> {
-    let result = this.rows().filter((r) => matchesWhere(r, where));
+    let result = this.rows().filter((r) => this.matches(r, where));
     if (options?.afterId) result = result.filter((row) => row.id > options.afterId!);
     if (options?.orderBy) {
       const { field, dir } = options.orderBy;
@@ -207,7 +222,7 @@ export class MemoryCollection<T extends Entity> implements Collection<T> {
     return true;
   }
   async count(where?: Partial<T>): Promise<number> {
-    return this.rows().filter((r) => matchesWhere(r, where)).length;
+    return this.rows().filter((r) => this.matches(r, where)).length;
   }
 }
 
@@ -249,7 +264,8 @@ export class MemoryStore implements DataStore {
     () => this.db.tickets,
     () => this.persist(),
     (id) => this.cascadeTicket(id),
-    "idempotencyScopeHash"
+    "idempotencyScopeHash",
+    ["requesterEmail"]
   );
   messages = new MemoryCollection<TicketMessageRow>(() => this.db.messages, () => this.persist());
   events = new MemoryCollection<TicketEventRow>(() => this.db.events, () => this.persist());
@@ -326,7 +342,8 @@ export class MemoryStore implements DataStore {
   }
 
   async requesterTickets(tenantId: string, email: string, spec: RequesterListSpec) {
-    const mine = this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt && t.requesterEmail === email);
+    const owner = normalizeEmail(email);
+    const mine = this.db.tickets.filter((t) => t.tenantId === tenantId && !t.deletedAt && normalizeEmail(t.requesterEmail) === owner);
     const counts = emptyRequesterCounts();
     for (const t of mine) { counts.all += 1; counts[bucketOf(t.status)] += 1; }
     const needle = spec.q?.trim().toLowerCase();

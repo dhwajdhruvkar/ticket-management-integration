@@ -225,6 +225,40 @@ describe.skipIf(!DIR)("PrismaStore on real PostgreSQL vs MemoryStore", () => {
     expect((await pg.requesterTickets("other", emails[0], { bucket: "all", sort: "recent", skip: 0, take: 5 })).data.every((t) => t.tenantId === "other")).toBe(true);
   });
 
+  it("requester email matching is case-insensitive and identical on both stores, tenant-scoped", async () => {
+    const base = (await mem.tickets.list({ tenantId: "org" }, { take: 1 }))[0];
+    const mk = (id: string, email: string, tenantId = "org", status = "open") => ({ ...base, id, reference: `CI-${id}`, requesterEmail: email, tenantId, status, deletedAt: null, workflow: null, assigneeId: null, assignmentGroupId: null, resolvedAt: null, resolvedById: null });
+    for (const t of [
+      mk("ci1", "Case.Owner@Example.com"), mk("ci2", "case.owner@example.com", "org", "resolved"), mk("ci3", "CASE.OWNER@EXAMPLE.COM", "org", "pending"),
+      mk("ci4", "someone.else@example.com"), mk("ci5", "case.owner@example.com", "other"),
+    ]) {
+      await prisma.ticket.create({ data: { ...t, workflow: Prisma.DbNull } as never });
+      await mem.tickets.create(t as unknown as TicketRow);
+    }
+    for (const asked of ["case.owner@example.com", "Case.Owner@Example.com", "  CASE.OWNER@example.com "]) {
+      for (const bucket of ["all", "open", "waiting", "resolved"] as const) {
+        const spec = { bucket, sort: "recent" as const, skip: 0, take: 10 };
+        const [a, b] = [await pg.requesterTickets("org", asked, spec), await mem.requesterTickets("org", asked, spec)];
+        expect(a.data.map((t) => t.id).sort(), `${asked}/${bucket}`).toEqual(b.data.map((t) => t.id).sort());
+        expect(a.counts).toEqual(b.counts);
+        expect(a.total).toBe(b.total);
+      }
+    }
+    const all = await pg.requesterTickets("org", "CASE.owner@example.com", { bucket: "all", sort: "recent", skip: 0, take: 10 });
+    expect(all.data.map((t) => t.id).sort()).toEqual(["ci1", "ci2", "ci3"]); // legacy mixed case included; ci4 and the other tenant's ci5 are not
+    expect(all.counts).toMatchObject({ all: 3, open: 1, waiting: 1, resolved: 1 });
+    // The Collection and explorer paths use the same rule.
+    const where = { tenantId: "org", requesterEmail: "Case.Owner@example.com" } as Partial<TicketRow>;
+    expect((await pg.tickets.list(where)).map((t) => t.id).sort()).toEqual(["ci1", "ci2", "ci3"]);
+    expect((await mem.tickets.list(where)).map((t) => t.id).sort()).toEqual(["ci1", "ci2", "ci3"]);
+    expect(await pg.tickets.count(where)).toBe(3);
+    expect(await mem.tickets.count(where)).toBe(3);
+    const spec: TicketSearchSpec = { scope: { requesterEmail: "CASE.OWNER@example.com" }, meId: "u1", view: "all", filters: {}, skip: 0, take: 10 };
+    const [x, y] = [await pg.searchTickets("org", spec), await mem.searchTickets("org", spec)];
+    expect(x.data.map((t) => t.id).sort()).toEqual(y.data.map((t) => t.id).sort());
+    expect(x.total).toBe(3);
+  });
+
   it("activeWorkloads (grouped in SQL) matches the MemoryStore, incl. unaccepted workflow tickets and JSON null", async () => {
     const [a, b] = [await pg.activeWorkloads("org"), await mem.activeWorkloads("org")];
     expect(a).toEqual(b);

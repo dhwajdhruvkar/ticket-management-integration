@@ -4,6 +4,8 @@ import { fail, ok, parseBody } from "@/server/http";
 import { isResponse, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { intakeTicket } from "@/server/services/intake";
+import { TicketInputError } from "@/server/services/ticketService";
+import { CREATABLE_TICKET_TYPES, checkTypeDetails } from "@/shared/ticketTypes";
 import { handleTeamsActivity } from "@/server/channels/teams";
 import { clientKey, rateLimit } from "@/server/rateLimit";
 import { getStore } from "@/server/data";
@@ -32,6 +34,9 @@ const IntakeSchema = z.object({
   requesterEmail: z.string().email().optional(),
   source: z.string().max(120).optional(),
   catalogItemId: z.string().max(64).optional(),
+  // Only the creatable types are accepted; anything else (including legacy "problem") is a 400 from the schema.
+  type: z.enum(CREATABLE_TICKET_TYPES).optional(),
+  typeDetails: z.record(z.string(), z.unknown()).optional(),
   teams: z
     .object({
       text: z.string().max(10_000).optional(),
@@ -117,15 +122,28 @@ export async function POST(req: Request) {
   if (!payload.subject || !payload.body || !payload.requesterEmail) {
     return fail("subject, body, and requesterEmail are required.");
   }
-  const ticket = await intakeTicket(tenantId, {
-    subject: payload.subject,
-    body: payload.body,
-    requesterEmail: payload.requesterEmail,
-    channel: (payload.channel as TicketChannel) ?? "api",
-    source: payload.source ?? "intake",
-    type: payload.catalogItemId ? "service_request" : undefined,
-    catalogItemId: payload.catalogItemId,
-    integrationKeyId: ctx.actor.apiKeyId,
-  });
-  return ok(ticket, { status: 201 });
+  // A catalog request is always a service request; calls that name no type keep the old defaults.
+  if (payload.catalogItemId && payload.type && payload.type !== "service_request") {
+    return fail("A catalog item can only be requested as a service_request.");
+  }
+  const checked = checkTypeDetails(payload.catalogItemId ? "service_request" : payload.type, payload.typeDetails);
+  if ("error" in checked) return fail(checked.error);
+  try {
+    const ticket = await intakeTicket(tenantId, {
+      subject: payload.subject,
+      body: payload.body,
+      requesterEmail: payload.requesterEmail,
+      channel: (payload.channel as TicketChannel) ?? "api",
+      source: payload.source ?? "intake",
+      // Omitted type stays the old default (incident, or service request for a catalog item); details are sanitized and approval is derived from the catalog item server-side.
+      type: payload.catalogItemId || payload.type ? checked.type : undefined,
+      typeDetails: checked.details,
+      catalogItemId: payload.catalogItemId,
+      integrationKeyId: ctx.actor.apiKeyId,
+    });
+    return ok(ticket, { status: 201 });
+  } catch (error) {
+    if (error instanceof TicketInputError) return fail(error.message, error.status);
+    throw error;
+  }
 }

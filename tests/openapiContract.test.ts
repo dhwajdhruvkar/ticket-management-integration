@@ -97,7 +97,7 @@ describe("GET /tickets documents the query parameters the route reads", () => {
     const { paths } = await spec();
     const post = paths["/tickets/{id}/attachments"].post as Op & { summary?: string };
     expect(post.summary).toMatch(/max 5 files/);
-    expect((post.parameters ?? []).some((p) => p.name === "X-Upload-Retry" && p.in === "header")).toBe(true);
+    expect((post.parameters ?? []).some((p) => p.name === "X-Upload-Key" && p.in === "header")).toBe(true);
     expect(Object.keys(post.responses ?? {})).toEqual(expect.arrayContaining(["200", "201", "400"]));
   });
 });

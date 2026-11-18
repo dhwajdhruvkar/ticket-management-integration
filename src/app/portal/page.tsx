@@ -6,8 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiGetAll, apiGetPage, apiSend } from "@/lib/api";
 import { usePersona } from "@/components/Persona";
 import { InfoHint, LabelWithHint, StatusBadge, timeAgo } from "@/components/ui";
-import { CloseButton, Drawer } from "@/components/primitives";
+import { CloseButton, Drawer, useOverlayBehavior } from "@/components/primitives";
 import { HINTS } from "@/lib/hints";
+import { TicketTypeFields, TicketTypeSelect, buildTypeDetails, emptyTypeDetails, typeDetailsError, type TypeDetailsState } from "@/components/TicketTypeFields";
+import type { CreatableTicketType } from "@/shared/ticketTypes";
 import { createLatestSearch, type LatestSearch, type SearchState } from "@/lib/latestSearch";
 import type { TicketCategory, TicketRow, TicketStatus } from "@/server/domain/models";
 
@@ -74,6 +76,8 @@ export default function PortalPage() {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [selectedCatalog, setSelectedCatalog] = useState<CatalogItem | null>(null);
+  const [ticketType, setTicketType] = useState<CreatableTicketType>("incident");
+  const [typeState, setTypeState] = useState<TypeDetailsState>(emptyTypeDetails);
   const [email, setEmail] = useState("");
   const [created, setCreated] = useState<CreatedTicket | null>(null);
   const [busy, setBusy] = useState(false);
@@ -140,6 +144,8 @@ export default function PortalPage() {
   function openDialog(item: CatalogItem | null) {
     setSelectedCatalog(item);
     if (item) {
+      setTicketType("service_request"); // a catalog item is always a service request
+      setTypeState({ ...emptyTypeDetails(), requestedItem: item.name });
       setSubject(item.name);
       setBody(`Requesting: ${item.name}.\n\nDetails:\n`);
     } else if (!subject && !body) {
@@ -154,8 +160,10 @@ export default function PortalPage() {
     setDialogOpen(false);
   }
 
+  const detailsProblem = typeDetailsError(ticketType, typeState);
+
   async function submit() {
-    if (!subject.trim() || !body.trim()) return;
+    if (!subject.trim() || !body.trim() || detailsProblem) return;
     setBusy(true);
     try {
       const t = await apiSend<CreatedTicket>("/intake", "POST", {
@@ -165,11 +173,16 @@ export default function PortalPage() {
         requesterEmail: email,
         source: "portal",
         catalogItemId: selectedCatalog?.id,
+        // The server re-checks all of this; approval for a catalog item comes from the item, not from here.
+        type: selectedCatalog ? "service_request" : ticketType,
+        typeDetails: buildTypeDetails(selectedCatalog ? "service_request" : ticketType, typeState),
       });
       setCreated(t);
       setSubject("");
       setBody("");
       setSelectedCatalog(null);
+      setTicketType("incident");
+      setTypeState(emptyTypeDetails());
       apiGetPage<TicketRow>("/tickets?page=1&pageSize=3")
         .then(({ data }) => setRecent(data))
         .catch(() => {});
@@ -719,6 +732,11 @@ export default function PortalPage() {
           selectedCatalog={selectedCatalog}
           onClearCatalog={() => setSelectedCatalog(null)}
           created={created}
+          ticketType={ticketType}
+          setTicketType={setTicketType}
+          typeState={typeState}
+          setTypeState={setTypeState}
+          detailsProblem={detailsProblem}
         />
       ) : null}
 
@@ -915,28 +933,28 @@ function RequestDialog(props: {
   selectedCatalog: CatalogItem | null;
   onClearCatalog: () => void;
   created: CreatedTicket | null;
+  ticketType: CreatableTicketType;
+  setTicketType: (t: CreatableTicketType) => void;
+  typeState: TypeDetailsState;
+  setTypeState: (s: TypeDetailsState) => void;
+  detailsProblem: string | null;
 }) {
   const {
     onClose, onSubmit, busy,
     email, setEmail, emailLocked,
     subject, setSubject, body, setBody,
     selectedCatalog, onClearCatalog, created,
+    ticketType, setTicketType, typeState, setTypeState, detailsProblem,
   } = props;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [onClose]);
+  // Escape, scroll lock, focus in/trap/restore: the same behaviour as every other dialog (lib/overlayBehavior.ts).
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useOverlayBehavior(true, onClose, dialogRef);
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label="Submit a request"
@@ -1103,6 +1121,12 @@ function RequestDialog(props: {
             />
           </div>
           <div>
+            <label className="label" htmlFor="portal-type" style={{ marginBottom: 4 }}>
+              What kind of request is this?
+            </label>
+            <TicketTypeSelect id="portal-type" value={selectedCatalog ? "service_request" : ticketType} onChange={setTicketType} disabled={!!selectedCatalog} />
+          </div>
+          <div>
             <label className="label" htmlFor="portal-subject" style={{ marginBottom: 4 }}>
               Subject
             </label>
@@ -1128,6 +1152,7 @@ function RequestDialog(props: {
               onChange={(e) => setBody(e.target.value)}
             />
           </div>
+          <TicketTypeFields type={selectedCatalog ? "service_request" : ticketType} value={typeState} onChange={setTypeState} />
         </div>
 
         <div
@@ -1144,7 +1169,7 @@ function RequestDialog(props: {
           <button
             className="btn btn-primary"
             onClick={onSubmit}
-            disabled={busy || !subject.trim() || !body.trim()}
+            disabled={busy || !subject.trim() || !body.trim() || !!detailsProblem}
           >
             {busy ? "Submitting…" : "Submit request"}
           </button>

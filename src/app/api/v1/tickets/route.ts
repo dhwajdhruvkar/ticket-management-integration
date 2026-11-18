@@ -9,7 +9,7 @@ import {
 import { isResponse, requirePermission } from "@/server/guards";
 import { isAgentRole } from "@/server/auth/rbac";
 import { clientKey, rateLimit } from "@/server/rateLimit";
-import { listRequesterTickets, listTickets, searchTickets, type NewTicketInput } from "@/server/services/ticketService";
+import { listRequesterTickets, listTickets, searchTickets, TicketInputError, type NewTicketInput } from "@/server/services/ticketService";
 import { intakeTicket } from "@/server/services/intake";
 import {
   findIdempotentTicket,
@@ -17,7 +17,7 @@ import {
   ticketIdempotencyMetadata,
 } from "@/server/services/idempotencyService";
 import { emptyRequesterCounts, isRequesterFilter, isRequesterSort } from "@/shared/requesterBuckets";
-import { CREATABLE_TICKET_TYPES, isCreatableTicketType, sanitizeTypeDetails, typeDetailsProblem } from "@/shared/ticketTypes";
+import { checkTypeDetails } from "@/shared/ticketTypes";
 import { sanitizeIssueContext } from "@/shared/issueContext";
 import { filtersFromParams } from "@/lib/ticketFilters";
 import { isTicketViewId } from "@/lib/ticketViews";
@@ -149,15 +149,10 @@ export async function POST(req: Request) {
   if (!email.success) return fail("A valid requester email is required.");
   body.requesterEmail = email.data.toLowerCase();
   // Only the three creatable types are accepted; historical "problem" tickets are never created here.
-  if (body.type !== undefined && !isCreatableTicketType(body.type)) {
-    return fail(`type must be one of: ${CREATABLE_TICKET_TYPES.join(", ")}.`);
-  }
-  const ticketType = body.type ?? "incident";
   // Type-specific details are re-validated here; unknown keys and caller-set approval flags are dropped.
-  const detailsProblem = typeDetailsProblem(ticketType, body.typeDetails);
-  if (detailsProblem) return fail(detailsProblem);
-  const typeDetails = sanitizeTypeDetails(ticketType, body.typeDetails);
-  if (typeDetails) body.typeDetails = typeDetails;
+  const checked = checkTypeDetails(body.type, body.typeDetails);
+  if ("error" in checked) return fail(checked.error);
+  if (checked.details) body.typeDetails = checked.details;
   else delete body.typeDetails;
   // Classification hints are optional; malformed values are dropped rather than rejected.
   if (body.affectedPeople !== undefined && !["one", "team", "many"].includes(body.affectedPeople as string)) delete body.affectedPeople;
@@ -240,6 +235,7 @@ export async function POST(req: Request) {
       }
     }
     if (error instanceof IdempotencyError) return fail(error.message, error.status);
+    if (error instanceof TicketInputError) return fail(error.message, error.status);
     throw error;
   }
 }

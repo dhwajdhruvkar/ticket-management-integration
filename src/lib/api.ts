@@ -139,13 +139,13 @@ export function uploadTicketAttachment(
   file: File,
   onProgress?: (percent: number) => void,
   signal?: AbortSignal,
-  /** True when re-sending a file whose earlier attempt failed: the server then returns an already-stored copy instead of adding a duplicate. */
-  retry = false
+  /** One key per selected file, re-sent unchanged on retry: the server returns the already-stored attachment instead of adding a duplicate. */
+  uploadKey?: string
 ): Promise<AttachmentRow> {
   return new Promise<AttachmentRow>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/v1/tickets/${encodeURIComponent(ticketId)}/attachments`);
-    if (retry) xhr.setRequestHeader("X-Upload-Retry", "1");
+    if (uploadKey) xhr.setRequestHeader("X-Upload-Key", uploadKey);
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
     };
